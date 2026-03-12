@@ -1,0 +1,18 @@
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-patch-and-transform
+  annotations:
+    render.crossplane.io/runtime: Development
+    render.crossplane.io/runtime-docker-cleanup: Stop
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.7.0
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-starlark
+  annotations:
+    render.crossplane.io/runtime: Development
+spec:
+  package: runtime

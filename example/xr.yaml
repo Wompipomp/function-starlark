@@ -1,0 +1,6 @@
+apiVersion: example.crossplane.io/v1
+kind: XBucket
+metadata:
+  name: example-xr
+spec:
+  region: us-east-1
