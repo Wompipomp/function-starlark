@@ -8,9 +8,11 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/protobuf/testing/protocmp"
 
+	"github.com/crossplane/function-sdk-go/errors"
 	"github.com/crossplane/function-sdk-go/logging"
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/resource"
+	"github.com/crossplane/function-sdk-go/response"
 )
 
 func TestRunFunction(t *testing.T) {
@@ -43,14 +45,19 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 			want: want{
-				rsp: &fnv1.RunFunctionResponse{
-					Results: []*fnv1.Result{
-						{
-							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  "function-starlark: input parsed successfully (passthrough mode)",
-						},
-					},
-				},
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "pass"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+					return rsp
+				}(),
 			},
 		},
 		"MissingInput": {
@@ -60,14 +67,11 @@ func TestRunFunction(t *testing.T) {
 				req: &fnv1.RunFunctionRequest{},
 			},
 			want: want{
-				rsp: &fnv1.RunFunctionResponse{
-					Results: []*fnv1.Result{
-						{
-							Severity: fnv1.Severity_SEVERITY_FATAL,
-							Message:  "cannot get Function input: cannot get Function input from *v1.RunFunctionRequest: no input was specified",
-						},
-					},
-				},
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{}, response.DefaultTTL)
+					response.Fatal(rsp, errors.New("spec.source or spec.scriptConfigRef is required"))
+					return rsp
+				}(),
 			},
 		},
 		"MissingSource": {
@@ -83,14 +87,17 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 			want: want{
-				rsp: &fnv1.RunFunctionResponse{
-					Results: []*fnv1.Result{
-						{
-							Severity: fnv1.Severity_SEVERITY_FATAL,
-							Message:  "spec.source or spec.scriptConfigRef is required",
-						},
-					},
-				},
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {}
+						}`),
+					}, response.DefaultTTL)
+					response.Fatal(rsp, errors.New("spec.source or spec.scriptConfigRef is required"))
+					return rsp
+				}(),
 			},
 		},
 		"PreservesDesiredState": {
@@ -118,24 +125,29 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 			want: want{
-				rsp: &fnv1.RunFunctionResponse{
-					Desired: &fnv1.State{
-						Composite: &fnv1.Resource{
-							Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`),
-						},
-						Resources: map[string]*fnv1.Resource{
-							"bucket": {
-								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "pass"
+							}
+						}`),
+						Desired: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`),
+							},
+							Resources: map[string]*fnv1.Resource{
+								"bucket": {
+									Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+								},
 							},
 						},
-					},
-					Results: []*fnv1.Result{
-						{
-							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  "function-starlark: input parsed successfully (passthrough mode)",
-						},
-					},
-				},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+					return rsp
+				}(),
 			},
 		},
 		"EmptyDesiredState": {
@@ -153,14 +165,19 @@ func TestRunFunction(t *testing.T) {
 				},
 			},
 			want: want{
-				rsp: &fnv1.RunFunctionResponse{
-					Results: []*fnv1.Result{
-						{
-							Severity: fnv1.Severity_SEVERITY_NORMAL,
-							Message:  "function-starlark: input parsed successfully (passthrough mode)",
-						},
-					},
-				},
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "pass"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+					return rsp
+				}(),
 			},
 		},
 	}
