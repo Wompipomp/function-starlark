@@ -1,0 +1,9 @@
+apiVersion: meta.pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-starlark
+  annotations:
+    meta.crossplane.io/maintainer: wompipomp
+    meta.crossplane.io/source: https://github.com/wompipomp/function-starlark
+    meta.crossplane.io/description: |
+      Crossplane composition function using Starlark scripts for resource composition.
