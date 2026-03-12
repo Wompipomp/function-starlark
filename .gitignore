@@ -1,0 +1,12 @@
+# Build artifacts
+function-starlark.xpkg
+/function
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
