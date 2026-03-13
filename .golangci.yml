@@ -12,8 +12,11 @@ linters:
     - unused
     - gosec
     - gocritic
-    - goimports
     - misspell
+
+formatters:
+  enable:
+    - goimports
 
 issues:
   exclude-generated: strict
