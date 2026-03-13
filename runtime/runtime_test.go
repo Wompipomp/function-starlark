@@ -367,6 +367,155 @@ func TestContentHash(t *testing.T) {
 	}
 }
 
+func TestCacheKeyIsSourceOnly(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	source := "x = 1"
+
+	// Execute with one set of predeclared.
+	_, err := rt.Execute(source, starlark.StringDict{
+		"a": starlark.String("alpha"),
+	})
+	if err != nil {
+		t.Fatalf("first execute error: %v", err)
+	}
+
+	// Execute same source with different predeclared -- should cache hit.
+	_, err = rt.Execute(source, starlark.StringDict{
+		"b": starlark.String("beta"),
+	})
+	if err != nil {
+		t.Fatalf("second execute error: %v", err)
+	}
+
+	if rt.CacheLen() != 1 {
+		t.Fatalf("cache len = %d, want 1 (cache key should be source only)", rt.CacheLen())
+	}
+}
+
+func TestDefFunction(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	source := `
+def greet(name):
+    return "hello " + name
+result = greet("world")
+`
+	globals, err := rt.Execute(source, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	result, ok := globals["result"]
+	if !ok {
+		t.Fatal("expected global 'result' to be set")
+	}
+	if result.(starlark.String) != "hello world" {
+		t.Errorf("result = %v, want 'hello world'", result)
+	}
+}
+
+func TestSetLiteral(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	globals, err := rt.Execute("s = set([1, 2, 3, 2])", starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s, ok := globals["s"]
+	if !ok {
+		t.Fatal("expected global 's' to be set")
+	}
+
+	set, ok := s.(*starlark.Set)
+	if !ok {
+		t.Fatalf("expected s to be *starlark.Set, got %T", s)
+	}
+
+	if set.Len() != 3 {
+		t.Errorf("set len = %d, want 3 (duplicates removed)", set.Len())
+	}
+}
+
+func TestEmptySource(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	globals, err := rt.Execute("", starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(globals) != 0 {
+		t.Errorf("globals len = %d, want 0 for empty source", len(globals))
+	}
+}
+
+func TestConcurrentSameSource(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	const goroutines = 10
+	source := "x = 42"
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := rt.Execute(source, starlark.StringDict{})
+			errs[idx] = err
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("goroutine %d error: %v", i, err)
+		}
+	}
+
+	if rt.CacheLen() != 1 {
+		t.Errorf("cache len = %d, want 1 (all goroutines used same source)", rt.CacheLen())
+	}
+}
+
+func TestWhileLoopNormal(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Use a list to accumulate results (Starlark forbids top-level
+	// variable reassignment inside while loops).
+	source := `
+acc = []
+i = [0]
+while i[0] < 5:
+    acc.append(i[0])
+    i[0] = i[0] + 1
+total = len(acc)
+`
+	globals, err := rt.Execute(source, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	total, ok := globals["total"]
+	if !ok {
+		t.Fatal("expected global 'total' to be set")
+	}
+
+	got, _ := starlark.AsInt32(total.(starlark.Int))
+	if got != 5 {
+		t.Errorf("total = %d, want 5 (items 0..4)", got)
+	}
+}
+
 func TestPredeclaredAccess(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
