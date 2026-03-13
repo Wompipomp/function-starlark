@@ -315,20 +315,20 @@ func TestStructToStarlark_EmptyStruct(t *testing.T) {
 func TestStructToStarlark_EmptyList(t *testing.T) {
 	s := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"items": structpb.NewListValue(&structpb.ListValue{}),
+			"entries": structpb.NewListValue(&structpb.ListValue{}),
 		},
 	}
 	d, err := StructToStarlark(s, false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	v, err := d.Attr("items")
+	v, err := d.Attr("entries")
 	if err != nil {
 		t.Fatal(err)
 	}
 	list, ok := v.(*starlark.List)
 	if !ok {
-		t.Fatalf("items = %T, want *starlark.List", v)
+		t.Fatalf("entries = %T, want *starlark.List", v)
 	}
 	if list.Len() != 0 {
 		t.Errorf("list len = %d, want 0", list.Len())
@@ -713,20 +713,20 @@ func TestEdgeCases_NilListValue(t *testing.T) {
 	// A Value_ListValue where the ListValue pointer itself is nil.
 	s := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"items": {Kind: &structpb.Value_ListValue{ListValue: nil}},
+			"entries": {Kind: &structpb.Value_ListValue{ListValue: nil}},
 		},
 	}
 	d, err := StructToStarlark(s, false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	v, err := d.Attr("items")
+	v, err := d.Attr("entries")
 	if err != nil {
 		t.Fatal(err)
 	}
 	list, ok := v.(*starlark.List)
 	if !ok {
-		t.Fatalf("items = %T, want *starlark.List", v)
+		t.Fatalf("entries = %T, want *starlark.List", v)
 	}
 	if list.Len() != 0 {
 		t.Errorf("nil ListValue len = %d, want 0", list.Len())
@@ -768,8 +768,8 @@ func TestEdgeCases_FreezeNestedStructAndList(t *testing.T) {
 	}
 	s := &structpb.Struct{
 		Fields: map[string]*structpb.Value{
-			"obj":   structpb.NewStructValue(inner),
-			"items": structpb.NewListValue(lv),
+			"obj":     structpb.NewStructValue(inner),
+			"entries": structpb.NewListValue(lv),
 		},
 	}
 	d, err := StructToStarlark(s, true)
@@ -789,8 +789,8 @@ func TestEdgeCases_FreezeNestedStructAndList(t *testing.T) {
 	}
 
 	// Nested list frozen
-	items, _ := d.Attr("items")
-	if err := items.(*starlark.List).Append(starlark.MakeInt(9)); err == nil {
+	entries, _ := d.Attr("entries")
+	if err := entries.(*starlark.List).Append(starlark.MakeInt(9)); err == nil {
 		t.Error("Append on frozen list should fail")
 	}
 }
