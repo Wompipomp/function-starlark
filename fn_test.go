@@ -226,32 +226,9 @@ func TestRunFunction(t *testing.T) {
 				}(),
 			},
 		},
-		"InvalidInputJSON": {
-			reason: "The function should return Fatal when input cannot be parsed into StarlarkInput.",
-			args: args{
-				ctx: context.Background(),
-				req: &fnv1.RunFunctionRequest{
-					Input: resource.MustStructJSON(`{
-						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
-						"kind": "StarlarkInput",
-						"spec": "not-an-object"
-					}`),
-				},
-			},
-			want: want{
-				rsp: func() *fnv1.RunFunctionResponse {
-					rsp := response.To(&fnv1.RunFunctionRequest{
-						Input: resource.MustStructJSON(`{
-							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
-							"kind": "StarlarkInput",
-							"spec": "not-an-object"
-						}`),
-					}, response.DefaultTTL)
-					response.Fatal(rsp, errors.Wrapf(errors.New("cannot get function input *v1alpha1.StarlarkInput from *v1.RunFunctionRequest: cannot unmarshal JSON from *structpb.Struct into *v1alpha1.StarlarkInput: json: cannot unmarshal JSON string into Go value of type v1alpha1.StarlarkInputSpec"), "cannot get Function input"))
-					return rsp
-				}(),
-			},
-		},
+		// InvalidInputJSON moved to TestInvalidInputJSON (substring match)
+		// because Go's encoding/json error messages differ between race and
+		// non-race builds ("cannot" vs "unable to" unmarshal).
 		"MultipleDesiredResources": {
 			reason: "The function should preserve all desired resources from prior pipeline steps, not just one.",
 			args: args{
@@ -479,5 +456,41 @@ func TestErrorSubstrings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestInvalidInputJSON verifies Fatal response for unparseable input.
+// Uses substring matching because Go's encoding/json error messages differ
+// between race and non-race builds ("cannot" vs "unable to" unmarshal).
+func TestInvalidInputJSON(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": "not-an-object"
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_FATAL {
+		t.Errorf("expected SEVERITY_FATAL, got %v", rsp.GetResults()[0].GetSeverity())
+	}
+
+	msg := rsp.GetResults()[0].GetMessage()
+	for _, sub := range []string{
+		"cannot get Function input",
+		"unmarshal JSON",
+		"v1alpha1.StarlarkInputSpec",
+	} {
+		if !strings.Contains(msg, sub) {
+			t.Errorf("expected message to contain %q, got: %s", sub, msg)
+		}
 	}
 }
