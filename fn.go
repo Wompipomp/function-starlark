@@ -8,14 +8,17 @@ import (
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
+	"go.starlark.net/starlark"
 
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
+	"github.com/wompipomp/function-starlark/runtime"
 )
 
 // Function implements the Crossplane composition function.
 type Function struct {
 	fnv1.UnimplementedFunctionRunnerServiceServer
-	log logging.Logger
+	log     logging.Logger
+	runtime *runtime.Runtime
 }
 
 // RunFunction processes a RunFunctionRequest.
@@ -42,7 +45,18 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 
 	log.Info("Parsed StarlarkInput", "source-length", len(in.Spec.Source))
 
-	// Phase 1: passthrough. Starlark execution added in Phase 3+.
-	response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+	// Execute the Starlark script if inline source is provided.
+	// When only scriptConfigRef is set, skip execution (Phase 5 handles ConfigMap loading).
+	if in.Spec.Source != "" {
+		_, err := f.runtime.Execute(in.Spec.Source, starlark.StringDict{})
+		if err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
+			return rsp, nil
+		}
+		response.Normal(rsp, "function-starlark: executed successfully")
+	} else {
+		response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+	}
+
 	return rsp, nil
 }

@@ -3,6 +3,8 @@ package main
 import (
 	"github.com/alecthomas/kong"
 	"github.com/crossplane/function-sdk-go"
+
+	"github.com/wompipomp/function-starlark/runtime"
 )
 
 // CLI represents the command-line interface for the function.
@@ -24,7 +26,9 @@ func (c *CLI) Run() error {
 		return err
 	}
 
-	return function.Serve(&Function{log: log},
+	rt := runtime.NewRuntime(log)
+
+	return function.Serve(&Function{log: log, runtime: rt},
 		function.Listen(c.Network, c.Address),
 		function.MTLSCertificates(c.TLSCertsDir),
 		function.Insecure(c.Insecure),
