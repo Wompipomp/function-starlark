@@ -207,8 +207,9 @@ func TestStarlarkDictGetMissing(t *testing.T) {
 	if found {
 		t.Fatal("Get() found = true, want false")
 	}
-	if val != nil {
-		t.Errorf("Get() = %v, want nil", val)
+	// starlark.Dict.Get returns (None, false, nil) for missing keys.
+	if val != starlark.None {
+		t.Errorf("Get() = %v, want None", val)
 	}
 }
 
