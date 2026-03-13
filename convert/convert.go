@@ -11,8 +11,7 @@ import (
 
 // maxSafeInt is the largest integer that can be exactly represented as float64.
 // Beyond this, float64 loses precision for integer values.
-var maxSafeInt = new(big.Int).SetInt64(1 << 53)  // 2^53
-var minSafeInt = new(big.Int).Neg(maxSafeInt)     // -2^53
+var maxSafeInt = new(big.Int).SetInt64(1 << 53) // 2^53
 
 // StructToStarlark converts a protobuf Struct to a StarlarkDict.
 // If freeze is true, the resulting dict tree is frozen (immutable).
