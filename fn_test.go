@@ -180,6 +180,132 @@ func TestRunFunction(t *testing.T) {
 				}(),
 			},
 		},
+		"ScriptConfigRefOnly": {
+			reason: "The function should accept scriptConfigRef as an alternative to inline source.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"scriptConfigRef": {
+								"name": "my-script",
+								"namespace": "default",
+								"key": "main.star"
+							}
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"scriptConfigRef": {
+									"name": "my-script",
+									"namespace": "default",
+									"key": "main.star"
+								}
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+					return rsp
+				}(),
+			},
+		},
+		"InvalidInputJSON": {
+			reason: "The function should return Fatal when input cannot be parsed into StarlarkInput.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": "not-an-object"
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": "not-an-object"
+						}`),
+					}, response.DefaultTTL)
+					response.Fatal(rsp, errors.Wrapf(errors.New("cannot get function input *v1alpha1.StarlarkInput from *v1.RunFunctionRequest: cannot unmarshal JSON from *structpb.Struct into *v1alpha1.StarlarkInput: json: cannot unmarshal JSON string into Go value of type v1alpha1.StarlarkInputSpec"), "cannot get Function input"))
+					return rsp
+				}(),
+			},
+		},
+		"MultipleDesiredResources": {
+			reason: "The function should preserve all desired resources from prior pipeline steps, not just one.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "pass"
+						}
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+							},
+							"policy": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"iam.aws.upbound.io/v1beta1","kind":"Policy"}`),
+							},
+							"role": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"iam.aws.upbound.io/v1beta1","kind":"Role"}`),
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "pass"
+							}
+						}`),
+						Desired: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`),
+							},
+							Resources: map[string]*fnv1.Resource{
+								"bucket": {
+									Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+								},
+								"policy": {
+									Resource: resource.MustStructJSON(`{"apiVersion":"iam.aws.upbound.io/v1beta1","kind":"Policy"}`),
+								},
+								"role": {
+									Resource: resource.MustStructJSON(`{"apiVersion":"iam.aws.upbound.io/v1beta1","kind":"Role"}`),
+								},
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+					return rsp
+				}(),
+			},
+		},
 	}
 
 	for name, tc := range cases {
