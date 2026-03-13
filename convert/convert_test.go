@@ -3,6 +3,7 @@ package convert
 import (
 	"math"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -858,5 +859,170 @@ func TestStructToStarlark_NegativeZero(t *testing.T) {
 	_, ok := v.(starlark.Int)
 	if !ok {
 		t.Fatalf("-0 = %T, want starlark.Int", v)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional tests from add-tests command
+// ---------------------------------------------------------------------------
+
+func TestStructToStarlark_NegativeInteger(t *testing.T) {
+	s := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"offset": structpb.NewNumberValue(-5),
+		},
+	}
+	d, err := StructToStarlark(s, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	v, err := d.Attr("offset")
+	if err != nil {
+		t.Fatal(err)
+	}
+	si, ok := v.(starlark.Int)
+	if !ok {
+		t.Fatalf("offset = %T, want starlark.Int", v)
+	}
+	got, _ := si.Int64()
+	if got != -5 {
+		t.Errorf("offset = %d, want -5", got)
+	}
+}
+
+func TestStructToStarlark_Zero(t *testing.T) {
+	s := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"count": structpb.NewNumberValue(0),
+		},
+	}
+	d, err := StructToStarlark(s, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	v, err := d.Attr("count")
+	if err != nil {
+		t.Fatal(err)
+	}
+	si, ok := v.(starlark.Int)
+	if !ok {
+		t.Fatalf("0.0 = %T, want starlark.Int", v)
+	}
+	got, _ := si.Int64()
+	if got != 0 {
+		t.Errorf("count = %d, want 0", got)
+	}
+}
+
+func TestStructToStarlark_BoolFalse(t *testing.T) {
+	s := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"disabled": structpb.NewBoolValue(false),
+		},
+	}
+	d, err := StructToStarlark(s, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	v, err := d.Attr("disabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != starlark.False {
+		t.Errorf("disabled = %v, want False", v)
+	}
+}
+
+func TestStructToStarlark_EmptyString(t *testing.T) {
+	original := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"tag": structpb.NewStringValue(""),
+		},
+	}
+	d, err := StructToStarlark(original, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	v, err := d.Attr("tag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != starlark.String("") {
+		t.Errorf("tag = %v, want empty string", v)
+	}
+
+	// Round-trip
+	result, err := StarlarkToStruct(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(original, result, protocmp.Transform()); diff != "" {
+		t.Errorf("empty string round-trip mismatch:\n%s", diff)
+	}
+}
+
+func TestStarlarkToStruct_NonStringKey(t *testing.T) {
+	d := NewStarlarkDict(0)
+	// Insert an integer key via SetKey (bypasses string-only SetField).
+	_ = d.SetKey(starlark.MakeInt(42), starlark.String("val"))
+
+	_, err := StarlarkToStruct(d)
+	if err == nil {
+		t.Fatal("StarlarkToStruct with non-string key should return error")
+	}
+	if !strings.Contains(err.Error(), "not a string") {
+		t.Errorf("error %q should contain 'not a string'", err.Error())
+	}
+}
+
+func TestRoundTrip_NaNValue(t *testing.T) {
+	d := NewStarlarkDict(0)
+	_ = d.SetField("nan", starlark.Float(math.NaN()))
+
+	s, err := StarlarkToStruct(d)
+	if err != nil {
+		t.Fatalf("StarlarkToStruct: %v", err)
+	}
+	nv := s.GetFields()["nan"].GetNumberValue()
+	if !math.IsNaN(nv) {
+		t.Errorf("NaN reverse path = %v, want NaN", nv)
+	}
+}
+
+func TestRoundTrip_InfValues(t *testing.T) {
+	d := NewStarlarkDict(0)
+	_ = d.SetField("pos_inf", starlark.Float(math.Inf(1)))
+	_ = d.SetField("neg_inf", starlark.Float(math.Inf(-1)))
+
+	s, err := StarlarkToStruct(d)
+	if err != nil {
+		t.Fatalf("StarlarkToStruct: %v", err)
+	}
+
+	posInf := s.GetFields()["pos_inf"].GetNumberValue()
+	if !math.IsInf(posInf, 1) {
+		t.Errorf("+Inf reverse = %v, want +Inf", posInf)
+	}
+
+	negInf := s.GetFields()["neg_inf"].GetNumberValue()
+	if !math.IsInf(negInf, -1) {
+		t.Errorf("-Inf reverse = %v, want -Inf", negInf)
+	}
+}
+
+func TestStructToStarlark_FrozenNilStruct(t *testing.T) {
+	d, err := StructToStarlark(nil, true)
+	if err != nil {
+		t.Fatalf("StructToStarlark(nil, true): %v", err)
+	}
+	if d == nil {
+		t.Fatal("returned nil")
+	}
+	if d.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", d.Len())
+	}
+	// Should be frozen.
+	if err := d.SetField("x", starlark.MakeInt(1)); err == nil {
+		t.Error("SetField on frozen nil-struct dict should return error")
 	}
 }

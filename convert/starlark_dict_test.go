@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 )
 
 func TestStarlarkDictNewEmpty(t *testing.T) {
@@ -607,5 +608,165 @@ func TestStarlarkDictLen(t *testing.T) {
 
 	if d.Len() != 3 {
 		t.Errorf("Len() = %d, want 3", d.Len())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Additional tests from add-tests command
+// ---------------------------------------------------------------------------
+
+func TestStarlarkDictCompareSameType_Equal(t *testing.T) {
+	a := NewStarlarkDict(0)
+	_ = a.SetField("x", starlark.MakeInt(1))
+	_ = a.SetField("y", starlark.String("hello"))
+
+	b := NewStarlarkDict(0)
+	_ = b.SetField("x", starlark.MakeInt(1))
+	_ = b.SetField("y", starlark.String("hello"))
+
+	ok, err := a.CompareSameType(syntax.EQL, b, 10)
+	if err != nil {
+		t.Fatalf("CompareSameType error: %v", err)
+	}
+	if !ok {
+		t.Error("equal dicts should compare == as true")
+	}
+}
+
+func TestStarlarkDictCompareSameType_NotEqual(t *testing.T) {
+	a := NewStarlarkDict(0)
+	_ = a.SetField("x", starlark.MakeInt(1))
+
+	b := NewStarlarkDict(0)
+	_ = b.SetField("x", starlark.MakeInt(2))
+
+	ok, err := a.CompareSameType(syntax.EQL, b, 10)
+	if err != nil {
+		t.Fatalf("CompareSameType error: %v", err)
+	}
+	if ok {
+		t.Error("different dicts should compare == as false")
+	}
+}
+
+func TestStarlarkDictCompareSameType_NotStarlarkDict(t *testing.T) {
+	a := NewStarlarkDict(0)
+
+	_, err := a.CompareSameType(syntax.EQL, starlark.String("not a dict"), 1)
+	if err == nil {
+		t.Fatal("CompareSameType with non-StarlarkDict should return error")
+	}
+}
+
+func TestStarlarkDictBuiltinUpdateWithStarlarkDict(t *testing.T) {
+	d := NewStarlarkDict(0)
+	_ = d.SetField("a", starlark.MakeInt(1))
+
+	// Create a plain *starlark.Dict to pass to update.
+	other := new(starlark.Dict)
+	_ = other.SetKey(starlark.String("b"), starlark.MakeInt(2))
+	_ = other.SetKey(starlark.String("a"), starlark.MakeInt(10))
+
+	updateAttr, err := d.Attr("update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := updateAttr.(*starlark.Builtin)
+
+	_, err = starlark.Call(&starlark.Thread{}, fn, starlark.Tuple{other}, nil)
+	if err != nil {
+		t.Fatalf("update with *starlark.Dict: %v", err)
+	}
+
+	// "a" overwritten to 10.
+	val, err := d.Attr("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val != starlark.MakeInt(10) {
+		t.Errorf("after update, a = %v, want 10", val)
+	}
+
+	// "b" added.
+	val, err = d.Attr("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val != starlark.MakeInt(2) {
+		t.Errorf("after update, b = %v, want 2", val)
+	}
+}
+
+func TestStarlarkDictBuiltinUpdateUnsupportedType(t *testing.T) {
+	d := NewStarlarkDict(0)
+
+	updateAttr, err := d.Attr("update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := updateAttr.(*starlark.Builtin)
+
+	_, err = starlark.Call(&starlark.Thread{}, fn, starlark.Tuple{starlark.String("not a dict")}, nil)
+	if err == nil {
+		t.Fatal("update with string should return error")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Errorf("error %q should contain 'unsupported'", err.Error())
+	}
+}
+
+func TestStarlarkDictBuiltinClearFrozen(t *testing.T) {
+	d := NewStarlarkDict(0)
+	_ = d.SetField("a", starlark.MakeInt(1))
+	d.Freeze()
+
+	clearAttr, err := d.Attr("clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := clearAttr.(*starlark.Builtin)
+
+	_, err = starlark.Call(&starlark.Thread{}, fn, nil, nil)
+	if err == nil {
+		t.Fatal("clear on frozen dict should return error")
+	}
+}
+
+func TestStarlarkDictBuiltinPopFrozen(t *testing.T) {
+	d := NewStarlarkDict(0)
+	_ = d.SetField("a", starlark.MakeInt(1))
+	d.Freeze()
+
+	popAttr, err := d.Attr("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := popAttr.(*starlark.Builtin)
+
+	_, err = starlark.Call(&starlark.Thread{}, fn, starlark.Tuple{starlark.String("a")}, nil)
+	if err == nil {
+		t.Fatal("pop on frozen dict should return error")
+	}
+}
+
+func TestStarlarkDictInternalDict(t *testing.T) {
+	d := NewStarlarkDict(0)
+	_ = d.SetField("x", starlark.MakeInt(1))
+
+	internal := d.InternalDict()
+	if internal == nil {
+		t.Fatal("InternalDict() returned nil")
+	}
+
+	// The internal dict should have the same data.
+	v, found, err := internal.Get(starlark.String("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("internal dict missing key 'x'")
+	}
+	if v != starlark.MakeInt(1) {
+		t.Errorf("internal dict x = %v, want 1", v)
 	}
 }
