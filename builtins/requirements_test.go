@@ -166,6 +166,48 @@ func TestRequireResources_MatchLabels(t *testing.T) {
 	}
 }
 
+func TestRequireResources_NonStringLabelValue(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	labels := new(starlark.Dict)
+	_ = labels.SetKey(starlark.String("app"), starlark.MakeInt(42))
+
+	_, err := starlark.Call(thread, rc.RequireResourcesBuiltin(), starlark.Tuple{
+		starlark.String("dbs"),
+		starlark.String("v1"),
+		starlark.String("Instance"),
+		labels,
+	}, nil)
+	if err == nil {
+		t.Fatal("require_resources with non-string label value should error")
+	}
+	if !strings.Contains(err.Error(), "not a string") {
+		t.Errorf("error %q should mention 'not a string'", err.Error())
+	}
+}
+
+func TestRequireResources_NonStringLabelKey(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	labels := new(starlark.Dict)
+	_ = labels.SetKey(starlark.MakeInt(42), starlark.String("value"))
+
+	_, err := starlark.Call(thread, rc.RequireResourcesBuiltin(), starlark.Tuple{
+		starlark.String("dbs"),
+		starlark.String("v1"),
+		starlark.String("Instance"),
+		labels,
+	}, nil)
+	if err == nil {
+		t.Fatal("require_resources with non-string label key should error")
+	}
+	if !strings.Contains(err.Error(), "not a string") {
+		t.Errorf("error %q should mention 'not a string'", err.Error())
+	}
+}
+
 func TestRequireResources_MatchLabelsRequired(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)

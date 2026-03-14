@@ -108,6 +108,37 @@ func TestSetConnectionDetails_MergesAdditively(t *testing.T) {
 	}
 }
 
+func TestSetConnectionDetails_OverwriteKey(t *testing.T) {
+	cc := NewConnectionCollector()
+	thread := new(starlark.Thread)
+
+	// First call sets key1=original
+	d1 := new(starlark.Dict)
+	_ = d1.SetKey(starlark.String("key1"), starlark.String("original"))
+
+	_, err := starlark.Call(thread, cc.SetConnectionDetailsBuiltin(), starlark.Tuple{d1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second call overwrites key1=updated
+	d2 := new(starlark.Dict)
+	_ = d2.SetKey(starlark.String("key1"), starlark.String("updated"))
+
+	_, err = starlark.Call(thread, cc.SetConnectionDetailsBuiltin(), starlark.Tuple{d2}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cd := cc.ConnectionDetails()
+	if len(cd) != 1 {
+		t.Fatalf("ConnectionDetails() = %d, want 1", len(cd))
+	}
+	if string(cd["key1"]) != "updated" {
+		t.Errorf("key1 = %q, want 'updated' (overwrite semantics)", cd["key1"])
+	}
+}
+
 func TestConnectionDetails_ReturnsCopy(t *testing.T) {
 	cc := NewConnectionCollector()
 	thread := new(starlark.Thread)

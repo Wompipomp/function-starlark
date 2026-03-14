@@ -1,6 +1,7 @@
 package builtins
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -303,6 +304,159 @@ func TestApplyContext_WrongType(t *testing.T) {
 		t.Errorf("error %q should contain 'want *starlark.Dict'", err.Error())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// protoValueToStarlarkValue tests
+// ---------------------------------------------------------------------------
+
+func TestProtoValue_NilInput(t *testing.T) {
+	v, err := protoValueToStarlarkValue(nil, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v != starlark.None {
+		t.Errorf("got %v, want None", v)
+	}
+}
+
+func TestProtoValue_NullValue(t *testing.T) {
+	v, err := protoValueToStarlarkValue(structpb.NewNullValue(), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v != starlark.None {
+		t.Errorf("got %v, want None", v)
+	}
+}
+
+func TestProtoValue_Integer(t *testing.T) {
+	// A whole-number float (42.0) should produce starlark.Int, not Float.
+	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(42.0), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	intVal, ok := v.(starlark.Int)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Int", v)
+	}
+	got, _ := intVal.Int64()
+	if got != 42 {
+		t.Errorf("got %d, want 42", got)
+	}
+}
+
+func TestProtoValue_Float(t *testing.T) {
+	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(3.14), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	f, ok := v.(starlark.Float)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Float", v)
+	}
+	if float64(f) != 3.14 {
+		t.Errorf("got %v, want 3.14", f)
+	}
+}
+
+func TestProtoValue_NaN(t *testing.T) {
+	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(math.NaN()), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	f, ok := v.(starlark.Float)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Float", v)
+	}
+	if !math.IsNaN(float64(f)) {
+		t.Errorf("got %v, want NaN", f)
+	}
+}
+
+func TestProtoValue_Inf(t *testing.T) {
+	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(math.Inf(1)), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	f, ok := v.(starlark.Float)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Float", v)
+	}
+	if !math.IsInf(float64(f), 1) {
+		t.Errorf("got %v, want +Inf", f)
+	}
+}
+
+func TestProtoValue_Bool(t *testing.T) {
+	v, err := protoValueToStarlarkValue(structpb.NewBoolValue(true), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	b, ok := v.(starlark.Bool)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Bool", v)
+	}
+	if b != starlark.True {
+		t.Errorf("got %v, want True", b)
+	}
+}
+
+func TestProtoValue_StructFrozen(t *testing.T) {
+	sv := structpb.NewStructValue(&structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"key": structpb.NewStringValue("val"),
+		},
+	})
+	v, err := protoValueToStarlarkValue(sv, true)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	d, ok := v.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.Dict", v)
+	}
+	if err := d.SetKey(starlark.String("new"), starlark.None); err == nil {
+		t.Error("frozen struct dict should reject SetKey")
+	}
+}
+
+func TestProtoValue_ListNilValue(t *testing.T) {
+	// ListValue with nil internal value should return empty list.
+	v, err := protoValueToStarlarkValue(&structpb.Value{
+		Kind: &structpb.Value_ListValue{ListValue: nil},
+	}, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	l, ok := v.(*starlark.List)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.List", v)
+	}
+	if l.Len() != 0 {
+		t.Errorf("Len() = %d, want 0", l.Len())
+	}
+}
+
+func TestProtoValue_ListFrozen(t *testing.T) {
+	lv := structpb.NewListValue(&structpb.ListValue{
+		Values: []*structpb.Value{structpb.NewStringValue("a")},
+	})
+	v, err := protoValueToStarlarkValue(lv, true)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	l, ok := v.(*starlark.List)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.List", v)
+	}
+	if err := l.Append(starlark.None); err == nil {
+		t.Error("frozen list should reject Append")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Context round-trip tests
+// ---------------------------------------------------------------------------
 
 func TestContextRoundTrip(t *testing.T) {
 	// Context from request -> starlark.Dict -> ApplyContext -> response
