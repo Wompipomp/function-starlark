@@ -15,9 +15,10 @@ import (
 
 // CollectedResource holds a single resource produced by the Resource() builtin.
 type CollectedResource struct {
-	Name  string
-	Body  *structpb.Struct
-	Ready resource.Ready
+	Name              string
+	Body              *structpb.Struct
+	Ready             resource.Ready
+	ConnectionDetails map[string][]byte
 }
 
 // Collector accumulates Resource() calls from Starlark scripts.
@@ -49,7 +50,7 @@ func (c *Collector) Resources() map[string]CollectedResource {
 	return out
 }
 
-// resourceFn implements the Resource(name, body, ready=True) Starlark builtin.
+// resourceFn implements the Resource(name, body, ready=True, connection_details=None) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -58,10 +59,12 @@ func (c *Collector) resourceFn(
 ) (starlark.Value, error) {
 	var name string
 	var body *starlark.Dict
+	var connDetails *starlark.Dict
 	ready := true
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"name", &name, "body", &body, "ready?", &ready); err != nil {
+		"name", &name, "body", &body, "ready?", &ready,
+		"connection_details??", &connDetails); err != nil {
 		return nil, err
 	}
 
@@ -70,11 +73,29 @@ func (c *Collector) resourceFn(
 		return nil, fmt.Errorf("Resource(%q): %w", name, err)
 	}
 
+	// Convert connection_details dict to map[string][]byte if provided.
+	var cd map[string][]byte
+	if connDetails != nil {
+		cd = make(map[string][]byte, connDetails.Len())
+		for _, item := range connDetails.Items() {
+			k, ok := item[0].(starlark.String)
+			if !ok {
+				return nil, fmt.Errorf("Resource(%q): connection_details key must be string, got %s", name, item[0].Type())
+			}
+			v, ok := item[1].(starlark.String)
+			if !ok {
+				return nil, fmt.Errorf("Resource(%q): connection_details value must be string, got %s", name, item[1].Type())
+			}
+			cd[string(k)] = []byte(string(v))
+		}
+	}
+
 	c.mu.Lock()
 	c.resources[name] = CollectedResource{
-		Name:  name,
-		Body:  s,
-		Ready: readyFromBool(ready),
+		Name:              name,
+		Body:              s,
+		Ready:             readyFromBool(ready),
+		ConnectionDetails: cd,
 	}
 	c.mu.Unlock()
 

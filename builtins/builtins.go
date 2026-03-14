@@ -140,8 +140,9 @@ func ApplyResources(rsp *fnv1.RunFunctionResponse, collector *Collector) error {
 
 	for name, cr := range collected {
 		rsp.Desired.Resources[name] = &fnv1.Resource{
-			Resource: cr.Body,
-			Ready:    readyToProto(cr.Ready),
+			Resource:          cr.Body,
+			Ready:             readyToProto(cr.Ready),
+			ConnectionDetails: cr.ConnectionDetails,
 		}
 	}
 	return nil
