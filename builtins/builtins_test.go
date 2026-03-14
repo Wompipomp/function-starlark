@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
-	"github.com/crossplane/function-sdk-go/resource"
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/types/known/structpb"
 
