@@ -31,15 +31,16 @@ func NewRuntime(log logging.Logger) *Runtime {
 
 // Execute compiles (or retrieves from cache) and runs the Starlark source.
 // predeclared defines the built-in globals available to the script.
+// filename is used in error messages and stack traces (e.g., "my-script.star").
 // Returns post-execution globals.
-func (r *Runtime) Execute(source string, predeclared starlark.StringDict) (starlark.StringDict, error) {
-	prog, err := r.getOrCompile(source, predeclared)
+func (r *Runtime) Execute(source string, predeclared starlark.StringDict, filename string) (starlark.StringDict, error) {
+	prog, err := r.getOrCompile(source, predeclared, filename)
 	if err != nil {
 		return nil, fmt.Errorf("starlark compilation error: %w", err)
 	}
 
 	thread := &starlark.Thread{
-		Name: "composition.star",
+		Name: filename,
 		Print: func(_ *starlark.Thread, msg string) {
 			r.log.Debug("starlark print", "msg", msg)
 		},
@@ -74,8 +75,10 @@ func (r *Runtime) Execute(source string, predeclared starlark.StringDict) (starl
 }
 
 // getOrCompile returns a cached *Program or compiles the source and caches it.
-func (r *Runtime) getOrCompile(source string, predeclared starlark.StringDict) (*starlark.Program, error) {
-	key := contentHash(source)
+// The cache key includes the filename to avoid serving programs compiled with
+// a different filename (which would produce wrong position info in errors).
+func (r *Runtime) getOrCompile(source string, predeclared starlark.StringDict, filename string) (*starlark.Program, error) {
+	key := contentHash(source + "\x00" + filename)
 
 	// Fast path: read lock.
 	r.mu.RLock()
@@ -97,7 +100,7 @@ func (r *Runtime) getOrCompile(source string, predeclared starlark.StringDict) (
 		return exists
 	}
 
-	_, prog, err := starlark.SourceProgramOptions(opts, "composition.star", source, isPredeclared)
+	_, prog, err := starlark.SourceProgramOptions(opts, filename, source, isPredeclared)
 	if err != nil {
 		return nil, err
 	}
