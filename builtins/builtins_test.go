@@ -1,6 +1,7 @@
 package builtins
 
 import (
+	"strings"
 	"testing"
 
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
@@ -691,5 +692,79 @@ func TestApplyDXR_EmptyDXR(t *testing.T) {
 	}
 	if len(rsp.Desired.Composite.Resource.GetFields()) != 0 {
 		t.Errorf("fields = %d, want 0", len(rsp.Desired.Composite.Resource.GetFields()))
+	}
+}
+
+func TestApplyDXR_WrongType(t *testing.T) {
+	// ApplyDXR should return error when passed a plain *starlark.Dict instead of *StarlarkDict.
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("x"), starlark.MakeInt(1))
+
+	rsp := &fnv1.RunFunctionResponse{}
+
+	err := ApplyDXR(rsp, d)
+	if err == nil {
+		t.Fatal("ApplyDXR with *starlark.Dict should return error")
+	}
+	if !strings.Contains(err.Error(), "want *convert.StarlarkDict") {
+		t.Errorf("error %q should contain 'want *convert.StarlarkDict'", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// pathToKeys tests
+// ---------------------------------------------------------------------------
+
+func TestPathToKeys_InvalidType(t *testing.T) {
+	_, err := pathToKeys(starlark.MakeInt(42))
+	if err == nil {
+		t.Fatal("pathToKeys with Int should return error")
+	}
+	if !strings.Contains(err.Error(), "must be string or list") {
+		t.Errorf("error %q should contain 'must be string or list'", err.Error())
+	}
+}
+
+func TestPathToKeys_NonStringListElement(t *testing.T) {
+	pathList := starlark.NewList([]starlark.Value{
+		starlark.String("spec"),
+		starlark.MakeInt(42),
+	})
+	_, err := pathToKeys(pathList)
+	if err == nil {
+		t.Fatal("pathToKeys with non-string list element should return error")
+	}
+	if !strings.Contains(err.Error(), "want string") {
+		t.Errorf("error %q should contain 'want string'", err.Error())
+	}
+}
+
+func TestGetBuiltin_NoneIntermediate(t *testing.T) {
+	// When an intermediate value in the path is starlark.None, get() should return default.
+	req := makeReq(
+		map[string]*structpb.Value{
+			"spec": structpb.NewNullValue(), // spec is null/None
+		},
+		map[string]*structpb.Value{},
+		nil,
+	)
+	c := NewCollector()
+	globals, err := BuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thread := new(starlark.Thread)
+	result, err := starlark.Call(thread, globals["get"], starlark.Tuple{
+		globals["oxr"],
+		starlark.String("spec.parameters.region"),
+	}, []starlark.Tuple{
+		{starlark.String("default"), starlark.String("fallback")},
+	})
+	if err != nil {
+		t.Fatalf("get() error: %v", err)
+	}
+	if result != starlark.String("fallback") {
+		t.Errorf("get(oxr, 'spec.parameters.region', default='fallback') with None intermediate = %v, want 'fallback'", result)
 	}
 }

@@ -174,3 +174,67 @@ func TestCollector_ResourcesCopy(t *testing.T) {
 		t.Error("Resources() should return a copy, not a reference")
 	}
 }
+
+func TestCollector_MultipleDistinct(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	names := []string{"bucket", "queue", "topic"}
+	kinds := []string{"Bucket", "Queue", "Topic"}
+
+	for i, name := range names {
+		body := new(starlark.Dict)
+		_ = body.SetKey(starlark.String("kind"), starlark.String(kinds[i]))
+
+		_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+			starlark.String(name),
+			body,
+		}, nil)
+		if err != nil {
+			t.Fatalf("Resource(%q) error: %v", name, err)
+		}
+	}
+
+	res := c.Resources()
+	if len(res) != 3 {
+		t.Fatalf("Resources() = %d, want 3", len(res))
+	}
+	for i, name := range names {
+		cr, ok := res[name]
+		if !ok {
+			t.Errorf("missing resource %q", name)
+			continue
+		}
+		got := cr.Body.GetFields()["kind"].GetStringValue()
+		if got != kinds[i] {
+			t.Errorf("%s kind = %q, want %q", name, got, kinds[i])
+		}
+	}
+}
+
+func TestCollector_EmptyBody(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict) // empty
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("empty-item"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr, ok := res["empty-item"]
+	if !ok {
+		t.Fatal("missing resource 'empty-item'")
+	}
+	if cr.Body == nil {
+		t.Fatal("body is nil")
+	}
+	if len(cr.Body.GetFields()) != 0 {
+		t.Errorf("fields = %d, want 0", len(cr.Body.GetFields()))
+	}
+}

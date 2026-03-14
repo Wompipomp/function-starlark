@@ -1207,3 +1207,66 @@ func TestStructToStarlark_FrozenNilStruct(t *testing.T) {
 		t.Error("SetField on frozen nil-struct dict should return error")
 	}
 }
+
+func TestPlainDictToStruct_UnsupportedNestedType(t *testing.T) {
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("bad"), starlark.Tuple{starlark.MakeInt(1), starlark.MakeInt(2)})
+
+	_, err := PlainDictToStruct(d)
+	if err == nil {
+		t.Fatal("PlainDictToStruct with Tuple value should return error")
+	}
+	if !strings.Contains(err.Error(), "unsupported starlark type") {
+		t.Errorf("error %q should contain 'unsupported starlark type'", err.Error())
+	}
+}
+
+func TestPlainDictToStruct_MixedNestedTypes(t *testing.T) {
+	// Plain dict with all supported types: string, int, bool, None, nested dict, list.
+	inner := new(starlark.Dict)
+	_ = inner.SetKey(starlark.String("nested"), starlark.String("value"))
+
+	list := starlark.NewList([]starlark.Value{
+		starlark.MakeInt(1),
+		starlark.String("two"),
+	})
+
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("str"), starlark.String("hello"))
+	_ = d.SetKey(starlark.String("num"), starlark.MakeInt(42))
+	_ = d.SetKey(starlark.String("flag"), starlark.True)
+	_ = d.SetKey(starlark.String("nil"), starlark.None)
+	_ = d.SetKey(starlark.String("obj"), inner)
+	_ = d.SetKey(starlark.String("arr"), list)
+
+	s, err := PlainDictToStruct(d)
+	if err != nil {
+		t.Fatalf("PlainDictToStruct error: %v", err)
+	}
+	fields := s.GetFields()
+	if len(fields) != 6 {
+		t.Errorf("fields = %d, want 6", len(fields))
+	}
+
+	// Spot-check each type
+	if fields["str"].GetStringValue() != "hello" {
+		t.Errorf("str = %v, want 'hello'", fields["str"])
+	}
+	if fields["num"].GetNumberValue() != 42 {
+		t.Errorf("num = %v, want 42", fields["num"])
+	}
+	if !fields["flag"].GetBoolValue() {
+		t.Errorf("flag = %v, want true", fields["flag"])
+	}
+	if _, ok := fields["nil"].GetKind().(*structpb.Value_NullValue); !ok {
+		t.Errorf("nil kind = %T, want NullValue", fields["nil"].GetKind())
+	}
+	if _, ok := fields["obj"].GetKind().(*structpb.Value_StructValue); !ok {
+		t.Errorf("obj kind = %T, want StructValue", fields["obj"].GetKind())
+	}
+	if lv, ok := fields["arr"].GetKind().(*structpb.Value_ListValue); !ok {
+		t.Errorf("arr kind = %T, want ListValue", fields["arr"].GetKind())
+	} else if len(lv.ListValue.GetValues()) != 2 {
+		t.Errorf("arr len = %d, want 2", len(lv.ListValue.GetValues()))
+	}
+}
