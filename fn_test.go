@@ -64,6 +64,12 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					// ApplyDXR always sets desired composite (empty when no observed composite).
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
 					return rsp
 				}(),
 			},
@@ -184,6 +190,11 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
 					return rsp
 				}(),
 			},
@@ -252,6 +263,11 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
 					return rsp
 				}(),
 			},
@@ -282,6 +298,11 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
 					return rsp
 				}(),
 			},
@@ -347,6 +368,625 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					return rsp
+				}(),
+			},
+		},
+		// ========================
+		// E2E tests for Phase 4 requirements (STAT-01 through STAT-05, RSRC-01 through RSRC-08)
+		// ========================
+
+		"ResourceCreation": {
+			reason: "STAT-03/RSRC-06: Script creates one resource via Resource(). Resource appears in response with correct body and READY_TRUE.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource('bucket', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket', 'metadata': {'name': 'my-bucket'}, 'spec': {'forProvider': {'region': 'us-east-1'}}})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource('bucket', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket', 'metadata': {'name': 'my-bucket'}, 'spec': {'forProvider': {'region': 'us-east-1'}}})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "s3.aws.upbound.io/v1beta1",
+									"kind": "Bucket",
+									"metadata": {"name": "my-bucket"},
+									"spec": {"forProvider": {"region": "us-east-1"}}
+								}`),
+								Ready: fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"OXRAccess": {
+			reason: "STAT-01/RSRC-07: Script reads oxr spec, metadata, labels, annotations, and status fields and creates resource to prove values are readable.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "region = oxr.spec.parameters.region\napp = oxr.metadata.labels['app']\nnote = oxr.metadata.annotations['note']\nReady = oxr.status.ready\nResource('test', {'region': region, 'app': app, 'note': note, 'ready': Ready})"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.crossplane.io/v1",
+								"kind": "XBucket",
+								"spec": {
+									"parameters": {"region": "us-east-1"}
+								},
+								"status": {"ready": "True"},
+								"metadata": {
+									"labels": {"app": "web"},
+									"annotations": {"note": "test"}
+								}
+							}`),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "region = oxr.spec.parameters.region\napp = oxr.metadata.labels['app']\nnote = oxr.metadata.annotations['note']\nReady = oxr.status.ready\nResource('test', {'region': region, 'app': app, 'note': note, 'ready': Ready})"
+							}
+						}`),
+						Observed: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.crossplane.io/v1",
+									"kind": "XBucket",
+									"spec": {
+										"parameters": {"region": "us-east-1"}
+									},
+									"status": {"ready": "True"},
+									"metadata": {
+										"labels": {"app": "web"},
+										"annotations": {"note": "test"}
+									}
+								}`),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"test": {
+								Resource: resource.MustStructJSON(`{
+									"region": "us-east-1",
+									"app": "web",
+									"note": "test",
+									"ready": "True"
+								}`),
+								Ready: fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"ObservedAccess": {
+			reason: "STAT-02/RSRC-07: Script reads observed composed resources by name and uses their fields.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "region = observed['bucket'].spec.forProvider.region\nResource('new-bucket', {'region': region})"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{"apiVersion": "example.crossplane.io/v1", "kind": "XBucket"}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "s3.aws.upbound.io/v1beta1",
+									"kind": "Bucket",
+									"spec": {"forProvider": {"region": "eu-west-1"}}
+								}`),
+							},
+							"policy": {
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "iam.aws.upbound.io/v1beta1",
+									"kind": "Policy"
+								}`),
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "region = observed['bucket'].spec.forProvider.region\nResource('new-bucket', {'region': region})"
+							}
+						}`),
+						Observed: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{"apiVersion": "example.crossplane.io/v1", "kind": "XBucket"}`),
+							},
+							Resources: map[string]*fnv1.Resource{
+								"bucket": {
+									Resource: resource.MustStructJSON(`{
+										"apiVersion": "s3.aws.upbound.io/v1beta1",
+										"kind": "Bucket",
+										"spec": {"forProvider": {"region": "eu-west-1"}}
+									}`),
+								},
+								"policy": {
+									Resource: resource.MustStructJSON(`{
+										"apiVersion": "iam.aws.upbound.io/v1beta1",
+										"kind": "Policy"
+									}`),
+								},
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"new-bucket": {
+								Resource: resource.MustStructJSON(`{"region": "eu-west-1"}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"DXRStatusMutation": {
+			reason: "STAT-04: Script sets dxr.status fields. Changes appear in response desired composite.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "dxr['status'] = {'ready': 'True', 'synced': 'True'}"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.crossplane.io/v1",
+								"kind": "XBucket"
+							}`),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "dxr['status'] = {'ready': 'True', 'synced': 'True'}"
+							}
+						}`),
+						Observed: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.crossplane.io/v1",
+									"kind": "XBucket"
+								}`),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"status": {"ready": "True", "synced": "True"}
+							}`),
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"PreservesDesiredWithScript": {
+			reason: "STAT-05: Prior desired resources preserved even when script creates new ones.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource('new-bucket', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket'})"
+						}
+					}`),
+					Desired: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"existing-bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","metadata":{"name":"existing"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource('new-bucket', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket'})"
+							}
+						}`),
+						Desired: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`),
+							},
+							Resources: map[string]*fnv1.Resource{
+								"existing-bucket": {
+									Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","metadata":{"name":"existing"}}`),
+									Ready:    fnv1.Ready_READY_TRUE,
+								},
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					// ApplyDXR sets the desired composite from the dxr (built from desired composite in request).
+					rsp.Desired.Composite.Resource = resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`)
+					// ApplyResources adds new resources, preserving existing ones.
+					rsp.Desired.Resources["new-bucket"] = &fnv1.Resource{
+						Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+						Ready:    fnv1.Ready_READY_TRUE,
+					}
+					return rsp
+				}(),
+			},
+		},
+		"ConditionalResource": {
+			reason: "RSRC-01: Script uses if/else to conditionally create resources based on oxr fields.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "if oxr.spec.parameters.createBucket == True:\n    Resource('bucket', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket'})"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.crossplane.io/v1",
+								"kind": "XBucket",
+								"spec": {
+									"parameters": {"createBucket": true}
+								}
+							}`),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "if oxr.spec.parameters.createBucket == True:\n    Resource('bucket', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket'})"
+							}
+						}`),
+						Observed: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.crossplane.io/v1",
+									"kind": "XBucket",
+									"spec": {
+										"parameters": {"createBucket": true}
+									}
+								}`),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"IteratedResources": {
+			reason: "RSRC-02: Script uses for-loop to create multiple resources.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "for i in range(3):\n    Resource('instance-%d' % i, {'apiVersion': 'ec2.aws.upbound.io/v1beta1', 'kind': 'Instance', 'metadata': {'name': 'instance-%d' % i}})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "for i in range(3):\n    Resource('instance-%d' % i, {'apiVersion': 'ec2.aws.upbound.io/v1beta1', 'kind': 'Instance', 'metadata': {'name': 'instance-%d' % i}})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"instance-0": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"ec2.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"instance-0"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+							"instance-1": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"ec2.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"instance-1"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+							"instance-2": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"ec2.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"instance-2"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"HelperFunctionResource": {
+			reason: "RSRC-03: Script defines helper function with def and calls it to create resources.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "def make_bucket(name, region):\n    Resource(name, {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket', 'spec': {'forProvider': {'region': region}}})\nmake_bucket('my-bucket', 'us-west-2')"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "def make_bucket(name, region):\n    Resource(name, {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket', 'spec': {'forProvider': {'region': region}}})\nmake_bucket('my-bucket', 'us-west-2')"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"my-bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","spec":{"forProvider":{"region":"us-west-2"}}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"ReadyFalse": {
+			reason: "RSRC-05: Script calls Resource with ready=False. Resource has READY_FALSE in response.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource('pending', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket'}, ready=False)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource('pending', {'apiVersion': 's3.aws.upbound.io/v1beta1', 'kind': 'Bucket'}, ready=False)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"pending": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
+								Ready:    fnv1.Ready_READY_FALSE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"GetBuiltin": {
+			reason: "RSRC-08: Script uses get() for safe nested access with default fallback.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "region = get(oxr, 'spec.parameters.region')\nfallback = get(oxr, 'spec.missing.field', 'fallback-value')\nResource('test', {'region': region, 'fallback': fallback})"
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.crossplane.io/v1",
+								"kind": "XBucket",
+								"spec": {
+									"parameters": {"region": "ap-southeast-1"}
+								}
+							}`),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "region = get(oxr, 'spec.parameters.region')\nfallback = get(oxr, 'spec.missing.field', 'fallback-value')\nResource('test', {'region': region, 'fallback': fallback})"
+							}
+						}`),
+						Observed: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.crossplane.io/v1",
+									"kind": "XBucket",
+									"spec": {
+										"parameters": {"region": "ap-southeast-1"}
+									}
+								}`),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"test": {
+								Resource: resource.MustStructJSON(`{"region": "ap-southeast-1", "fallback": "fallback-value"}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"LastWinsResource": {
+			reason: "RSRC-06 detail: Duplicate Resource() calls with same name use last-wins semantics.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource('bucket', {'apiVersion': 'v1beta1', 'kind': 'Bucket', 'spec': {'region': 'us-east-1'}})\nResource('bucket', {'apiVersion': 'v1beta1', 'kind': 'Bucket', 'spec': {'region': 'eu-west-1'}})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource('bucket', {'apiVersion': 'v1beta1', 'kind': 'Bucket', 'spec': {'region': 'us-east-1'}})\nResource('bucket', {'apiVersion': 'v1beta1', 'kind': 'Bucket', 'spec': {'region': 'eu-west-1'}})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1beta1","kind":"Bucket","spec":{"region":"eu-west-1"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
 					return rsp
 				}(),
 			},

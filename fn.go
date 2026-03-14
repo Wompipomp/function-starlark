@@ -55,7 +55,7 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 			return rsp, nil
 		}
 
-		result, err := f.runtime.Execute(in.Spec.Source, globals)
+		_, err = f.runtime.Execute(in.Spec.Source, globals)
 		if err != nil {
 			response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
 			return rsp, nil
@@ -68,7 +68,9 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		}
 
 		// Apply dxr status changes to response desired composite.
-		if err := builtins.ApplyDXR(rsp, result["dxr"]); err != nil {
+		// dxr is a predeclared global (mutable StarlarkDict), so scripts
+		// mutate it in-place. We read it back from the globals dict.
+		if err := builtins.ApplyDXR(rsp, globals["dxr"]); err != nil {
 			response.Fatal(rsp, errors.Wrapf(err, "applying dxr status"))
 			return rsp, nil
 		}
