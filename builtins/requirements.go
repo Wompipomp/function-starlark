@@ -184,7 +184,7 @@ func buildExtraResourcesDict(req *fnv1.RunFunctionRequest) (*starlark.Dict, erro
 	// Prefer RequiredResources (current), fall back to ExtraResources (deprecated).
 	rrs := req.GetRequiredResources()
 	if rrs == nil {
-		rrs = req.GetExtraResources()
+		rrs = req.GetExtraResources() //nolint:staticcheck // intentional fallback for backward compatibility
 	}
 	if rrs == nil {
 		d.Freeze()

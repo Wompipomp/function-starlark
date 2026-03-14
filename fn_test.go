@@ -10,6 +10,9 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"google.golang.org/protobuf/testing/protocmp"
 
+	"os"
+	"path/filepath"
+
 	"github.com/crossplane/function-sdk-go/errors"
 	"github.com/crossplane/function-sdk-go/logging"
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
@@ -1269,6 +1272,452 @@ func TestRunFunction(t *testing.T) {
 				}(),
 			},
 		},
+
+		// -----------------------------------------------------------------
+		// E2E tests for Phase 5 requirements
+		// -----------------------------------------------------------------
+
+		// STAT-06: Pipeline Context Read/Write
+		"ContextReadWrite": {
+			reason: "STAT-06: Script reads and writes pipeline context; response includes both existing and new keys.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "existing = context['my-key']\ncontext['new-key'] = 'new-value'"
+						}
+					}`),
+					Context: &structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"my-key": structpb.NewStringValue("my-value"),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "existing = context['my-key']\ncontext['new-key'] = 'new-value'"
+							}
+						}`),
+						Context: &structpb.Struct{
+							Fields: map[string]*structpb.Value{
+								"my-key": structpb.NewStringValue("my-value"),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"my-key":  structpb.NewStringValue("my-value"),
+							"new-key": structpb.NewStringValue("new-value"),
+						},
+					}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// STAT-07: EnvironmentConfig Access
+		"EnvironmentConfigAccess": {
+			reason: "STAT-07: Script reads environment.data.region via dot-access on frozen StarlarkDict.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "region = environment.data.region\nResource('bucket', {'apiVersion': 'v1', 'kind': 'Bucket', 'spec': {'region': region}})"
+						}
+					}`),
+					Context: &structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"apiextensions.crossplane.io/environment": structpb.NewStructValue(&structpb.Struct{
+								Fields: map[string]*structpb.Value{
+									"data": structpb.NewStructValue(&structpb.Struct{
+										Fields: map[string]*structpb.Value{
+											"region": structpb.NewStringValue("eu-west-1"),
+										},
+									}),
+								},
+							}),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "region = environment.data.region\nResource('bucket', {'apiVersion': 'v1', 'kind': 'Bucket', 'spec': {'region': region}})"
+							}
+						}`),
+						Context: &structpb.Struct{
+							Fields: map[string]*structpb.Value{
+								"apiextensions.crossplane.io/environment": structpb.NewStructValue(&structpb.Struct{
+									Fields: map[string]*structpb.Value{
+										"data": structpb.NewStructValue(&structpb.Struct{
+											Fields: map[string]*structpb.Value{
+												"region": structpb.NewStringValue("eu-west-1"),
+											},
+										}),
+									},
+								}),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"apiextensions.crossplane.io/environment": structpb.NewStructValue(&structpb.Struct{
+								Fields: map[string]*structpb.Value{
+									"data": structpb.NewStructValue(&structpb.Struct{
+										Fields: map[string]*structpb.Value{
+											"region": structpb.NewStringValue("eu-west-1"),
+										},
+									}),
+								},
+							}),
+						},
+					}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Bucket","spec":{"region":"eu-west-1"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// STAT-08: Extra Resources Request (first reconciliation -- no resources yet)
+		"ExtraResourcesRequest": {
+			reason: "STAT-08: Script calls require_resource; response has Requirements with ResourceSelector.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "require_resource('my-db', 'rds.aws.upbound.io/v1beta1', 'Instance', match_name='my-database')"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "require_resource('my-db', 'rds.aws.upbound.io/v1beta1', 'Instance', match_name='my-database')"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
+					rsp.Requirements = &fnv1.Requirements{
+						Resources: map[string]*fnv1.ResourceSelector{
+							"my-db": {
+								ApiVersion: "rds.aws.upbound.io/v1beta1",
+								Kind:       "Instance",
+								Match:      &fnv1.ResourceSelector_MatchName{MatchName: "my-database"},
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// STAT-08: Extra Resources Read (second reconciliation -- resources available)
+		"ExtraResourcesRead": {
+			reason: "STAT-08: Script reads extra_resources from a previous require_resource response.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "db = extra_resources['my-db'][0]\nname = get(db, 'metadata.name')\nResource('ref', {'apiVersion': 'v1', 'kind': 'Reference', 'spec': {'dbName': name}})"
+						}
+					}`),
+					RequiredResources: map[string]*fnv1.Resources{
+						"my-db": {
+							Items: []*fnv1.Resource{
+								{
+									Resource: resource.MustStructJSON(`{"apiVersion":"rds.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"my-database"}}`),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "db = extra_resources['my-db'][0]\nname = get(db, 'metadata.name')\nResource('ref', {'apiVersion': 'v1', 'kind': 'Reference', 'spec': {'dbName': name}})"
+							}
+						}`),
+						RequiredResources: map[string]*fnv1.Resources{
+							"my-db": {
+								Items: []*fnv1.Resource{
+									{
+										Resource: resource.MustStructJSON(`{"apiVersion":"rds.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"my-database"}}`),
+									},
+								},
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"ref": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Reference","spec":{"dbName":"my-database"}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// RSRC-04 + COMP-02: Connection Details Per-Resource
+		"ConnectionDetailsPerResource": {
+			reason: "RSRC-04+COMP-02: Script creates a Resource with connection_details kwarg.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource('my-rds', {'apiVersion': 'v1', 'kind': 'RDS'}, connection_details={'username': 'admin', 'password': 'secret'})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource('my-rds', {'apiVersion': 'v1', 'kind': 'RDS'}, connection_details={'username': 'admin', 'password': 'secret'})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"my-rds": {
+								Resource:          resource.MustStructJSON(`{"apiVersion":"v1","kind":"RDS"}`),
+								Ready:             fnv1.Ready_READY_TRUE,
+								ConnectionDetails: map[string][]byte{"username": []byte("admin"), "password": []byte("secret")},
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// COMP-02: XR-Level Connection Details
+		"ConnectionDetailsXRLevel": {
+			reason: "COMP-02: Script calls set_connection_details; response has XR-level connection details.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "set_connection_details({'endpoint': 'db.example.com', 'port': '5432'})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "set_connection_details({'endpoint': 'db.example.com', 'port': '5432'})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource:          resource.MustStructJSON(`{}`),
+							ConnectionDetails: map[string][]byte{"endpoint": []byte("db.example.com"), "port": []byte("5432")},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// OBSV-02: Conditions
+		"SetCondition": {
+			reason: "OBSV-02: Script calls set_condition; response has matching condition.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "set_condition('DatabaseReady', 'True', 'Available', 'All databases healthy')"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "set_condition('DatabaseReady', 'True', 'Available', 'All databases healthy')"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
+					// Condition added by ApplyConditions via SDK helper.
+					response.ConditionTrue(rsp, "DatabaseReady", "Available").WithMessage("All databases healthy")
+					return rsp
+				}(),
+			},
+		},
+
+		// OBSV-03: Events
+		"EmitEvent": {
+			reason: "OBSV-03: Script calls emit_event; response has Normal result with message.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "emit_event('Normal', 'Resource reconciled successfully')"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "emit_event('Normal', 'Resource reconciled successfully')"
+							}
+						}`),
+					}, response.DefaultTTL)
+					// ApplyEvents runs before the final response.Normal, so event result comes first.
+					response.Normal(rsp, "Resource reconciled successfully")
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+
+		// OBSV-03: Fatal builtin
+		"FatalBuiltin": {
+			reason: "OBSV-03: Script calls fatal(); response has Fatal result and conditions/events still applied.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "set_condition('DatabaseReady', 'False', 'Failed', 'DB check failed')\nfatal('cannot proceed: database unavailable')"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "set_condition('DatabaseReady', 'False', 'Failed', 'DB check failed')\nfatal('cannot proceed: database unavailable')"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Fatal(rsp, errors.New("cannot proceed: database unavailable"))
+					// Conditions set before fatal() are still applied.
+					response.ConditionFalse(rsp, "DatabaseReady", "Failed").WithMessage("DB check failed")
+					return rsp
+				}(),
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -1297,11 +1746,11 @@ func TestErrorSubstrings(t *testing.T) {
 	}{
 		"CompilationErrorMessage": {
 			source:   "x = (",
-			contains: []string{"starlark execution failed", "Starlark compilation error", "composition.star"},
+			contains: []string{"starlark execution failed", "starlark compilation error", "composition.star"},
 		},
 		"RuntimeErrorMessage": {
 			source:   "x = {}['missing_key']",
-			contains: []string{"starlark execution failed", "Starlark execution error"},
+			contains: []string{"starlark execution failed", "starlark execution error"},
 		},
 		"StepLimitMessage": {
 			source:   "while True: pass",
@@ -1374,5 +1823,114 @@ func TestInvalidInputJSON(t *testing.T) {
 		if !strings.Contains(msg, sub) {
 			t.Errorf("expected message to contain %q, got: %s", sub, msg)
 		}
+	}
+}
+
+// TestConfigMapScriptLoading verifies RUNT-03: ConfigMap-mounted scripts execute
+// identically to inline source -- same runtime, same globals, same pipeline.
+func TestConfigMapScriptLoading(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+
+	// Create a temp directory to simulate the ConfigMap volume mount.
+	tmpDir := t.TempDir()
+	scriptDir := filepath.Join(tmpDir, "my-scripts")
+	if err := os.MkdirAll(scriptDir, 0o750); err != nil {
+		t.Fatalf("creating script dir: %v", err)
+	}
+
+	// Write a Starlark script that exercises Resource() and context.
+	script := `Resource('bucket', {'apiVersion': 'v1', 'kind': 'Bucket', 'spec': {'from': 'configmap'}})
+context['loaded-from'] = 'configmap'`
+	if err := os.WriteFile(filepath.Join(scriptDir, "main.star"), []byte(script), 0o600); err != nil {
+		t.Fatalf("writing script: %v", err)
+	}
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, scriptDir: tmpDir}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"scriptConfigRef": {
+					"name": "my-scripts",
+					"key": "main.star"
+				}
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	// Should have Normal result (successful execution).
+	if len(rsp.GetResults()) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_NORMAL {
+		t.Errorf("expected SEVERITY_NORMAL, got %v (message: %s)",
+			rsp.GetResults()[0].GetSeverity(), rsp.GetResults()[0].GetMessage())
+	}
+
+	// Should have created the bucket resource.
+	bucket, ok := rsp.GetDesired().GetResources()["bucket"]
+	if !ok {
+		t.Fatal("expected 'bucket' resource in desired state")
+	}
+	kind := bucket.GetResource().GetFields()["kind"].GetStringValue()
+	if kind != "Bucket" {
+		t.Errorf("bucket kind = %q, want 'Bucket'", kind)
+	}
+	from := bucket.GetResource().GetFields()["spec"].GetStructValue().GetFields()["from"].GetStringValue()
+	if from != "configmap" {
+		t.Errorf("bucket spec.from = %q, want 'configmap'", from)
+	}
+
+	// Should have context with loaded-from key.
+	loadedFrom := rsp.GetContext().GetFields()["loaded-from"].GetStringValue()
+	if loadedFrom != "configmap" {
+		t.Errorf("context['loaded-from'] = %q, want 'configmap'", loadedFrom)
+	}
+}
+
+// TestConfigMapDefaultKey verifies that loadScript defaults key to "main.star".
+func TestConfigMapDefaultKey(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+
+	tmpDir := t.TempDir()
+	scriptDir := filepath.Join(tmpDir, "my-scripts")
+	if err := os.MkdirAll(scriptDir, 0o750); err != nil {
+		t.Fatalf("creating script dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(scriptDir, "main.star"), []byte("x = 42"), 0o600); err != nil {
+		t.Fatalf("writing script: %v", err)
+	}
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, scriptDir: tmpDir}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"scriptConfigRef": {
+					"name": "my-scripts"
+				}
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	// Should succeed (no key specified, defaults to main.star).
+	if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_NORMAL {
+		t.Errorf("expected SEVERITY_NORMAL, got %v (message: %s)",
+			rsp.GetResults()[0].GetSeverity(), rsp.GetResults()[0].GetMessage())
 	}
 }

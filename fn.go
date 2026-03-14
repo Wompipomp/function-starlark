@@ -154,7 +154,7 @@ func (f *Function) loadScript(ref *v1alpha1.ScriptConfigRef) (string, error) {
 	}
 
 	path := filepath.Join(dir, ref.Name, key)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from trusted ConfigMap ref
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf(

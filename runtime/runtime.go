@@ -35,7 +35,7 @@ func NewRuntime(log logging.Logger) *Runtime {
 func (r *Runtime) Execute(source string, predeclared starlark.StringDict) (starlark.StringDict, error) {
 	prog, err := r.getOrCompile(source, predeclared)
 	if err != nil {
-		return nil, fmt.Errorf("Starlark compilation error: %w", err)
+		return nil, fmt.Errorf("starlark compilation error: %w", err)
 	}
 
 	thread := &starlark.Thread{
@@ -55,17 +55,19 @@ func (r *Runtime) Execute(source string, predeclared starlark.StringDict) (starl
 		// because step limit cancellation also produces an EvalError.
 		if thread.ExecutionSteps() >= maxSteps {
 			return nil, fmt.Errorf(
-				"Starlark script exceeded execution limit (%d steps): possible infinite loop",
+				"starlark script exceeded execution limit (%d steps): possible infinite loop",
 				maxSteps,
 			)
 		}
 
 		var evalErr *starlark.EvalError
 		if errors.As(err, &evalErr) {
-			return nil, fmt.Errorf("Starlark execution error: %s", evalErr.Backtrace())
+			// Wrap with %w to preserve error chain so callers can use errors.As
+			// (e.g., to detect FatalError from the fatal() builtin).
+			return nil, fmt.Errorf("starlark execution error: %s: %w", evalErr.Backtrace(), err)
 		}
 
-		return nil, fmt.Errorf("Starlark execution error: %w", err)
+		return nil, fmt.Errorf("starlark execution error: %w", err)
 	}
 
 	return globals, nil

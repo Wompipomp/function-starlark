@@ -123,8 +123,8 @@ func TestCompilationError(t *testing.T) {
 		t.Fatal("expected compilation error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "Starlark compilation error:") {
-		t.Errorf("error = %q, want it to contain 'Starlark compilation error:'", err.Error())
+	if !strings.Contains(err.Error(), "starlark compilation error:") {
+		t.Errorf("error = %q, want it to contain 'starlark compilation error:'", err.Error())
 	}
 }
 
@@ -149,8 +149,8 @@ f()
 		t.Fatal("expected runtime error, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "Starlark execution error:") {
-		t.Errorf("error = %q, want it to contain 'Starlark execution error:'", err.Error())
+	if !strings.Contains(err.Error(), "starlark execution error:") {
+		t.Errorf("error = %q, want it to contain 'starlark execution error:'", err.Error())
 	}
 }
 
