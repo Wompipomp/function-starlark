@@ -8,20 +8,6 @@ spec:
     kind: XBucket
   mode: Pipeline
   pipeline:
-    - step: create-bucket
-      functionRef:
-        name: function-patch-and-transform
-      input:
-        apiVersion: pt.fn.crossplane.io/v1beta1
-        kind: Resources
-        resources:
-          - name: bucket
-            base:
-              apiVersion: s3.aws.upbound.io/v1beta1
-              kind: Bucket
-              spec:
-                forProvider:
-                  region: us-east-1
     - step: run-starlark
       functionRef:
         name: function-starlark
@@ -30,5 +16,111 @@ spec:
         kind: StarlarkInput
         spec:
           source: |
-            # Phase 1: passthrough script - just validates input parsing
-            pass
+            # Realistic 10-resource composition exercising all builtins.
+            #
+            # Globals available: oxr, dxr, observed, context, environment,
+            #   get, Resource, set_condition, emit_event, fatal,
+            #   set_connection_details, require_resource, require_resources
+            #
+            # Note: context read/write is verified in unit tests (fn_test.go
+            # ContextReadWrite) but omitted here because crossplane render
+            # does not support context propagation between pipeline steps.
+
+            # --- Safe nested access via get() with defaults ---
+            region = get(oxr, "spec.region", "us-east-1")
+            env = get(oxr, "spec.environment", "dev")
+            xr_name = get(oxr, "metadata.name", "unknown")
+
+            # --- Conditional resource creation (prod-only monitoring) ---
+            if env == "prod":
+                Resource("monitoring-dashboard", {
+                    "apiVersion": "monitoring.example.io/v1",
+                    "kind": "Dashboard",
+                    "metadata": {
+                        "name": "%s-dashboard" % xr_name,
+                        "labels": {
+                            "app.kubernetes.io/managed-by": "function-starlark",
+                            "environment": env,
+                        },
+                    },
+                    "spec": {
+                        "forProvider": {
+                            "region": region,
+                            "enabled": True,
+                            "refreshInterval": "30s",
+                        },
+                    },
+                })
+
+            # --- Loop-based resource creation (8 buckets) ---
+            for i in range(8):
+                name = "bucket-%d" % i
+                Resource(name, {
+                    "apiVersion": "s3.aws.upbound.io/v1beta1",
+                    "kind": "Bucket",
+                    "metadata": {
+                        "name": "%s-%s" % (xr_name, name),
+                        "labels": {
+                            "app.kubernetes.io/managed-by": "function-starlark",
+                            "environment": env,
+                            "index": str(i),
+                        },
+                    },
+                    "spec": {
+                        "forProvider": {
+                            "region": region,
+                            "tags": {
+                                "Environment": env,
+                                "Index": str(i),
+                                "ManagedBy": "crossplane",
+                            },
+                        },
+                    },
+                })
+
+            # --- Notification resource (always created) ---
+            Resource("notification-topic", {
+                "apiVersion": "sns.aws.upbound.io/v1beta1",
+                "kind": "Topic",
+                "metadata": {
+                    "name": "%s-notifications" % xr_name,
+                    "labels": {
+                        "app.kubernetes.io/managed-by": "function-starlark",
+                        "environment": env,
+                    },
+                },
+                "spec": {
+                    "forProvider": {
+                        "region": region,
+                        "displayName": "Bucket notifications for %s" % xr_name,
+                    },
+                },
+            })
+
+            # --- XR-level connection details ---
+            set_connection_details({
+                "region": region,
+                "bucketCount": str(8),
+                "notificationTopic": "%s-notifications" % xr_name,
+            })
+
+            # --- Conditions: set Ready status ---
+            set_condition(
+                type="Ready",
+                status="True",
+                reason="Available",
+                message="All %d resources created in %s" % (10, region),
+            )
+
+            # --- Events: emit creation summary ---
+            emit_event(
+                severity="Normal",
+                message="Created 8 buckets + 1 notification topic + 1 dashboard in %s (%s)" % (region, env),
+            )
+
+            # --- DXR status update ---
+            dxr["status"] = {
+                "bucketCount": 8,
+                "region": region,
+                "environment": env,
+            }

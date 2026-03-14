@@ -1,0 +1,119 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbuckets.example.crossplane.io
+  annotations:
+    purpose: "KCL equivalent of the Starlark composition for migration comparison"
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: run-kcl
+      functionRef:
+        name: function-kcl
+      input:
+        apiVersion: krm.kcl.dev/v1alpha1
+        kind: KCLInput
+        spec:
+          source: |
+            # KCL equivalent of the Starlark 10-resource composition.
+            # This file is for documentation/comparison purposes only.
+            # It requires function-kcl to be installed and is NOT executed in CI.
+
+            import regex
+
+            # Access the observed composite resource via KCL option()
+            oxr = option("params").oxr
+            dxr = option("params").dxr
+            ocds = option("params").ocds or {}
+
+            # Safe nested access (KCL uses ?. and or for defaults)
+            region = oxr.spec?.region or "us-east-1"
+            env = oxr.spec?.environment or "dev"
+            xr_name = oxr.metadata?.name or "unknown"
+
+            # Conditional resource creation (prod-only monitoring)
+            _monitoring = [
+                {
+                    apiVersion = "monitoring.example.io/v1"
+                    kind = "Dashboard"
+                    metadata = {
+                        name = "${xr_name}-dashboard"
+                        labels = {
+                            "app.kubernetes.io/managed-by" = "function-starlark"
+                            environment = env
+                        }
+                        annotations = {
+                            "krm.kcl.dev/composition-resource-name" = "monitoring-dashboard"
+                        }
+                    }
+                    spec.forProvider = {
+                        region = region
+                        enabled = True
+                        refreshInterval = "30s"
+                    }
+                }
+            ] if env == "prod" else []
+
+            # Loop-based resource creation (8 buckets)
+            _buckets = [
+                {
+                    apiVersion = "s3.aws.upbound.io/v1beta1"
+                    kind = "Bucket"
+                    metadata = {
+                        name = "${xr_name}-bucket-${i}"
+                        labels = {
+                            "app.kubernetes.io/managed-by" = "function-starlark"
+                            environment = env
+                            index = str(i)
+                        }
+                        annotations = {
+                            "krm.kcl.dev/composition-resource-name" = "bucket-${i}"
+                        }
+                    }
+                    spec.forProvider = {
+                        region = region
+                        tags = {
+                            Environment = env
+                            Index = str(i)
+                            ManagedBy = "crossplane"
+                        }
+                    }
+                }
+                for i in range(8)
+            ]
+
+            # Notification resource (always created)
+            _notification = [
+                {
+                    apiVersion = "sns.aws.upbound.io/v1beta1"
+                    kind = "Topic"
+                    metadata = {
+                        name = "${xr_name}-notifications"
+                        labels = {
+                            "app.kubernetes.io/managed-by" = "function-starlark"
+                            environment = env
+                        }
+                        annotations = {
+                            "krm.kcl.dev/composition-resource-name" = "notification-topic"
+                        }
+                    }
+                    spec.forProvider = {
+                        region = region
+                        displayName = "Bucket notifications for ${xr_name}"
+                    }
+                }
+            ]
+
+            # DXR status update
+            _dxr = {
+                **dxr
+                status.bucketCount = 8
+                status.region = region
+                status.environment = env
+            }
+
+            # Assemble items list (KCL pattern for desired resources)
+            items = _monitoring + _buckets + _notification + [_dxr]

@@ -1,0 +1,289 @@
+---
+apiVersion: example.crossplane.io/v1
+kind: XBucket
+metadata:
+  name: example-xr
+status:
+  bucketCount: 8
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: Available
+    status: "True"
+    type: Ready
+  environment: prod
+  region: us-east-1
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-0
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "0"
+  name: example-xr-bucket-0
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "0"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-1
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "1"
+  name: example-xr-bucket-1
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "1"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-2
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "2"
+  name: example-xr-bucket-2
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "2"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-3
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "3"
+  name: example-xr-bucket-3
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "3"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-4
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "4"
+  name: example-xr-bucket-4
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "4"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-5
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "5"
+  name: example-xr-bucket-5
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "5"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-6
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "6"
+  name: example-xr-bucket-6
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "6"
+      ManagedBy: crossplane
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: bucket-7
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    index: "7"
+  name: example-xr-bucket-7
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    region: us-east-1
+    tags:
+      Environment: prod
+      Index: "7"
+      ManagedBy: crossplane
+---
+apiVersion: monitoring.example.io/v1
+kind: Dashboard
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: monitoring-dashboard
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+  name: example-xr-dashboard
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    enabled: true
+    refreshInterval: 30s
+    region: us-east-1
+---
+apiVersion: sns.aws.upbound.io/v1beta1
+kind: Topic
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: notification-topic
+  generateName: example-xr-
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+  name: example-xr-notifications
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    displayName: Bucket notifications for example-xr
+    region: us-east-1
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)
+severity: SEVERITY_NORMAL
+step: run-starlark
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'function-starlark: executed successfully'
+severity: SEVERITY_NORMAL
+step: run-starlark

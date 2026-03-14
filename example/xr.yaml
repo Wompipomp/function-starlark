@@ -4,3 +4,4 @@ metadata:
   name: example-xr
 spec:
   region: us-east-1
+  environment: prod
