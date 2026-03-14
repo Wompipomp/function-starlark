@@ -103,6 +103,25 @@ func listValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlark.Lis
 	return list, nil
 }
 
+// PlainDictToStruct converts a plain *starlark.Dict (as produced by dict
+// literals in Starlark scripts) to a protobuf Struct. It rejects non-string
+// keys and handles nested dicts recursively via starlarkToProtoValue.
+func PlainDictToStruct(d *starlark.Dict) (*structpb.Struct, error) {
+	fields := make(map[string]*structpb.Value, d.Len())
+	for _, item := range d.Items() {
+		k, ok := item[0].(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("dict key %v (%T) is not a string", item[0], item[0])
+		}
+		pv, err := starlarkToProtoValue(item[1])
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", string(k), err)
+		}
+		fields[string(k)] = pv
+	}
+	return &structpb.Struct{Fields: fields}, nil
+}
+
 // StarlarkToStruct converts a StarlarkDict back to a protobuf Struct.
 func StarlarkToStruct(d *StarlarkDict) (*structpb.Struct, error) {
 	fields := make(map[string]*structpb.Value, d.Len())
@@ -152,6 +171,12 @@ func starlarkToProtoValue(v starlark.Value) (*structpb.Value, error) {
 		return structpb.NewStringValue(string(v)), nil
 	case *StarlarkDict:
 		s, err := StarlarkToStruct(v)
+		if err != nil {
+			return nil, err
+		}
+		return structpb.NewStructValue(s), nil
+	case *starlark.Dict:
+		s, err := PlainDictToStruct(v)
 		if err != nil {
 			return nil, err
 		}
