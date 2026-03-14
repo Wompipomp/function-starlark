@@ -49,9 +49,17 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 
 	log.Info("Parsed StarlarkInput", "source-length", len(in.Spec.Source))
 
-	// Resolve script source: inline takes precedence over ConfigMap.
+	// Resolve script source and filename.
+	// Inline scripts use "composition.star"; ConfigMap scripts use the real key.
 	source := in.Spec.Source
+	filename := "composition.star"
 	if source == "" && in.Spec.ScriptConfigRef != nil {
+		key := in.Spec.ScriptConfigRef.Key
+		if key == "" {
+			key = "main.star"
+		}
+		filename = key
+
 		var err error
 		source, err = f.loadScript(in.Spec.ScriptConfigRef)
 		if err != nil {
@@ -85,7 +93,7 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 			return rsp, nil
 		}
 
-		_, err = f.runtime.Execute(source, globals)
+		_, err = f.runtime.Execute(source, globals, filename)
 		if err != nil {
 			// Check for FatalError from fatal() builtin before generic error handling.
 			var fatalErr *builtins.FatalError

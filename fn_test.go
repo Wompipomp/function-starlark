@@ -217,7 +217,6 @@ func TestRunFunction(t *testing.T) {
 						"spec": {
 							"scriptConfigRef": {
 								"name": "my-script",
-								"namespace": "default",
 								"key": "main.star"
 							}
 						}
@@ -233,7 +232,6 @@ func TestRunFunction(t *testing.T) {
 							"spec": {
 								"scriptConfigRef": {
 									"name": "my-script",
-									"namespace": "default",
 									"key": "main.star"
 								}
 							}
@@ -1202,7 +1200,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					// Execute via runtime to get the exact error.
-					_, err := rt.Execute("x = (", starlark.StringDict{})
+					_, err := rt.Execute("x = (", starlark.StringDict{}, "composition.star")
 					response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
 					return rsp
 				}(),
@@ -1234,7 +1232,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					// Execute via runtime to get the exact error.
-					_, err := rt.Execute("x = {}['missing_key']", starlark.StringDict{})
+					_, err := rt.Execute("x = {}['missing_key']", starlark.StringDict{}, "composition.star")
 					response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
 					return rsp
 				}(),
@@ -1266,7 +1264,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					// Execute via runtime to get the exact error.
-					_, err := rt.Execute("while True: pass", starlark.StringDict{})
+					_, err := rt.Execute("while True: pass", starlark.StringDict{}, "composition.star")
 					response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
 					return rsp
 				}(),
