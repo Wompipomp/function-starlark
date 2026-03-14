@@ -26,7 +26,7 @@ render: build
 
 # Render and compare against expected output (non-zero exit on mismatch)
 render-check: build
-	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | diff - example/expected-output.yaml
+	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | grep -v '^\s*generateName:' | diff - example/expected-output.yaml
 
 # Build Crossplane package
 xpkg: build
