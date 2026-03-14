@@ -1010,6 +1010,187 @@ func TestRoundTrip_InfValues(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// PlainDictToStruct tests
+// ---------------------------------------------------------------------------
+
+func TestPlainDictToStruct_Empty(t *testing.T) {
+	d := new(starlark.Dict)
+	s, err := PlainDictToStruct(d)
+	if err != nil {
+		t.Fatalf("PlainDictToStruct(empty) error: %v", err)
+	}
+	if len(s.GetFields()) != 0 {
+		t.Errorf("fields = %d, want 0", len(s.GetFields()))
+	}
+}
+
+func TestPlainDictToStruct_FlatDict(t *testing.T) {
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("name"), starlark.String("web"))
+	_ = d.SetKey(starlark.String("replicas"), starlark.MakeInt(3))
+	_ = d.SetKey(starlark.String("enabled"), starlark.True)
+	_ = d.SetKey(starlark.String("empty"), starlark.None)
+
+	s, err := PlainDictToStruct(d)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	fields := s.GetFields()
+	if len(fields) != 4 {
+		t.Errorf("fields = %d, want 4", len(fields))
+	}
+	// Check string
+	if sv, ok := fields["name"].GetKind().(*structpb.Value_StringValue); !ok || sv.StringValue != "web" {
+		t.Errorf("name = %v, want 'web'", fields["name"])
+	}
+	// Check int (stored as number)
+	if nv, ok := fields["replicas"].GetKind().(*structpb.Value_NumberValue); !ok || nv.NumberValue != 3.0 {
+		t.Errorf("replicas = %v, want 3.0", fields["replicas"])
+	}
+	// Check bool
+	if bv, ok := fields["enabled"].GetKind().(*structpb.Value_BoolValue); !ok || !bv.BoolValue {
+		t.Errorf("enabled = %v, want true", fields["enabled"])
+	}
+	// Check None -> null
+	if _, ok := fields["empty"].GetKind().(*structpb.Value_NullValue); !ok {
+		t.Errorf("empty = %v, want null", fields["empty"])
+	}
+}
+
+func TestPlainDictToStruct_NestedDict(t *testing.T) {
+	// 3 levels: {"metadata": {"labels": {"app": "web"}}}
+	inner := new(starlark.Dict)
+	_ = inner.SetKey(starlark.String("app"), starlark.String("web"))
+
+	mid := new(starlark.Dict)
+	_ = mid.SetKey(starlark.String("labels"), inner)
+
+	outer := new(starlark.Dict)
+	_ = outer.SetKey(starlark.String("metadata"), mid)
+
+	s, err := PlainDictToStruct(outer)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// Navigate to inner
+	metaVal, ok := s.GetFields()["metadata"].GetKind().(*structpb.Value_StructValue)
+	if !ok {
+		t.Fatalf("metadata kind = %T, want StructValue", s.GetFields()["metadata"].GetKind())
+	}
+	labelsVal, ok := metaVal.StructValue.GetFields()["labels"].GetKind().(*structpb.Value_StructValue)
+	if !ok {
+		t.Fatalf("labels kind = %T, want StructValue", metaVal.StructValue.GetFields()["labels"].GetKind())
+	}
+	appVal, ok := labelsVal.StructValue.GetFields()["app"].GetKind().(*structpb.Value_StringValue)
+	if !ok {
+		t.Fatalf("app kind = %T, want StringValue", labelsVal.StructValue.GetFields()["app"].GetKind())
+	}
+	if appVal.StringValue != "web" {
+		t.Errorf("app = %q, want 'web'", appVal.StringValue)
+	}
+}
+
+func TestPlainDictToStruct_NonStringKey(t *testing.T) {
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.MakeInt(42), starlark.String("val"))
+
+	_, err := PlainDictToStruct(d)
+	if err == nil {
+		t.Fatal("PlainDictToStruct with non-string key should return error")
+	}
+	if !strings.Contains(err.Error(), "not a string") {
+		t.Errorf("error %q should contain 'not a string'", err.Error())
+	}
+}
+
+func TestPlainDictToStruct_WithList(t *testing.T) {
+	list := starlark.NewList([]starlark.Value{
+		starlark.MakeInt(1),
+		starlark.MakeInt(2),
+		starlark.MakeInt(3),
+	})
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("items"), list)
+
+	s, err := PlainDictToStruct(d)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	lv, ok := s.GetFields()["items"].GetKind().(*structpb.Value_ListValue)
+	if !ok {
+		t.Fatalf("items kind = %T, want ListValue", s.GetFields()["items"].GetKind())
+	}
+	if len(lv.ListValue.GetValues()) != 3 {
+		t.Errorf("items len = %d, want 3", len(lv.ListValue.GetValues()))
+	}
+}
+
+func TestStarlarkToProtoValue_PlainDict(t *testing.T) {
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("key"), starlark.String("value"))
+
+	pv, err := starlarkToProtoValue(d)
+	if err != nil {
+		t.Fatalf("starlarkToProtoValue(*starlark.Dict) error: %v", err)
+	}
+	sv, ok := pv.GetKind().(*structpb.Value_StructValue)
+	if !ok {
+		t.Fatalf("kind = %T, want StructValue", pv.GetKind())
+	}
+	if sv.StructValue.GetFields()["key"].GetStringValue() != "value" {
+		t.Errorf("key = %q, want 'value'", sv.StructValue.GetFields()["key"].GetStringValue())
+	}
+}
+
+func TestPlainDictToStruct_RoundTrip(t *testing.T) {
+	// plain dict -> PlainDictToStruct -> StructToStarlark produces equivalent data
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = d.SetKey(starlark.String("replicas"), starlark.MakeInt(3))
+	_ = d.SetKey(starlark.String("enabled"), starlark.True)
+
+	s, err := PlainDictToStruct(d)
+	if err != nil {
+		t.Fatalf("PlainDictToStruct error: %v", err)
+	}
+
+	sd, err := StructToStarlark(s, false)
+	if err != nil {
+		t.Fatalf("StructToStarlark error: %v", err)
+	}
+
+	// Verify values are equivalent
+	apiVal, err := sd.Attr("apiVersion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if apiVal != starlark.String("v1") {
+		t.Errorf("apiVersion = %v, want 'v1'", apiVal)
+	}
+
+	replVal, err := sd.Attr("replicas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ri, ok := replVal.(starlark.Int)
+	if !ok {
+		t.Fatalf("replicas = %T, want starlark.Int", replVal)
+	}
+	got, _ := ri.Int64()
+	if got != 3 {
+		t.Errorf("replicas = %d, want 3", got)
+	}
+
+	enabledVal, err := sd.Attr("enabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabledVal != starlark.True {
+		t.Errorf("enabled = %v, want True", enabledVal)
+	}
+}
+
 func TestStructToStarlark_FrozenNilStruct(t *testing.T) {
 	d, err := StructToStarlark(nil, true)
 	if err != nil {
