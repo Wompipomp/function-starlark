@@ -13,6 +13,12 @@ import (
 
 // helpers to build requests/responses
 
+// testBuildGlobals wraps BuildGlobals with default (empty) extended collectors
+// so that existing tests don't need to construct them.
+func testBuildGlobals(req *fnv1.RunFunctionRequest, c *Collector) (starlark.StringDict, error) {
+	return BuildGlobals(req, c, NewConditionCollector(), NewConnectionCollector(), NewRequirementsCollector())
+}
+
 func makeReq(oxrFields, dxrFields map[string]*structpb.Value, observed map[string]*fnv1.Resource) *fnv1.RunFunctionRequest {
 	req := &fnv1.RunFunctionRequest{}
 
@@ -51,12 +57,17 @@ func TestBuildGlobals_Keys(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("BuildGlobals error: %v", err)
 	}
 
-	expected := []string{"oxr", "dxr", "observed", "Resource", "get"}
+	expected := []string{
+		"oxr", "dxr", "observed", "Resource", "get",
+		"context", "environment", "extra_resources",
+		"set_condition", "emit_event", "fatal",
+		"set_connection_details", "require_resource", "require_resources",
+	}
 	if len(globals) != len(expected) {
 		t.Errorf("len(globals) = %d, want %d", len(globals), len(expected))
 	}
@@ -75,7 +86,7 @@ func TestBuildGlobals_OXR_Frozen(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +128,7 @@ func TestBuildGlobals_OXR_Fields(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +171,7 @@ func TestBuildGlobals_DXR_Mutable(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +196,7 @@ func TestBuildGlobals_DXR_NilDesired(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +240,7 @@ func TestBuildGlobals_Observed(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +282,7 @@ func TestBuildGlobals_Observed_Empty(t *testing.T) {
 	)
 	c := NewCollector()
 
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +323,7 @@ func TestGetBuiltin_DotPath(t *testing.T) {
 		nil,
 	)
 	c := NewCollector()
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +352,7 @@ func TestGetBuiltin_MissingReturnsDefault(t *testing.T) {
 		nil,
 	)
 	c := NewCollector()
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +377,7 @@ func TestGetBuiltin_CustomDefault(t *testing.T) {
 		nil,
 	)
 	c := NewCollector()
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +414,7 @@ func TestGetBuiltin_ListPath(t *testing.T) {
 		nil,
 	)
 	c := NewCollector()
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,7 +760,7 @@ func TestGetBuiltin_NoneIntermediate(t *testing.T) {
 		nil,
 	)
 	c := NewCollector()
-	globals, err := BuildGlobals(req, c)
+	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
 	}

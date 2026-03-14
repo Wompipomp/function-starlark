@@ -12,13 +12,28 @@ import (
 )
 
 // BuildGlobals constructs the predeclared Starlark globals from a
-// RunFunctionRequest and a Collector. It returns a StringDict containing:
+// RunFunctionRequest and all collectors. It returns a StringDict containing:
 //   - oxr: frozen StarlarkDict of the observed composite resource
 //   - dxr: mutable StarlarkDict of the desired composite resource
 //   - observed: frozen StarlarkDict of frozen StarlarkDicts keyed by resource name
+//   - context: mutable plain starlark.Dict of pipeline context
+//   - environment: frozen StarlarkDict of EnvironmentConfig data
+//   - extra_resources: frozen plain starlark.Dict of extra/required resources
 //   - Resource: the collector's builtin for producing desired composed resources
 //   - get: utility builtin for safe nested dict access
-func BuildGlobals(req *fnv1.RunFunctionRequest, collector *Collector) (starlark.StringDict, error) {
+//   - set_condition: builtin for setting XR conditions
+//   - emit_event: builtin for emitting Normal/Warning events
+//   - fatal: builtin for halting execution with a fatal error
+//   - set_connection_details: builtin for setting XR-level connection details
+//   - require_resource: builtin for requesting a single extra resource
+//   - require_resources: builtin for requesting multiple extra resources
+func BuildGlobals(
+	req *fnv1.RunFunctionRequest,
+	collector *Collector,
+	condCollector *ConditionCollector,
+	connCollector *ConnectionCollector,
+	reqCollector *RequirementsCollector,
+) (starlark.StringDict, error) {
 	// Build oxr (frozen) from observed composite.
 	oxr, err := convert.StructToStarlark(req.GetObserved().GetComposite().GetResource(), true)
 	if err != nil {
@@ -37,12 +52,39 @@ func BuildGlobals(req *fnv1.RunFunctionRequest, collector *Collector) (starlark.
 		return nil, fmt.Errorf("building observed: %w", err)
 	}
 
+	// Build pipeline context (mutable plain dict).
+	ctxDict, err := buildContextDict(req)
+	if err != nil {
+		return nil, fmt.Errorf("building context: %w", err)
+	}
+
+	// Build environment (frozen StarlarkDict from well-known context key).
+	envDict, err := buildEnvironmentDict(req)
+	if err != nil {
+		return nil, fmt.Errorf("building environment: %w", err)
+	}
+
+	// Build extra resources (frozen plain dict).
+	extraRes, err := buildExtraResourcesDict(req)
+	if err != nil {
+		return nil, fmt.Errorf("building extra_resources: %w", err)
+	}
+
 	return starlark.StringDict{
-		"oxr":      oxr,
-		"dxr":      dxr,
-		"observed": observed,
-		"Resource": collector.Builtin(),
-		"get":      starlark.NewBuiltin("get", getFnImpl),
+		"oxr":                    oxr,
+		"dxr":                    dxr,
+		"observed":               observed,
+		"context":                ctxDict,
+		"environment":            envDict,
+		"extra_resources":        extraRes,
+		"Resource":               collector.Builtin(),
+		"get":                    starlark.NewBuiltin("get", getFnImpl),
+		"set_condition":          condCollector.SetConditionBuiltin(),
+		"emit_event":             condCollector.EmitEventBuiltin(),
+		"fatal":                  condCollector.FatalBuiltin(),
+		"set_connection_details": connCollector.SetConnectionDetailsBuiltin(),
+		"require_resource":       reqCollector.RequireResourceBuiltin(),
+		"require_resources":      reqCollector.RequireResourcesBuiltin(),
 	}, nil
 }
 

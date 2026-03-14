@@ -16,6 +16,7 @@ import (
 	"github.com/crossplane/function-sdk-go/resource"
 	"github.com/crossplane/function-sdk-go/response"
 	"go.starlark.net/starlark"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/runtime"
 )
@@ -64,6 +65,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					// ApplyDXR always sets desired composite (empty when no observed composite).
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
@@ -160,6 +162,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					return rsp
 				}(),
 			},
@@ -190,6 +193,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -200,7 +204,7 @@ func TestRunFunction(t *testing.T) {
 			},
 		},
 		"ScriptConfigRefOnly": {
-			reason: "The function should accept scriptConfigRef as an alternative to inline source.",
+			reason: "The function should return Fatal when scriptConfigRef points to a missing ConfigMap file.",
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
@@ -232,7 +236,10 @@ func TestRunFunction(t *testing.T) {
 							}
 						}`),
 					}, response.DefaultTTL)
-					response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
+					response.Fatal(rsp, errors.Errorf(
+						"loading script from ConfigMap: script file %q not found; ensure the ConfigMap %q is mounted via DeploymentRuntimeConfig",
+						"/scripts/my-script/main.star", "my-script",
+					))
 					return rsp
 				}(),
 			},
@@ -263,6 +270,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -298,6 +306,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -368,6 +377,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					return rsp
 				}(),
 			},
@@ -402,6 +412,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -480,6 +491,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -566,6 +578,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -623,6 +636,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{
@@ -682,6 +696,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					// ApplyDXR sets the desired composite from the dxr (built from desired composite in request).
 					rsp.Desired.Composite.Resource = resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XBucket"}`)
 					// ApplyResources adds new resources, preserving existing ones.
@@ -741,6 +756,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -782,6 +798,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -831,6 +848,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -872,6 +890,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -935,6 +954,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -998,6 +1018,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					// No resources created, but ApplyDXR still sets empty desired composite.
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
@@ -1044,6 +1065,7 @@ func TestRunFunction(t *testing.T) {
 						},
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -1085,6 +1107,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),
@@ -1134,6 +1157,7 @@ func TestRunFunction(t *testing.T) {
 						}`),
 					}, response.DefaultTTL)
 					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
 					rsp.Desired = &fnv1.State{
 						Composite: &fnv1.Resource{
 							Resource: resource.MustStructJSON(`{}`),

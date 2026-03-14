@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/crossplane/function-sdk-go/errors"
 	"github.com/crossplane/function-sdk-go/logging"
@@ -17,8 +20,9 @@ import (
 // Function implements the Crossplane composition function.
 type Function struct {
 	fnv1.UnimplementedFunctionRunnerServiceServer
-	log     logging.Logger
-	runtime *runtime.Runtime
+	log       logging.Logger
+	runtime   *runtime.Runtime
+	scriptDir string // base directory for ConfigMap-mounted scripts (default "/scripts")
 }
 
 // RunFunction processes a RunFunctionRequest.
@@ -45,18 +49,55 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 
 	log.Info("Parsed StarlarkInput", "source-length", len(in.Spec.Source))
 
-	// Execute the Starlark script if inline source is provided.
-	// When only scriptConfigRef is set, skip execution (Phase 5 handles ConfigMap loading).
-	if in.Spec.Source != "" {
+	// Resolve script source: inline takes precedence over ConfigMap.
+	source := in.Spec.Source
+	if source == "" && in.Spec.ScriptConfigRef != nil {
+		var err error
+		source, err = f.loadScript(in.Spec.ScriptConfigRef)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "loading script from ConfigMap"))
+			return rsp, nil
+		}
+	}
+
+	if source != "" {
+		// Capability detection logging (transparent -- does not prevent execution).
+		if !request.AdvertisesCapabilities(req) {
+			log.Debug("Crossplane does not advertise capabilities")
+		} else {
+			if !request.HasCapability(req, fnv1.Capability_CAPABILITY_CONDITIONS) {
+				log.Debug("Crossplane does not support conditions")
+			}
+			if !request.HasCapability(req, fnv1.Capability_CAPABILITY_REQUIRED_RESOURCES) {
+				log.Debug("Crossplane does not support required resources")
+			}
+		}
+
+		// Create all collectors for this execution.
 		collector := builtins.NewCollector()
-		globals, err := builtins.BuildGlobals(req, collector)
+		condCollector := builtins.NewConditionCollector()
+		connCollector := builtins.NewConnectionCollector()
+		reqCollector := builtins.NewRequirementsCollector()
+
+		globals, err := builtins.BuildGlobals(req, collector, condCollector, connCollector, reqCollector)
 		if err != nil {
 			response.Fatal(rsp, errors.Wrapf(err, "building Starlark globals"))
 			return rsp, nil
 		}
 
-		_, err = f.runtime.Execute(in.Spec.Source, globals)
+		_, err = f.runtime.Execute(source, globals)
 		if err != nil {
+			// Check for FatalError from fatal() builtin before generic error handling.
+			var fatalErr *builtins.FatalError
+			if errors.As(err, &fatalErr) {
+				response.Fatal(rsp, errors.New(fatalErr.Message))
+				// Still apply conditions/events/requirements collected before fatal().
+				// These are useful diagnostics even though execution was halted.
+				builtins.ApplyConditions(rsp, condCollector.Conditions())
+				builtins.ApplyEvents(rsp, condCollector.Events())
+				builtins.ApplyRequirements(rsp, reqCollector.Requirements())
+				return rsp, nil
+			}
 			response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
 			return rsp, nil
 		}
@@ -68,12 +109,28 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		}
 
 		// Apply dxr status changes to response desired composite.
-		// dxr is a predeclared global (mutable StarlarkDict), so scripts
-		// mutate it in-place. We read it back from the globals dict.
 		if err := builtins.ApplyDXR(rsp, globals["dxr"]); err != nil {
 			response.Fatal(rsp, errors.Wrapf(err, "applying dxr status"))
 			return rsp, nil
 		}
+
+		// Apply pipeline context changes.
+		if err := builtins.ApplyContext(rsp, globals["context"]); err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "applying context"))
+			return rsp, nil
+		}
+
+		// Apply XR-level connection details.
+		builtins.ApplyConnectionDetails(rsp, connCollector.ConnectionDetails())
+
+		// Apply conditions.
+		builtins.ApplyConditions(rsp, condCollector.Conditions())
+
+		// Apply events.
+		builtins.ApplyEvents(rsp, condCollector.Events())
+
+		// Apply requirements.
+		builtins.ApplyRequirements(rsp, reqCollector.Requirements())
 
 		response.Normal(rsp, "function-starlark: executed successfully")
 	} else {
@@ -81,4 +138,31 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	}
 
 	return rsp, nil
+}
+
+// loadScript reads a Starlark script from a ConfigMap volume mount.
+// The ConfigMap is expected to be mounted at {f.scriptDir}/{ref.Name}/{key}.
+func (f *Function) loadScript(ref *v1alpha1.ScriptConfigRef) (string, error) {
+	key := ref.Key
+	if key == "" {
+		key = "main.star"
+	}
+
+	dir := f.scriptDir
+	if dir == "" {
+		dir = "/scripts"
+	}
+
+	path := filepath.Join(dir, ref.Name, key)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(
+				"script file %q not found; ensure the ConfigMap %q is mounted via DeploymentRuntimeConfig",
+				path, ref.Name,
+			)
+		}
+		return "", fmt.Errorf("reading script file %q: %w", path, err)
+	}
+	return string(data), nil
 }

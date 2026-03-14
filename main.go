@@ -28,7 +28,7 @@ func (c *CLI) Run() error {
 
 	rt := runtime.NewRuntime(log)
 
-	return function.Serve(&Function{log: log, runtime: rt},
+	return function.Serve(&Function{log: log, runtime: rt, scriptDir: "/scripts"},
 		function.Listen(c.Network, c.Address),
 		function.MTLSCertificates(c.TLSCertsDir),
 		function.Insecure(c.Insecure),
