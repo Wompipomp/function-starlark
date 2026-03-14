@@ -13,10 +13,9 @@ linters:
     - gosec
     - gocritic
     - misspell
+  exclusions:
+    generated: strict
 
 formatters:
   enable:
     - goimports
-
-issues:
-  exclude-generated: strict

@@ -35,10 +35,6 @@ type ScriptConfigRef struct {
 	// Name is the name of the ConfigMap.
 	Name string `json:"name"`
 
-	// Namespace is the namespace of the ConfigMap.
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-
 	// Key is the key within the ConfigMap data that holds the script.
 	// Defaults to "main.star".
 	// +optional

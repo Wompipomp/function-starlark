@@ -55,9 +55,6 @@ spec:
                   name:
                     description: Name is the name of the ConfigMap.
                     type: string
-                  namespace:
-                    description: Namespace is the namespace of the ConfigMap.
-                    type: string
                 required:
                 - name
                 type: object

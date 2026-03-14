@@ -291,6 +291,37 @@ func TestApplyContext_PreservesKeys(t *testing.T) {
 	}
 }
 
+func TestApplyContext_MergesWithExisting(t *testing.T) {
+	// Keys in rsp.Context that are NOT in the Starlark dict should be preserved.
+	rsp := &fnv1.RunFunctionResponse{
+		Context: &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"from-previous": structpb.NewStringValue("kept"),
+				"shared":        structpb.NewStringValue("old"),
+			},
+		},
+	}
+
+	d := new(starlark.Dict)
+	_ = d.SetKey(starlark.String("shared"), starlark.String("new"))
+	_ = d.SetKey(starlark.String("added"), starlark.String("fresh"))
+
+	if err := ApplyContext(rsp, d); err != nil {
+		t.Fatalf("ApplyContext error: %v", err)
+	}
+
+	fields := rsp.Context.GetFields()
+	if fields["from-previous"].GetStringValue() != "kept" {
+		t.Error("key only in existing context should be preserved")
+	}
+	if fields["shared"].GetStringValue() != "new" {
+		t.Error("shared key should be overwritten by Starlark dict")
+	}
+	if fields["added"].GetStringValue() != "fresh" {
+		t.Error("new key from Starlark dict should be added")
+	}
+}
+
 func TestApplyContext_WrongType(t *testing.T) {
 	// ApplyContext should reject non-*starlark.Dict values
 	sd := convert.NewStarlarkDict(0)

@@ -59,9 +59,10 @@ func buildEnvironmentDict(req *fnv1.RunFunctionRequest) (*convert.StarlarkDict, 
 }
 
 // ApplyContext converts the mutable context *starlark.Dict back to a protobuf
-// Struct and sets it on the response. This replaces rsp.Context entirely
-// (the dict was initialized from the request context, so unmodified keys are
-// already present).
+// Struct and merges it into the existing rsp.Context. Keys present in the
+// Starlark dict overwrite existing keys; keys only in rsp.Context are preserved.
+// This ensures downstream pipeline functions do not lose context keys that
+// this script did not modify.
 func ApplyContext(rsp *fnv1.RunFunctionResponse, ctxVal starlark.Value) error {
 	d, ok := ctxVal.(*starlark.Dict)
 	if !ok {
@@ -73,7 +74,15 @@ func ApplyContext(rsp *fnv1.RunFunctionResponse, ctxVal starlark.Value) error {
 		return fmt.Errorf("converting context: %w", err)
 	}
 
-	rsp.Context = s
+	if rsp.Context == nil {
+		rsp.Context = s
+		return nil
+	}
+
+	// Merge: script keys overwrite existing, existing-only keys preserved.
+	for k, v := range s.GetFields() {
+		rsp.Context.Fields[k] = v
+	}
 	return nil
 }
 

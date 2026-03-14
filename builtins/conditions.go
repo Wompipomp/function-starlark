@@ -184,6 +184,8 @@ func ApplyEvents(rsp *fnv1.RunFunctionResponse, events []CollectedEvent) {
 			opt = response.Normal(rsp, e.Message)
 		case "Warning":
 			opt = response.Warning(rsp, errors.New(e.Message))
+		default:
+			continue
 		}
 		if e.Target == "CompositeAndClaim" {
 			opt.TargetCompositeAndClaim()
