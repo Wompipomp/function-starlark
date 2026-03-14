@@ -8,8 +8,8 @@ import (
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
-	"go.starlark.net/starlark"
 
+	"github.com/wompipomp/function-starlark/builtins"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
 	"github.com/wompipomp/function-starlark/runtime"
 )
@@ -48,11 +48,31 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	// Execute the Starlark script if inline source is provided.
 	// When only scriptConfigRef is set, skip execution (Phase 5 handles ConfigMap loading).
 	if in.Spec.Source != "" {
-		_, err := f.runtime.Execute(in.Spec.Source, starlark.StringDict{})
+		collector := builtins.NewCollector()
+		globals, err := builtins.BuildGlobals(req, collector)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "building Starlark globals"))
+			return rsp, nil
+		}
+
+		result, err := f.runtime.Execute(in.Spec.Source, globals)
 		if err != nil {
 			response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
 			return rsp, nil
 		}
+
+		// Apply collected resources to response (merges with prior desired state).
+		if err := builtins.ApplyResources(rsp, collector); err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "applying composed resources"))
+			return rsp, nil
+		}
+
+		// Apply dxr status changes to response desired composite.
+		if err := builtins.ApplyDXR(rsp, result["dxr"]); err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "applying dxr status"))
+			return rsp, nil
+		}
+
 		response.Normal(rsp, "function-starlark: executed successfully")
 	} else {
 		response.Normal(rsp, "function-starlark: input parsed successfully (passthrough mode)")
