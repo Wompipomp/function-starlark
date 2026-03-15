@@ -11,22 +11,26 @@ import (
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
+	"github.com/google/go-containerregistry/pkg/authn"
 
 	"github.com/wompipomp/function-starlark/builtins"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
 	"github.com/wompipomp/function-starlark/runtime"
+	"github.com/wompipomp/function-starlark/runtime/oci"
 )
 
 // Function implements the Crossplane composition function.
 type Function struct {
 	fnv1.UnimplementedFunctionRunnerServiceServer
-	log       logging.Logger
-	runtime   *runtime.Runtime
-	scriptDir string // base directory for ConfigMap-mounted scripts (default "/scripts")
+	log        logging.Logger
+	runtime    *runtime.Runtime
+	scriptDir  string      // base directory for ConfigMap-mounted scripts (default "/scripts")
+	ociCache   *oci.Cache  // shared OCI module cache across reconciliations
+	ociFetcher oci.Fetcher // OCI image fetcher (nil = default RemoteFetcher); injectable for tests
 }
 
 // RunFunction processes a RunFunctionRequest.
-func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
+func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
 	log := f.log.WithValues("tag", req.GetMeta().GetTag())
 	log.Info("Running function")
 
@@ -93,6 +97,45 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 			return rsp, nil
 		}
 
+		// --- OCI Module Resolution Phase (resolve-then-execute) ---
+		// Deep copy inline modules to avoid mutating input across reconciliations.
+		inlineModules := make(map[string]string, len(in.Spec.Modules))
+		for k, v := range in.Spec.Modules {
+			inlineModules[k] = v
+		}
+
+		// Scan for OCI load targets in main script + inline modules.
+		// Parse errors are non-fatal here: if the script has syntax errors,
+		// it will fail later during compilation with a more appropriate message.
+		ociTargets, scanErr := oci.ScanForOCILoads(source, inlineModules)
+		if scanErr != nil {
+			log.Debug("OCI scan skipped due to parse error", "error", scanErr)
+			ociTargets = nil
+		}
+
+		if len(ociTargets) > 0 {
+			// Build keychain from Docker config secret if specified.
+			keychain := buildKeychain(in.Spec.DockerConfigSecret)
+
+			fetcher := f.ociFetcher
+			if fetcher == nil {
+				fetcher = oci.RemoteFetcher{}
+			}
+
+			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log)
+
+			resolvedModules, resolveErr := resolver.Resolve(ctx, ociTargets)
+			if resolveErr != nil {
+				response.Fatal(rsp, errors.Wrapf(resolveErr, "resolving OCI modules"))
+				return rsp, nil
+			}
+
+			// Inject OCI modules into inline map (OCI overrides local per context decision).
+			for name, src := range resolvedModules {
+				inlineModules[name] = src
+			}
+		}
+
 		// Determine script directory for filesystem module resolution.
 		var scriptSearchDir string
 		if in.Spec.ScriptConfigRef != nil {
@@ -110,8 +153,15 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		}
 		searchPaths = append(searchPaths, in.Spec.ModulePaths...)
 
-		// Create module loader with inline modules, search paths, and same builtins.
-		loader := runtime.NewModuleLoader(in.Spec.Modules, searchPaths, globals, f.runtime)
+		// Create module loader with merged inline+OCI modules, search paths, and same builtins.
+		loader := runtime.NewModuleLoader(inlineModules, searchPaths, globals, f.runtime)
+
+		// Expand star imports before execution.
+		source, err = loader.ResolveStarImports(source, filename)
+		if err != nil {
+			response.Fatal(rsp, errors.Wrapf(err, "resolving star imports"))
+			return rsp, nil
+		}
 
 		_, err = f.runtime.Execute(source, globals, filename, loader.LoadFunc())
 		if err != nil {
@@ -210,6 +260,27 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 	}
 
 	return rsp, nil
+}
+
+// buildKeychain creates an authn.Keychain that includes Docker config secret
+// credentials (if specified) and falls back to the default keychain.
+//
+// When dockerConfigSecret is set, it sets DOCKER_CONFIG to the expected mount
+// path so the default keychain picks up the credentials. The secret should be
+// mounted at /var/run/secrets/docker/<secret-name>/ containing a config.json.
+func buildKeychain(dockerConfigSecret string) authn.Keychain {
+	if dockerConfigSecret != "" {
+		// Docker config mounted via DeploymentRuntimeConfig.
+		// Standard mount path: /var/run/secrets/docker/<secret-name>/
+		// The directory should contain a config.json (or .dockerconfigjson
+		// renamed to config.json via the mount spec).
+		configDir := filepath.Join("/var/run/secrets/docker", dockerConfigSecret)
+		if _, statErr := os.Stat(configDir); statErr == nil {
+			// Set DOCKER_CONFIG so authn.DefaultKeychain reads from this path.
+			_ = os.Setenv("DOCKER_CONFIG", configDir) //nolint:errcheck
+		}
+	}
+	return authn.DefaultKeychain
 }
 
 // loadScript reads a Starlark script from a ConfigMap volume mount.

@@ -1,27 +1,36 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
-	"strings"
-	"testing"
-
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
-	"google.golang.org/protobuf/testing/protocmp"
-
 	"os"
 	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 
 	"github.com/crossplane/function-sdk-go/errors"
 	"github.com/crossplane/function-sdk-go/logging"
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/resource"
 	"github.com/crossplane/function-sdk-go/response"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
+	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 	"go.starlark.net/starlark"
+	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/runtime"
+	"github.com/wompipomp/function-starlark/runtime/oci"
 )
 
 func TestRunFunction(t *testing.T) {
@@ -2778,6 +2787,330 @@ Resource("test", {"tag": tag("prod")})`
 			t.Errorf("from = %q, want 'inline' (inline should take priority over filesystem)", from)
 		}
 	})
+}
+
+// ========================
+// E2E tests for OCI loading and star import through RunFunction
+// ========================
+
+// TestRunFunctionOCILoadFromCache verifies that OCI load targets resolved from
+// cache are available to the Starlark script via the inline module map.
+func TestRunFunctionOCILoadFromCache(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Pre-populate cache with a tag -> digest -> content chain.
+	cache.PutContent("sha256:abc123", map[string]string{
+		"helpers.star": `def greet(name): return "oci-hello " + name`,
+	})
+	cache.PutTag("ghcr.io/org/lib:v1", "sha256:abc123")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"oci://ghcr.io/org/lib:v1/helpers.star\", \"greet\")\nResource(\"test\", {\"greeting\": greet(\"world\")})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	greeting := testRes.GetResource().GetFields()["greeting"].GetStringValue()
+	if greeting != "oci-hello world" {
+		t.Errorf("greeting = %q, want 'oci-hello world'", greeting)
+	}
+}
+
+// TestRunFunctionOCIDigestPin verifies that digest-pinned OCI references
+// resolve from the content cache layer.
+func TestRunFunctionOCIDigestPin(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	digest := "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+	cache.PutContent(digest, map[string]string{
+		"pinned.star": `val = "deterministic"`,
+	})
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"oci://ghcr.io/org/lib@sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890/pinned.star\", \"val\")\nResource(\"test\", {\"value\": val})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	value := testRes.GetResource().GetFields()["value"].GetStringValue()
+	if value != "deterministic" {
+		t.Errorf("value = %q, want 'deterministic'", value)
+	}
+}
+
+// TestRunFunctionOCIMissingModule verifies that a script loading from an
+// unreachable OCI registry (cold cache miss) produces a Fatal response.
+func TestRunFunctionOCIMissingModule(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Mock fetcher that returns error.
+	fetcher := &testOCIFetcher{err: fmt.Errorf("connection refused")}
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache, ociFetcher: fetcher}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"oci://ghcr.io/org/lib:v1/helpers.star\", \"fn\")"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "resolving OCI modules", "connection refused")
+}
+
+// TestRunFunctionOCIMediaTypeRejection verifies that an OCI artifact with the
+// wrong media type produces a Fatal response.
+func TestRunFunctionOCIMediaTypeRejection(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Build an image with wrong artifact type.
+	img := buildTestOCIImage(t, map[string]string{
+		"helpers.star": `x = 1`,
+	}, "application/vnd.wrong.type", oci.LayerMediaType)
+
+	fetcher := &testOCIFetcher{
+		images: map[string]v1.Image{
+			"ghcr.io/org/lib:v1": img,
+		},
+	}
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache, ociFetcher: fetcher}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"oci://ghcr.io/org/lib:v1/helpers.star\", \"x\")"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "resolving OCI modules", "artifact type")
+}
+
+// TestRunFunctionStarImport verifies that star import works for inline modules.
+func TestRunFunctionStarImport(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: oci.NewCache(5 * time.Minute)}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"helpers.star\", \"*\")\nResource(\"test\", {\"a_val\": str(a), \"b_val\": str(b)})",
+				"modules": {
+					"helpers.star": "a = 1\nb = 2\n_private = 3"
+				}
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	aVal := testRes.GetResource().GetFields()["a_val"].GetStringValue()
+	bVal := testRes.GetResource().GetFields()["b_val"].GetStringValue()
+	if aVal != "1" {
+		t.Errorf("a_val = %q, want '1'", aVal)
+	}
+	if bVal != "2" {
+		t.Errorf("b_val = %q, want '2'", bVal)
+	}
+}
+
+// TestRunFunctionStarImportOCI verifies that star import works for OCI modules.
+func TestRunFunctionStarImportOCI(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Pre-populate cache with module that has multiple exports.
+	cache.PutContent("sha256:star123", map[string]string{
+		"lib.star": `x = 10
+y = 20
+_hidden = 30`,
+	})
+	cache.PutTag("ghcr.io/org/lib:v1", "sha256:star123")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"oci://ghcr.io/org/lib:v1/lib.star\", \"*\")\nResource(\"test\", {\"sum\": str(x + y)})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	sum := testRes.GetResource().GetFields()["sum"].GetStringValue()
+	if sum != "30" {
+		t.Errorf("sum = %q, want '30' (x+y = 10+20)", sum)
+	}
+}
+
+// TestRunFunctionOCINoTargets verifies that scripts without oci:// loads
+// work normally (no regression).
+func TestRunFunctionOCINoTargets(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+
+	// Providing ociCache ensures the OCI code path is active but not triggered.
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: oci.NewCache(5 * time.Minute)}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "Resource(\"test\", {\"value\": \"no-oci\"})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	value := testRes.GetResource().GetFields()["value"].GetStringValue()
+	if value != "no-oci" {
+		t.Errorf("value = %q, want 'no-oci'", value)
+	}
+}
+
+// testOCIFetcher is a mock OCI fetcher for E2E tests.
+type testOCIFetcher struct {
+	images map[string]v1.Image
+	err    error
+}
+
+func (f *testOCIFetcher) Fetch(ref name.Reference, _ authn.Keychain) (v1.Image, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	img, ok := f.images[ref.String()]
+	if !ok {
+		return nil, fmt.Errorf("image not found: %s", ref.String())
+	}
+	return img, nil
+}
+
+// buildTestOCIImage creates an in-memory OCI image with a tar layer for E2E tests.
+func buildTestOCIImage(t *testing.T, files map[string]string, artifactType, layerType string) v1.Image {
+	t.Helper()
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for name, content := range files {
+		hdr := &tar.Header{
+			Name:     name,
+			Mode:     0o644,
+			Size:     int64(len(content)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("writing tar header for %s: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("writing tar content for %s: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("closing tar writer: %v", err)
+	}
+
+	layer, err := tarball.LayerFromReader(bytes.NewReader(buf.Bytes()), tarball.WithMediaType(types.MediaType(layerType)))
+	if err != nil {
+		t.Fatalf("creating layer: %v", err)
+	}
+
+	img := mutate.MediaType(empty.Image, types.OCIManifestSchema1)
+	img = mutate.ConfigMediaType(img, types.MediaType(artifactType))
+	img, err = mutate.AppendLayers(img, layer)
+	if err != nil {
+		t.Fatalf("appending layer: %v", err)
+	}
+
+	return img
 }
 
 // assertFatalResult verifies the response has a Fatal severity result

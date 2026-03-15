@@ -1,10 +1,13 @@
 package main
 
 import (
+	"time"
+
 	"github.com/alecthomas/kong"
 	"github.com/crossplane/function-sdk-go"
 
 	"github.com/wompipomp/function-starlark/runtime"
+	"github.com/wompipomp/function-starlark/runtime/oci"
 )
 
 // CLI represents the command-line interface for the function.
@@ -27,8 +30,9 @@ func (c *CLI) Run() error {
 	}
 
 	rt := runtime.NewRuntime(log)
+	cache := oci.NewCache(5 * time.Minute)
 
-	return function.Serve(&Function{log: log, runtime: rt, scriptDir: "/scripts"},
+	return function.Serve(&Function{log: log, runtime: rt, scriptDir: "/scripts", ociCache: cache},
 		function.Listen(c.Network, c.Address),
 		function.MTLSCertificates(c.TLSCertsDir),
 		function.Insecure(c.Insecure),

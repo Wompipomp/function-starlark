@@ -216,7 +216,9 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 	opts := fileOptions()
 	f, err := opts.Parse(filename, source, 0)
 	if err != nil {
-		return "", fmt.Errorf("parsing %s for star imports: %w", filename, err)
+		// Parse errors are non-fatal: return source unchanged. The actual
+		// compilation step will produce a proper error message.
+		return source, nil //nolint:nilerr
 	}
 
 	// Collect star import load statements.
