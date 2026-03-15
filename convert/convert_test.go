@@ -1552,6 +1552,108 @@ func TestProtoValueToPlainStarlark_NilListValue(t *testing.T) {
 	}
 }
 
+func TestConvertNumber_ExceedsInt64Range(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   float64
+		wantErr string        // non-empty means expect error containing this
+		wantVal starlark.Value // expected value when no error
+	}{
+		{
+			name:    "exceeds +int64 range",
+			input:   1e19,
+			wantErr: "exceeds int64 range",
+		},
+		{
+			name:    "exceeds -int64 range",
+			input:   -1e19,
+			wantErr: "exceeds int64 range",
+		},
+		{
+			name:    "imprecise zone returns Float",
+			input:   float64(1<<53 + 1),
+			wantVal: starlark.Float(float64(1<<53 + 1)),
+		},
+		{
+			name:    "normal integer",
+			input:   3.0,
+			wantVal: starlark.MakeInt64(3),
+		},
+		{
+			name:    "normal float",
+			input:   3.14,
+			wantVal: starlark.Float(3.14),
+		},
+		{
+			name:    "+Inf returns Float",
+			input:   math.Inf(1),
+			wantVal: starlark.Float(math.Inf(1)),
+		},
+		{
+			name:    "NaN returns Float",
+			input:   math.NaN(),
+			wantVal: starlark.Float(math.NaN()),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := convertNumber(tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("convertNumber(%g) = %v, want error containing %q", tt.input, got, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("convertNumber(%g) error = %q, want error containing %q", tt.input, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("convertNumber(%g) unexpected error: %v", tt.input, err)
+			}
+			// Special handling for NaN comparison (NaN != NaN).
+			if math.IsNaN(tt.input) {
+				f, ok := got.(starlark.Float)
+				if !ok {
+					t.Fatalf("convertNumber(NaN) = %T, want starlark.Float", got)
+				}
+				if !math.IsNaN(float64(f)) {
+					t.Fatalf("convertNumber(NaN) = %v, want NaN", got)
+				}
+				return
+			}
+			if got != tt.wantVal {
+				t.Errorf("convertNumber(%g) = %v (%T), want %v (%T)", tt.input, got, got, tt.wantVal, tt.wantVal)
+			}
+		})
+	}
+}
+
+func TestStructToStarlark_OverflowError(t *testing.T) {
+	s := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"big": structpb.NewNumberValue(1e19),
+		},
+	}
+	_, err := StructToStarlark(s, false)
+	if err == nil {
+		t.Fatal("StructToStarlark with 1e19 should return error")
+	}
+	if !strings.Contains(err.Error(), "exceeds int64 range") {
+		t.Errorf("error = %q, want error containing 'exceeds int64 range'", err)
+	}
+}
+
+func TestProtoValueToPlainStarlark_OverflowError(t *testing.T) {
+	_, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(1e19), false)
+	if err == nil {
+		t.Fatal("ProtoValueToPlainStarlark with 1e19 should return error")
+	}
+	if !strings.Contains(err.Error(), "exceeds int64 range") {
+		t.Errorf("error = %q, want error containing 'exceeds int64 range'", err)
+	}
+}
+
 func TestProtoValueToPlainStarlark_FrozenNestedList(t *testing.T) {
 	// A struct containing a list, both frozen.
 	sv := structpb.NewStructValue(&structpb.Struct{
