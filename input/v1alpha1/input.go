@@ -45,6 +45,16 @@ type StarlarkInputSpec struct {
 	// ConfigMap mount points like "/scripts/shared-lib".
 	// +optional
 	ModulePaths []string `json:"modulePaths,omitempty"`
+
+	// OCICacheTTL configures the TTL for OCI tag-to-digest cache entries.
+	// Parsed as Go duration (e.g. "5m", "1h"). Default: 5m.
+	// +optional
+	OCICacheTTL string `json:"ociCacheTTL,omitempty"`
+
+	// DockerConfigSecret is the name of a Kubernetes Secret containing Docker
+	// registry credentials. The secret should be mounted via DeploymentRuntimeConfig.
+	// +optional
+	DockerConfigSecret string `json:"dockerConfigSecret,omitempty"`
 }
 
 // ScriptConfigRef references a ConfigMap containing a Starlark script.

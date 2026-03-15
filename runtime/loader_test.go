@@ -456,7 +456,9 @@ _private = 3`,
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
 
 	// ResolveStarImports should expand "*" to "x", "y" (not _private).
-	source := `load("m.star", "*")`
+	source := `load("m.star", "*")
+result_x = x
+result_y = y`
 	rewritten, err := loader.ResolveStarImports(source, "test.star")
 	if err != nil {
 		t.Fatalf("ResolveStarImports error: %v", err)
@@ -468,6 +470,7 @@ _private = 3`,
 	}
 
 	// Execute the rewritten source to verify names are bound.
+	// Load bindings aren't in returned globals, so we use them by assigning to new globals.
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 	thread.SetMaxExecutionSteps(maxSteps)
 	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, starlark.StringDict{})
@@ -475,16 +478,13 @@ _private = 3`,
 		t.Fatalf("executing rewritten source: %v", err)
 	}
 
-	xVal, _ := starlark.AsInt32(globals["x"].(starlark.Int))
+	xVal, _ := starlark.AsInt32(globals["result_x"].(starlark.Int))
 	if xVal != 1 {
 		t.Errorf("x = %d, want 1", xVal)
 	}
-	yVal, _ := starlark.AsInt32(globals["y"].(starlark.Int))
+	yVal, _ := starlark.AsInt32(globals["result_y"].(starlark.Int))
 	if yVal != 2 {
 		t.Errorf("y = %d, want 2", yVal)
-	}
-	if _, ok := globals["_private"]; ok {
-		t.Error("_private should not be imported by star import")
 	}
 }
 
@@ -526,7 +526,8 @@ c = 3`,
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
 
 	// load("m.star", "a", "*") -- named "a" plus star for remaining exports.
-	source := `load("m.star", "a", "*")`
+	source := `load("m.star", "a", "*")
+result = a + b + c`
 	rewritten, err := loader.ResolveStarImports(source, "test.star")
 	if err != nil {
 		t.Fatalf("ResolveStarImports error: %v", err)
@@ -543,11 +544,10 @@ c = 3`,
 		t.Fatalf("executing rewritten source: %v", err)
 	}
 
-	// All three should be available.
-	for _, name := range []string{"a", "b", "c"} {
-		if _, ok := globals[name]; !ok {
-			t.Errorf("expected %q in globals after star import", name)
-		}
+	// a + b + c = 1 + 2 + 3 = 6
+	result, _ := starlark.AsInt32(globals["result"].(starlark.Int))
+	if result != 6 {
+		t.Errorf("result = %d, want 6 (a+b+c)", result)
 	}
 }
 
@@ -583,7 +583,8 @@ b = 20`), 0o644); err != nil {
 	rt := NewRuntime(log)
 	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
 
-	source := `load("fs.star", "*")`
+	source := `load("fs.star", "*")
+result = a + b`
 	rewritten, err := loader.ResolveStarImports(source, "test.star")
 	if err != nil {
 		t.Fatalf("ResolveStarImports error: %v", err)
@@ -596,9 +597,9 @@ b = 20`), 0o644); err != nil {
 		t.Fatalf("executing rewritten source: %v", err)
 	}
 
-	aVal, _ := starlark.AsInt32(globals["a"].(starlark.Int))
-	if aVal != 10 {
-		t.Errorf("a = %d, want 10", aVal)
+	result, _ := starlark.AsInt32(globals["result"].(starlark.Int))
+	if result != 30 {
+		t.Errorf("result = %d, want 30 (a+b)", result)
 	}
 }
 
