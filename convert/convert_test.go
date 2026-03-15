@@ -1434,3 +1434,154 @@ func TestPlainDictToStruct_MixedNestedTypes(t *testing.T) {
 		t.Errorf("arr len = %d, want 2", len(lv.ListValue.GetValues()))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ProtoValueToPlainStarlark edge case tests (Phase 7 add-tests)
+// ---------------------------------------------------------------------------
+
+func TestProtoValueToPlainStarlark_NilInput(t *testing.T) {
+	v, err := ProtoValueToPlainStarlark(nil, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v != starlark.None {
+		t.Errorf("nil input = %v (%T), want starlark.None", v, v)
+	}
+}
+
+func TestProtoValueToPlainStarlark_NullValue(t *testing.T) {
+	v, err := ProtoValueToPlainStarlark(structpb.NewNullValue(), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v != starlark.None {
+		t.Errorf("NullValue = %v (%T), want starlark.None", v, v)
+	}
+}
+
+func TestProtoValueToPlainStarlark_Bool(t *testing.T) {
+	v, err := ProtoValueToPlainStarlark(structpb.NewBoolValue(true), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v != starlark.True {
+		t.Errorf("true = %v, want starlark.True", v)
+	}
+
+	v2, err := ProtoValueToPlainStarlark(structpb.NewBoolValue(false), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v2 != starlark.False {
+		t.Errorf("false = %v, want starlark.False", v2)
+	}
+}
+
+func TestProtoValueToPlainStarlark_String(t *testing.T) {
+	v, err := ProtoValueToPlainStarlark(structpb.NewStringValue("hello"), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if v != starlark.String("hello") {
+		t.Errorf("string = %v, want 'hello'", v)
+	}
+}
+
+func TestProtoValueToPlainStarlark_ExactMaxSafeInt(t *testing.T) {
+	// 2^53 = 9007199254740992 is the largest safe integer.
+	// The guard uses strict > so exactly 2^53 should remain Int.
+	val := float64(1 << 53)
+	v, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(val), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	si, ok := v.(starlark.Int)
+	if !ok {
+		t.Fatalf("exact 2^53 = %T, want starlark.Int (at boundary, not beyond)", v)
+	}
+	got, _ := si.Int64()
+	if got != 9007199254740992 {
+		t.Errorf("got %d, want 9007199254740992", got)
+	}
+
+	// Same for negative boundary.
+	negVal := -float64(1 << 53)
+	v2, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(negVal), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	si2, ok := v2.(starlark.Int)
+	if !ok {
+		t.Fatalf("exact -2^53 = %T, want starlark.Int", v2)
+	}
+	got2, _ := si2.Int64()
+	if got2 != -9007199254740992 {
+		t.Errorf("got %d, want -9007199254740992", got2)
+	}
+}
+
+func TestProtoValueToPlainStarlark_NilStructValue(t *testing.T) {
+	// StructValue wrapper with nil inner Struct should produce empty plain dict.
+	v, err := ProtoValueToPlainStarlark(
+		&structpb.Value{Kind: &structpb.Value_StructValue{StructValue: nil}}, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	d, ok := v.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("nil StructValue = %T, want *starlark.Dict", v)
+	}
+	if d.Len() != 0 {
+		t.Errorf("Len = %d, want 0", d.Len())
+	}
+}
+
+func TestProtoValueToPlainStarlark_NilListValue(t *testing.T) {
+	// ListValue wrapper with nil inner ListValue should produce empty list.
+	v, err := ProtoValueToPlainStarlark(
+		&structpb.Value{Kind: &structpb.Value_ListValue{ListValue: nil}}, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	list, ok := v.(*starlark.List)
+	if !ok {
+		t.Fatalf("nil ListValue = %T, want *starlark.List", v)
+	}
+	if list.Len() != 0 {
+		t.Errorf("Len = %d, want 0", list.Len())
+	}
+}
+
+func TestProtoValueToPlainStarlark_FrozenNestedList(t *testing.T) {
+	// A struct containing a list, both frozen.
+	sv := structpb.NewStructValue(&structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"items": structpb.NewListValue(&structpb.ListValue{
+				Values: []*structpb.Value{structpb.NewNumberValue(1)},
+			}),
+		},
+	})
+	v, err := ProtoValueToPlainStarlark(sv, true)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	d, ok := v.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.Dict", v)
+	}
+	// Dict should be frozen.
+	if err := d.SetKey(starlark.String("y"), starlark.MakeInt(2)); err == nil {
+		t.Error("SetKey on frozen dict should fail")
+	}
+
+	// List inside should also be frozen.
+	itemsVal, _, _ := d.Get(starlark.String("items"))
+	list, ok := itemsVal.(*starlark.List)
+	if !ok {
+		t.Fatalf("items = %T, want *starlark.List", itemsVal)
+	}
+	if err := list.Append(starlark.MakeInt(2)); err == nil {
+		t.Error("Append on frozen list should fail")
+	}
+}

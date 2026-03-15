@@ -89,6 +89,18 @@ func TestBuildUsageResources(t *testing.T) {
 			t.Fatalf("BuildUsageResources returned %d resources, want 0", len(result))
 		}
 	})
+
+	t.Run("duplicate dep pair produces one resource", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+			{Dependent: "app", Dependency: "db", IsRef: true},
+		}
+		result := BuildUsageResources(deps, UsageAPIVersionV1)
+		// Same dependent+dependency hashes to the same name, so map deduplicates.
+		if len(result) != 1 {
+			t.Fatalf("BuildUsageResources returned %d resources, want 1 (deduplicated)", len(result))
+		}
+	})
 }
 
 func TestDetectUsageAPIVersion(t *testing.T) {
@@ -100,6 +112,7 @@ func TestDetectUsageAPIVersion(t *testing.T) {
 		{"v1 override", "v1", UsageAPIVersionV1},
 		{"v2 override", "v2", UsageAPIVersionV2},
 		{"empty default", "", UsageAPIVersionV1},
+		{"unknown string defaults to v1", "garbage", UsageAPIVersionV1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,6 +233,28 @@ func TestValidateDependencies(t *testing.T) {
 		err := ValidateDependencies(deps, map[string]bool{"app": true, "db": true})
 		if err != nil {
 			t.Errorf("mixed valid refs should not error: %v", err)
+		}
+	})
+
+	t.Run("empty deps", func(t *testing.T) {
+		if err := ValidateDependencies(nil, map[string]bool{"app": true}); err != nil {
+			t.Errorf("empty deps should not error: %v", err)
+		}
+	})
+
+	t.Run("empty resourceNames with ref", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+		}
+		err := ValidateDependencies(deps, map[string]bool{})
+		if err == nil {
+			t.Fatal("expected error for ResourceRef against empty resourceNames")
+		}
+		if !strings.Contains(err.Error(), "db") {
+			t.Errorf("error should mention missing target 'db': %v", err)
+		}
+		if !strings.Contains(err.Error(), "available resources: []") {
+			t.Errorf("error should show empty available list: %v", err)
 		}
 	})
 }

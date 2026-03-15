@@ -2292,6 +2292,47 @@ Resource("app", {"apiVersion": "v1", "kind": "App", "spec": {"dbRef": ref.name}}
 	}
 }
 
+func TestRunFunctionDependsOnEmptyList(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// depends_on=[] should be a no-op: no Usage resources, no warnings.
+	script := `Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	// Should have "app" resource but no Usage resources.
+	resources := rsp.GetDesired().GetResources()
+	if _, ok := resources["app"]; !ok {
+		t.Fatal("expected 'app' resource in desired state")
+	}
+	for name := range resources {
+		if strings.HasPrefix(name, "usage-") {
+			t.Errorf("unexpected Usage resource %q for empty depends_on", name)
+		}
+	}
+
+	// No warnings should be emitted.
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING {
+			t.Errorf("unexpected warning: %s", r.GetMessage())
+		}
+	}
+}
+
 // assertNormalResult verifies the response has a Normal severity result.
 func assertNormalResult(t *testing.T, rsp *fnv1.RunFunctionResponse) {
 	t.Helper()

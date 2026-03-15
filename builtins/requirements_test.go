@@ -610,6 +610,67 @@ func TestBuildExtraResourcesDict_FrozenResourceDicts(t *testing.T) {
 	}
 }
 
+func TestWarnings_ReturnsCopy(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	labels := new(starlark.Dict)
+	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
+
+	_, _ = starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+		starlark.String("my-db"),
+		starlark.String("v1"),
+		starlark.String("Instance"),
+	}, []starlark.Tuple{
+		{starlark.String("match_name"), starlark.String("db")},
+		{starlark.String("match_labels"), labels},
+	})
+
+	w1 := rc.Warnings()
+	w2 := rc.Warnings()
+	if len(w1) != 1 {
+		t.Fatalf("Warnings() = %d, want 1", len(w1))
+	}
+	w1[0] = "mutated"
+	if w2[0] == "mutated" {
+		t.Error("Warnings() should return a copy, not a reference")
+	}
+}
+
+func TestRequireResource_MultipleWarnings(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	// Two calls with both match_name and match_labels should accumulate 2 warnings.
+	for _, name := range []string{"vpc-1", "vpc-2"} {
+		labels := new(starlark.Dict)
+		_ = labels.SetKey(starlark.String("env"), starlark.String("prod"))
+
+		_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+			starlark.String(name),
+			starlark.String("v1"),
+			starlark.String("VPC"),
+		}, []starlark.Tuple{
+			{starlark.String("match_name"), starlark.String(name + "-actual")},
+			{starlark.String("match_labels"), labels},
+		})
+		if err != nil {
+			t.Fatalf("require_resource(%q) error: %v", name, err)
+		}
+	}
+
+	warnings := rc.Warnings()
+	if len(warnings) != 2 {
+		t.Fatalf("Warnings() = %d, want 2", len(warnings))
+	}
+	if !strings.Contains(warnings[0], "vpc-1") {
+		t.Errorf("warning[0] should mention 'vpc-1': %s", warnings[0])
+	}
+	if !strings.Contains(warnings[1], "vpc-2") {
+		t.Errorf("warning[1] should mention 'vpc-2': %s", warnings[1])
+	}
+}
+
 func TestBuildExtraResourcesDict_MultipleResources(t *testing.T) {
 	req := &fnv1.RunFunctionRequest{
 		RequiredResources: map[string]*fnv1.Resources{
