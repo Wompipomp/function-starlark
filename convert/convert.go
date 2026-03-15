@@ -43,8 +43,37 @@ func StructToStarlark(s *structpb.Struct, freeze bool) (*StarlarkDict, error) {
 	return d, nil
 }
 
-// protoValueToStarlark converts a single protobuf Value to its Starlark equivalent.
-func protoValueToStarlark(v *structpb.Value, freeze bool) (starlark.Value, error) {
+// dictFactory creates a dict-like Starlark value from protobuf struct fields.
+// StructToStarlark passes a factory that produces *StarlarkDict;
+// ProtoValueToPlainStarlark passes one that produces *starlark.Dict.
+type dictFactory func(fields map[string]*structpb.Value, freeze bool) (starlark.Value, error)
+
+// convertNumber converts a float64 to a Starlark numeric value with an int64
+// overflow guard. Values that are whole numbers and within int64 range are
+// returned as starlark.Int; values in the imprecise zone (|x| > 2^53) fall
+// back to starlark.Float; values exceeding int64 range return an error.
+func convertNumber(f float64) (starlark.Value, error) {
+	if isWholeNumber(f) {
+		// Guard: values at or beyond int64 boundaries must error.
+		// float64(math.MaxInt64) rounds up to 2^63 exactly, so >= catches overflow.
+		// float64(math.MinInt64) is exactly -2^63, so <= catches underflow.
+		if f >= float64(math.MaxInt64) || f <= float64(math.MinInt64) {
+			return nil, fmt.Errorf("value %g exceeds int64 range", f)
+		}
+		// Values beyond 2^53 lose float64 precision for integers.
+		// Keep as Float to avoid silent precision loss.
+		if f > float64(1<<53) || f < -float64(1<<53) {
+			return starlark.Float(f), nil
+		}
+		return starlark.MakeInt64(int64(f)), nil
+	}
+	return starlark.Float(f), nil
+}
+
+// convertProtoValue is the shared conversion core for protobuf Value to
+// Starlark. The mkDict callback controls whether struct values become
+// *StarlarkDict or plain *starlark.Dict.
+func convertProtoValue(v *structpb.Value, freeze bool, mkDict dictFactory) (starlark.Value, error) {
 	if v == nil {
 		return starlark.None, nil
 	}
@@ -53,19 +82,15 @@ func protoValueToStarlark(v *structpb.Value, freeze bool) (starlark.Value, error
 	case *structpb.Value_NullValue:
 		return starlark.None, nil
 	case *structpb.Value_NumberValue:
-		f := kind.NumberValue
-		if isWholeNumber(f) {
-			return starlark.MakeInt64(int64(f)), nil
-		}
-		return starlark.Float(f), nil
+		return convertNumber(kind.NumberValue)
 	case *structpb.Value_StringValue:
 		return starlark.String(kind.StringValue), nil
 	case *structpb.Value_BoolValue:
 		return starlark.Bool(kind.BoolValue), nil
 	case *structpb.Value_StructValue:
-		return StructToStarlark(kind.StructValue, freeze)
+		return mkDict(kind.StructValue.GetFields(), freeze)
 	case *structpb.Value_ListValue:
-		return listValueToStarlarkList(kind.ListValue, freeze)
+		return convertListValue(kind.ListValue, freeze, mkDict)
 	case nil:
 		return starlark.None, nil
 	default:
@@ -73,93 +98,9 @@ func protoValueToStarlark(v *structpb.Value, freeze bool) (starlark.Value, error
 	}
 }
 
-// isWholeNumber reports whether f is a finite integer value.
-// IsInf and IsNaN are checked first to avoid treating Inf as a whole number
-// (math.Trunc(Inf) == Inf is true).
-func isWholeNumber(f float64) bool {
-	return !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f)
-}
-
-// listValueToStarlarkList converts a protobuf ListValue to a Starlark list.
-func listValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlark.List, error) {
-	if lv == nil {
-		return starlark.NewList(nil), nil
-	}
-
-	vals := lv.GetValues()
-	elems := make([]starlark.Value, len(vals))
-	for i, v := range vals {
-		sv, err := protoValueToStarlark(v, freeze)
-		if err != nil {
-			return nil, fmt.Errorf("list[%d]: %w", i, err)
-		}
-		elems[i] = sv
-	}
-
-	list := starlark.NewList(elems)
-	if freeze {
-		list.Freeze()
-	}
-	return list, nil
-}
-
-// ProtoValueToPlainStarlark converts a single protobuf Value to its Starlark
-// equivalent, producing plain *starlark.Dict for struct values (not
-// *StarlarkDict). This is used for context data where keys may contain dots
-// and slashes that conflict with StarlarkDict's dot-access.
-func ProtoValueToPlainStarlark(v *structpb.Value, freeze bool) (starlark.Value, error) {
-	if v == nil {
-		return starlark.None, nil
-	}
-
-	switch kind := v.GetKind().(type) {
-	case *structpb.Value_NullValue:
-		return starlark.None, nil
-	case *structpb.Value_NumberValue:
-		f := kind.NumberValue
-		if isWholeNumber(f) {
-			// Guard against int64 overflow: values beyond 2^53 cannot be
-			// represented exactly as float64, so keep them as Float.
-			if f > float64(1<<53) || f < -float64(1<<53) {
-				return starlark.Float(f), nil
-			}
-			return starlark.MakeInt64(int64(f)), nil
-		}
-		return starlark.Float(f), nil
-	case *structpb.Value_StringValue:
-		return starlark.String(kind.StringValue), nil
-	case *structpb.Value_BoolValue:
-		return starlark.Bool(kind.BoolValue), nil
-	case *structpb.Value_StructValue:
-		d := new(starlark.Dict)
-		if kind.StructValue != nil {
-			for k, fv := range kind.StructValue.GetFields() {
-				sv, err := ProtoValueToPlainStarlark(fv, freeze)
-				if err != nil {
-					return nil, fmt.Errorf("field %q: %w", k, err)
-				}
-				if err := d.SetKey(starlark.String(k), sv); err != nil {
-					return nil, fmt.Errorf("field %q: %w", k, err)
-				}
-			}
-		}
-		if freeze {
-			d.Freeze()
-		}
-		return d, nil
-	case *structpb.Value_ListValue:
-		return plainListValueToStarlarkList(kind.ListValue, freeze)
-	case nil:
-		return starlark.None, nil
-	default:
-		return nil, fmt.Errorf("unsupported protobuf value kind: %T", kind)
-	}
-}
-
-// plainListValueToStarlarkList converts a protobuf ListValue to a Starlark
-// list, using ProtoValueToPlainStarlark for element conversion (producing
-// plain dicts for nested structs).
-func plainListValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlark.List, error) {
+// convertListValue converts a protobuf ListValue to a Starlark list, using
+// convertProtoValue with the provided dictFactory for element conversion.
+func convertListValue(lv *structpb.ListValue, freeze bool, mkDict dictFactory) (*starlark.List, error) {
 	if lv == nil {
 		l := starlark.NewList(nil)
 		if freeze {
@@ -171,7 +112,7 @@ func plainListValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlar
 	vals := lv.GetValues()
 	elems := make([]starlark.Value, len(vals))
 	for i, v := range vals {
-		sv, err := ProtoValueToPlainStarlark(v, freeze)
+		sv, err := convertProtoValue(v, freeze, mkDict)
 		if err != nil {
 			return nil, fmt.Errorf("list[%d]: %w", i, err)
 		}
@@ -183,6 +124,49 @@ func plainListValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlar
 		list.Freeze()
 	}
 	return list, nil
+}
+
+// isWholeNumber reports whether f is a finite integer value.
+// IsInf and IsNaN are checked first to avoid treating Inf as a whole number
+// (math.Trunc(Inf) == Inf is true).
+func isWholeNumber(f float64) bool {
+	return !math.IsInf(f, 0) && !math.IsNaN(f) && f == math.Trunc(f)
+}
+
+// protoValueToStarlark converts a single protobuf Value to its Starlark
+// equivalent, producing *StarlarkDict for struct values.
+func protoValueToStarlark(v *structpb.Value, freeze bool) (starlark.Value, error) {
+	return convertProtoValue(v, freeze, func(fields map[string]*structpb.Value, freeze bool) (starlark.Value, error) {
+		// Reconstruct a *structpb.Struct to reuse StructToStarlark's nil
+		// handling and freeze logic.
+		return StructToStarlark(&structpb.Struct{Fields: fields}, freeze)
+	})
+}
+
+// ProtoValueToPlainStarlark converts a single protobuf Value to its Starlark
+// equivalent, producing plain *starlark.Dict for struct values (not
+// *StarlarkDict). This is used for context data where keys may contain dots
+// and slashes that conflict with StarlarkDict's dot-access.
+func ProtoValueToPlainStarlark(v *structpb.Value, freeze bool) (starlark.Value, error) {
+	return convertProtoValue(v, freeze, plainDictFactory)
+}
+
+// plainDictFactory builds a plain *starlark.Dict from protobuf struct fields.
+func plainDictFactory(fields map[string]*structpb.Value, freeze bool) (starlark.Value, error) {
+	d := new(starlark.Dict)
+	for k, fv := range fields {
+		sv, err := convertProtoValue(fv, freeze, plainDictFactory)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", k, err)
+		}
+		if err := d.SetKey(starlark.String(k), sv); err != nil {
+			return nil, fmt.Errorf("field %q: %w", k, err)
+		}
+	}
+	if freeze {
+		d.Freeze()
+	}
+	return d, nil
 }
 
 // PlainDictToStruct converts a plain *starlark.Dict (as produced by dict

@@ -1571,8 +1571,8 @@ func TestConvertNumber_ExceedsInt64Range(t *testing.T) {
 		},
 		{
 			name:    "imprecise zone returns Float",
-			input:   float64(1<<53 + 1),
-			wantVal: starlark.Float(float64(1<<53 + 1)),
+			input:   float64(1 << 54), // 2^54: whole number beyond 2^53, below int64 max
+			wantVal: starlark.Float(float64(1 << 54)),
 		},
 		{
 			name:    "normal integer",
