@@ -1,7 +1,9 @@
 package builtins
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crossplane/function-sdk-go/resource"
@@ -548,6 +550,35 @@ func TestCollector_NoDependsOn(t *testing.T) {
 	deps := c.Dependencies()
 	if len(deps) != 0 {
 		t.Errorf("Dependencies() len = %d, want 0 (no depends_on)", len(deps))
+	}
+}
+
+func TestCollector_AddDependency_Concurrent(t *testing.T) {
+	c := NewCollector()
+
+	const goroutines = 10
+	const depsPerGoroutine = 100
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < depsPerGoroutine; i++ {
+				c.addDependency(
+					fmt.Sprintf("dependent-%d-%d", id, i),
+					fmt.Sprintf("dependency-%d-%d", id, i),
+					true,
+				)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	deps := c.Dependencies()
+	want := goroutines * depsPerGoroutine
+	if len(deps) != want {
+		t.Errorf("Dependencies() len = %d, want %d", len(deps), want)
 	}
 }
 

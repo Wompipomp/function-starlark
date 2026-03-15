@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/wompipomp/function-starlark/input/v1alpha1"
 	"github.com/wompipomp/function-starlark/runtime"
 	"github.com/wompipomp/function-starlark/runtime/oci"
 )
@@ -3176,4 +3177,81 @@ func resourceNames(resources map[string]*fnv1.Resource) []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// ---------------------------------------------------------------------------
+// HOUSE-04: Path traversal tests for loadScript
+// ---------------------------------------------------------------------------
+
+func TestLoadScript_PathTraversal(t *testing.T) {
+	// Create a temp directory structure that simulates a ConfigMap mount.
+	// /tmp/.../my-config/main.star
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "my-config")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "main.star"), []byte("x = 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &Function{scriptDir: tmpDir}
+
+	cases := []struct {
+		name    string
+		ref     ScriptConfigRefForTest
+		wantErr string // empty means no error expected
+	}{
+		{
+			name:    "traversal in key",
+			ref:     ScriptConfigRefForTest{Name: "my-config", Key: "../../etc/passwd"},
+			wantErr: "path traversal",
+		},
+		{
+			name:    "traversal in ConfigMap name",
+			ref:     ScriptConfigRefForTest{Name: "../escape", Key: "main.star"},
+			wantErr: "path traversal",
+		},
+		{
+			name:    "empty key defaults to main.star",
+			ref:     ScriptConfigRefForTest{Name: "my-config", Key: ""},
+			wantErr: "",
+		},
+		{
+			name:    "valid key main.star",
+			ref:     ScriptConfigRefForTest{Name: "my-config", Key: "main.star"},
+			wantErr: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ref := &v1alpha1.ScriptConfigRef{
+				Name: tc.ref.Name,
+				Key:  tc.ref.Key,
+			}
+			got, err := f.loadScript(ref)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("loadScript() returned nil error, want error containing %q", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("loadScript() error = %q, want error containing %q", err.Error(), tc.wantErr)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("loadScript() unexpected error: %v", err)
+				}
+				if got != "x = 1" {
+					t.Errorf("loadScript() = %q, want %q", got, "x = 1")
+				}
+			}
+		})
+	}
+}
+
+// ScriptConfigRefForTest is a helper struct for test table entries.
+type ScriptConfigRefForTest struct {
+	Name string
+	Key  string
 }
