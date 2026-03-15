@@ -9,6 +9,7 @@ import (
 	"github.com/crossplane/function-sdk-go/resource"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.starlark.net/starlark"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/metrics"
 )
@@ -1091,5 +1092,74 @@ func TestCollector_SkipResource_Metrics(t *testing.T) {
 	delta = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - baseSkipped
 	if delta != 0 {
 		t.Errorf("skip counter delta after dedup skip = %v, want 0", delta)
+	}
+}
+
+// --- getOrCreateNestedStruct standalone tests ---
+
+func TestGetOrCreateNestedStruct_ExistingChild(t *testing.T) {
+	parent := &structpb.Struct{Fields: map[string]*structpb.Value{}}
+	child := &structpb.Struct{Fields: map[string]*structpb.Value{
+		"existing": structpb.NewStringValue("keep-me"),
+	}}
+	parent.Fields["metadata"] = structpb.NewStructValue(child)
+
+	got := getOrCreateNestedStruct(parent, "metadata")
+	if got != child {
+		t.Fatal("should return existing struct, not create new one")
+	}
+	if got.Fields["existing"].GetStringValue() != "keep-me" {
+		t.Error("existing field should be preserved")
+	}
+}
+
+func TestGetOrCreateNestedStruct_OverwriteNonStruct(t *testing.T) {
+	parent := &structpb.Struct{Fields: map[string]*structpb.Value{}}
+	parent.Fields["metadata"] = structpb.NewStringValue("not-a-struct")
+
+	got := getOrCreateNestedStruct(parent, "metadata")
+	if got == nil {
+		t.Fatal("should return a new struct")
+	}
+	if len(got.Fields) != 0 {
+		t.Error("new struct should be empty")
+	}
+	// Parent should now point to the new struct.
+	if parent.Fields["metadata"].GetStructValue() != got {
+		t.Error("parent should point to newly created struct")
+	}
+}
+
+// --- concurrent skip_resource test ---
+
+func TestCollector_SkipResource_Concurrent(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+
+	const goroutines = 10
+	const skipsPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for g := 0; g < goroutines; g++ {
+		go func(id int) {
+			defer wg.Done()
+			thread := new(starlark.Thread)
+			for i := 0; i < skipsPerGoroutine; i++ {
+				name := fmt.Sprintf("res-%d-%d", id, i)
+				_, _ = starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+					starlark.String(name),
+					starlark.String("reason"),
+				}, nil)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	// Each unique name should produce exactly one event.
+	events := cc.Events()
+	want := goroutines * skipsPerGoroutine
+	if len(events) != want {
+		t.Errorf("Events() len = %d, want %d", len(events), want)
 	}
 }
