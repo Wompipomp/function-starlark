@@ -1163,3 +1163,21 @@ func TestCollector_SkipResource_Concurrent(t *testing.T) {
 		t.Errorf("Events() len = %d, want %d", len(events), want)
 	}
 }
+
+// --- SetScriptName tests ---
+
+func TestSetScriptName(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+
+	// Default scriptName should be empty string.
+	if c.scriptName != "" {
+		t.Errorf("default scriptName = %q, want empty string", c.scriptName)
+	}
+
+	// SetScriptName should propagate the value.
+	c.SetScriptName("my-script.star")
+	if c.scriptName != "my-script.star" {
+		t.Errorf("scriptName after Set = %q, want %q", c.scriptName, "my-script.star")
+	}
+}

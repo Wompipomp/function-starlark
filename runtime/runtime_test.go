@@ -633,3 +633,31 @@ func TestCacheMetrics(t *testing.T) {
 		t.Errorf("cache miss delta after second execute = %v, want 0", missDelta)
 	}
 }
+
+func TestCacheMetrics_CompileError(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Use a unique filename to avoid cross-test interference.
+	filename := "cache-compile-error-test.star"
+
+	// Record baselines.
+	baseHits := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(filename))
+	baseMisses := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(filename))
+
+	// Execute source with syntax error -- compile should fail.
+	_, err := rt.Execute("def !!!invalid", starlark.StringDict{}, filename, nil)
+	if err == nil {
+		t.Fatal("expected compile error for invalid source")
+	}
+
+	// Neither counter should increment on compile error.
+	hitDelta := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(filename)) - baseHits
+	missDelta := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(filename)) - baseMisses
+	if hitDelta != 0 {
+		t.Errorf("cache hit delta after compile error = %v, want 0", hitDelta)
+	}
+	if missDelta != 0 {
+		t.Errorf("cache miss delta after compile error = %v, want 0", missDelta)
+	}
+}

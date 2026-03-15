@@ -112,3 +112,44 @@ func TestScriptLabel(t *testing.T) {
 		t.Errorf("CacheHitsTotal{script=%q} = %v, want 1", label, got)
 	}
 }
+
+func TestHistogramBuckets_Execution(t *testing.T) {
+	// Verify ExecutionDurationSeconds has exactly the 10 sub-second buckets
+	// documented in CONTEXT.md.
+	wantBuckets := []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5}
+
+	// Collect metric families from the default gatherer.
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error: %v", err)
+	}
+
+	// Ensure at least one observation exists so Gather returns the metric.
+	ExecutionDurationSeconds.WithLabelValues("bucket-test.star").Observe(0.001)
+
+	families, err = prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("Gather() error: %v", err)
+	}
+
+	var found bool
+	for _, fam := range families {
+		if fam.GetName() != "function_starlark_execution_duration_seconds" {
+			continue
+		}
+		found = true
+		m := fam.GetMetric()[0]
+		buckets := m.GetHistogram().GetBucket()
+		if len(buckets) != len(wantBuckets) {
+			t.Fatalf("bucket count = %d, want %d", len(buckets), len(wantBuckets))
+		}
+		for i, b := range buckets {
+			if b.GetUpperBound() != wantBuckets[i] {
+				t.Errorf("bucket[%d] = %v, want %v", i, b.GetUpperBound(), wantBuckets[i])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("function_starlark_execution_duration_seconds not found in gathered metrics")
+	}
+}
