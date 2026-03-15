@@ -716,3 +716,115 @@ public = "visible"
 		t.Error("underscore-prefixed '_private' should NOT be exported by load()")
 	}
 }
+
+// ========================
+// Coverage Gap Tests
+// ========================
+
+func TestModuleCachedError(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	// First load: module not found.
+	_, err1 := thread.Load(thread, "missing.star")
+	if err1 == nil {
+		t.Fatal("expected error on first load, got nil")
+	}
+
+	// Second load: should return cached error (same message).
+	_, err2 := thread.Load(thread, "missing.star")
+	if err2 == nil {
+		t.Fatal("expected error on second load, got nil")
+	}
+
+	if err1.Error() != err2.Error() {
+		t.Errorf("cached error differs:\n  first:  %q\n  second: %q", err1.Error(), err2.Error())
+	}
+}
+
+func TestModuleCompilationError(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"bad.star": `def f(`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "bad.star")
+	if err == nil {
+		t.Fatal("expected compilation error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "compiling module") {
+		t.Errorf("error = %q, want it to contain 'compiling module'", err.Error())
+	}
+}
+
+func TestModuleFilesystemPermissionError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret.star")
+	if err := os.WriteFile(path, []byte(`x = 1`), 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "secret.star")
+	if err == nil {
+		// On some systems (e.g., root), permission errors may not occur.
+		t.Skip("file was readable despite 0o000 permissions (likely running as root)")
+	}
+
+	if !strings.Contains(err.Error(), "reading module") {
+		t.Errorf("error = %q, want it to contain 'reading module'", err.Error())
+	}
+}
+
+func TestModuleMultipleSearchPaths(t *testing.T) {
+	dir1 := t.TempDir() // Empty -- module not here.
+	dir2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir2, "helpers.star"), []byte(`val = "found"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, []string{dir1, dir2}, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	loaded, err := thread.Load(thread, "helpers.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	v, ok := loaded["val"]
+	if !ok {
+		t.Fatal("expected 'val' in loaded globals")
+	}
+	if v.(starlark.String) != "found" {
+		t.Errorf("val = %v, want 'found'", v)
+	}
+}
+
+func TestModuleEmptyName(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "")
+	if err == nil {
+		t.Fatal("expected error for empty module name, got nil")
+	}
+	if !strings.Contains(err.Error(), ".star") {
+		t.Errorf("error = %q, want it to contain '.star'", err.Error())
+	}
+}
