@@ -1,6 +1,7 @@
 package builtins
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/crossplane/function-sdk-go/resource"
@@ -236,5 +237,325 @@ func TestCollector_EmptyBody(t *testing.T) {
 	}
 	if len(cr.Body.GetFields()) != 0 {
 		t.Errorf("fields = %d, want 0", len(cr.Body.GetFields()))
+	}
+}
+
+// --- ResourceRef type tests ---
+
+func TestResourceRef_String(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	if got := ref.String(); got != "my-db" {
+		t.Errorf("String() = %q, want %q", got, "my-db")
+	}
+}
+
+func TestResourceRef_Type(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	if got := ref.Type(); got != "ResourceRef" {
+		t.Errorf("Type() = %q, want %q", got, "ResourceRef")
+	}
+}
+
+func TestResourceRef_Truth(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	if got := ref.Truth(); got != starlark.True {
+		t.Errorf("Truth() = %v, want True", got)
+	}
+}
+
+func TestResourceRef_Hash(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	h1, err := ref.Hash()
+	if err != nil {
+		t.Fatalf("Hash() error: %v", err)
+	}
+
+	// Same name should produce same hash (deterministic).
+	h2, err := ref.Hash()
+	if err != nil {
+		t.Fatalf("Hash() error on second call: %v", err)
+	}
+	if h1 != h2 {
+		t.Errorf("Hash() not deterministic: %d != %d", h1, h2)
+	}
+
+	// Different name should (very likely) produce different hash.
+	ref2 := &ResourceRef{name: "other-db"}
+	h3, err := ref2.Hash()
+	if err != nil {
+		t.Fatalf("Hash() error: %v", err)
+	}
+	if h1 == h3 {
+		t.Errorf("Hash() collision for 'my-db' and 'other-db': both %d", h1)
+	}
+}
+
+func TestResourceRef_Attr_Name(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	v, err := ref.Attr("name")
+	if err != nil {
+		t.Fatalf("Attr('name') error: %v", err)
+	}
+	s, ok := v.(starlark.String)
+	if !ok {
+		t.Fatalf("Attr('name') returned %T, want starlark.String", v)
+	}
+	if string(s) != "my-db" {
+		t.Errorf("Attr('name') = %q, want %q", string(s), "my-db")
+	}
+}
+
+func TestResourceRef_Attr_Unknown(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	v, err := ref.Attr("unknown")
+	if err != nil {
+		t.Fatalf("Attr('unknown') error: %v", err)
+	}
+	if v != nil {
+		t.Errorf("Attr('unknown') = %v, want nil", v)
+	}
+}
+
+func TestResourceRef_AttrNames(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	names := ref.AttrNames()
+	if len(names) != 1 || names[0] != "name" {
+		t.Errorf("AttrNames() = %v, want [name]", names)
+	}
+}
+
+func TestResourceRef_Freeze(t *testing.T) {
+	ref := &ResourceRef{name: "my-db"}
+	// Freeze is a no-op; just verify it doesn't panic.
+	ref.Freeze()
+}
+
+// --- Resource() returns *ResourceRef ---
+
+func TestCollector_ResourceReturnsRef(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("my-bucket"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() returned %T, want *ResourceRef", val)
+	}
+	if ref.name != "my-bucket" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "my-bucket")
+	}
+}
+
+// --- depends_on kwarg tests ---
+
+func TestCollector_DependsOn_ResourceRef(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	// Create a resource to get a ResourceRef.
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("DB"))
+
+	dbVal, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource('db') error: %v", err)
+	}
+
+	// Create app with depends_on=[db_ref].
+	appBody := new(starlark.Dict)
+	_ = appBody.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	depsList := starlark.NewList([]starlark.Value{dbVal})
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		appBody,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err != nil {
+		t.Fatalf("Resource('app') error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 1 {
+		t.Fatalf("Dependencies() len = %d, want 1", len(deps))
+	}
+	if deps[0].Dependent != "app" {
+		t.Errorf("Dependent = %q, want %q", deps[0].Dependent, "app")
+	}
+	if deps[0].Dependency != "db" {
+		t.Errorf("Dependency = %q, want %q", deps[0].Dependency, "db")
+	}
+	if !deps[0].IsRef {
+		t.Error("IsRef = false, want true")
+	}
+}
+
+func TestCollector_DependsOn_String(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	depsList := starlark.NewList([]starlark.Value{starlark.String("external-vpc")})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err != nil {
+		t.Fatalf("Resource('app') error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 1 {
+		t.Fatalf("Dependencies() len = %d, want 1", len(deps))
+	}
+	if deps[0].Dependent != "app" {
+		t.Errorf("Dependent = %q, want %q", deps[0].Dependent, "app")
+	}
+	if deps[0].Dependency != "external-vpc" {
+		t.Errorf("Dependency = %q, want %q", deps[0].Dependency, "external-vpc")
+	}
+	if deps[0].IsRef {
+		t.Error("IsRef = true, want false")
+	}
+}
+
+func TestCollector_DependsOn_Mixed(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	// Create db resource first.
+	dbBody := new(starlark.Dict)
+	_ = dbBody.SetKey(starlark.String("kind"), starlark.String("DB"))
+
+	dbVal, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		dbBody,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource('db') error: %v", err)
+	}
+
+	// Create app with depends_on=[db_ref, "external-vpc"].
+	appBody := new(starlark.Dict)
+	_ = appBody.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	depsList := starlark.NewList([]starlark.Value{dbVal, starlark.String("external-vpc")})
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		appBody,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err != nil {
+		t.Fatalf("Resource('app') error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 2 {
+		t.Fatalf("Dependencies() len = %d, want 2", len(deps))
+	}
+
+	// First: ResourceRef to db.
+	if deps[0].Dependent != "app" || deps[0].Dependency != "db" || !deps[0].IsRef {
+		t.Errorf("deps[0] = %+v, want {app, db, true}", deps[0])
+	}
+
+	// Second: string ref to external-vpc.
+	if deps[1].Dependent != "app" || deps[1].Dependency != "external-vpc" || deps[1].IsRef {
+		t.Errorf("deps[1] = %+v, want {app, external-vpc, false}", deps[1])
+	}
+}
+
+func TestCollector_DependsOn_InvalidType(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	// Pass an integer in depends_on -- should error.
+	depsList := starlark.NewList([]starlark.Value{starlark.MakeInt(42)})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err == nil {
+		t.Fatal("Resource() with int in depends_on should error")
+	}
+	if !strings.Contains(err.Error(), "depends_on[0]") {
+		t.Errorf("error = %q, should mention depends_on[0]", err.Error())
+	}
+}
+
+func TestCollector_NoDependsOn(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Item"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 0 {
+		t.Errorf("Dependencies() len = %d, want 0 (no depends_on)", len(deps))
+	}
+}
+
+func TestCollector_DependenciesCopy(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	// Create db, then app depending on db.
+	dbBody := new(starlark.Dict)
+	_ = dbBody.SetKey(starlark.String("kind"), starlark.String("DB"))
+	dbVal, _ := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		dbBody,
+	}, nil)
+
+	appBody := new(starlark.Dict)
+	_ = appBody.SetKey(starlark.String("kind"), starlark.String("App"))
+	depsList := starlark.NewList([]starlark.Value{dbVal})
+	_, _ = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		appBody,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+
+	deps1 := c.Dependencies()
+	deps2 := c.Dependencies()
+
+	// Mutating the returned slice should not affect the collector.
+	deps1[0].Dependent = "mutated"
+	if deps2[0].Dependent == "mutated" {
+		t.Error("Dependencies() should return a copy, not a reference")
 	}
 }
