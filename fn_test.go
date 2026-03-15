@@ -2092,17 +2092,8 @@ func TestRunFunctionDependsOnCircularDependency(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
 
-	// A depends on B, B depends on A -> circular.
-	script := `a = Resource("a", {"apiVersion": "v1", "kind": "A"})
-b = Resource("b", {"apiVersion": "v1", "kind": "B"}, depends_on=[a])
-Resource("a2", {"apiVersion": "v1", "kind": "A"})
-# Overwrite a to create cycle: we need a->b and b->a
-# Actually, depends_on is per-Resource call, so:
-# b depends on a (from above). We need a to depend on b.
-# But a is already created. We need a new resource that creates the cycle.`
-
-	// Simpler approach: use string refs to create cycle.
-	script = `Resource("a", {"apiVersion": "v1", "kind": "A"}, depends_on=["b"])
+	// A depends on B, B depends on A -> circular (using string refs).
+	script := `Resource("a", {"apiVersion": "v1", "kind": "A"}, depends_on=["b"])
 Resource("b", {"apiVersion": "v1", "kind": "B"}, depends_on=["a"])`
 
 	req := &fnv1.RunFunctionRequest{

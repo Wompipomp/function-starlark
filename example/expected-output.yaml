@@ -266,6 +266,30 @@ spec:
     displayName: Bucket notifications for example-xr
     region: us-east-1
 ---
+apiVersion: apiextensions.crossplane.io/v1alpha1
+kind: Usage
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: usage-e8072ae8
+  labels:
+    crossplane.io/composite: example-xr
+  name: usage-e8072ae8
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  by:
+    resourceRef:
+      name: notification-topic
+  of:
+    resourceRef:
+      name: bucket-0
+  replayDeletion: true
+---
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
 message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)

@@ -53,9 +53,11 @@ spec:
                 })
 
             # --- Loop-based resource creation (8 buckets) ---
+            # Capture refs for depends_on usage.
+            bucket_refs = []
             for i in range(8):
                 name = "bucket-%d" % i
-                Resource(name, {
+                ref = Resource(name, {
                     "apiVersion": "s3.aws.upbound.io/v1beta1",
                     "kind": "Bucket",
                     "metadata": {
@@ -77,8 +79,9 @@ spec:
                         },
                     },
                 })
+                bucket_refs.append(ref)
 
-            # --- Notification resource (always created) ---
+            # --- Notification resource depends on first bucket ---
             Resource("notification-topic", {
                 "apiVersion": "sns.aws.upbound.io/v1beta1",
                 "kind": "Topic",
@@ -95,7 +98,7 @@ spec:
                         "displayName": "Bucket notifications for %s" % xr_name,
                     },
                 },
-            })
+            }, depends_on=[bucket_refs[0]])
 
             # --- XR-level connection details ---
             set_connection_details({
