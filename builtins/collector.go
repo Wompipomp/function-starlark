@@ -69,6 +69,7 @@ type CollectedResource struct {
 type Collector struct {
 	mu           sync.Mutex
 	resources    map[string]CollectedResource
+	skipped      map[string]bool
 	dependencies []DependencyPair
 	cc           *ConditionCollector
 }
@@ -79,6 +80,7 @@ type Collector struct {
 func NewCollector(cc *ConditionCollector) *Collector {
 	return &Collector{
 		resources: make(map[string]CollectedResource),
+		skipped:   make(map[string]bool),
 		cc:        cc,
 	}
 }
@@ -87,6 +89,54 @@ func NewCollector(cc *ConditionCollector) *Collector {
 // to produce desired composed resources.
 func (c *Collector) Builtin() *starlark.Builtin {
 	return starlark.NewBuiltin("Resource", c.resourceFn)
+}
+
+// SkipResourceBuiltin returns a *starlark.Builtin named "skip_resource" that
+// scripts call to intentionally omit a resource, emitting a Warning event for
+// observability.
+func (c *Collector) SkipResourceBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("skip_resource", c.skipResourceFn)
+}
+
+// skipResourceFn implements skip_resource(name, reason). It records the skip,
+// emits a Warning event on first call for a given name, and errors if the
+// resource was already emitted via Resource().
+func (c *Collector) skipResourceFn(
+	_ *starlark.Thread,
+	b *starlark.Builtin,
+	args starlark.Tuple,
+	kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	var name, reason string
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"name", &name, "reason", &reason); err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	// Error if already emitted via Resource().
+	if _, exists := c.resources[name]; exists {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("resource %q already emitted, cannot skip", name)
+	}
+	// Deduplicate: only first skip emits warning.
+	if c.skipped[name] {
+		c.mu.Unlock()
+		return starlark.None, nil
+	}
+	c.skipped[name] = true
+	c.mu.Unlock()
+
+	// Emit Warning event. Release c.mu before acquiring cc.mu to avoid
+	// lock ordering issues (Pitfall 4 from RESEARCH.md).
+	msg := fmt.Sprintf("Skipping resource %q: %s", name, reason)
+	c.cc.mu.Lock()
+	c.cc.events = append(c.cc.events, CollectedEvent{
+		Severity: "Warning", Message: msg, Target: "Composite",
+	})
+	c.cc.mu.Unlock()
+
+	return starlark.None, nil
 }
 
 // Resources returns a copy of all collected resources.
