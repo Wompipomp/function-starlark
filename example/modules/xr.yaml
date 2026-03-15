@@ -1,0 +1,7 @@
+apiVersion: example.crossplane.io/v1
+kind: XBucket
+metadata:
+  name: module-demo
+spec:
+  region: eu-west-1
+  environment: staging

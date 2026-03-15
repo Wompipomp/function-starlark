@@ -1,0 +1,66 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbuckets-with-modules.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XBucket
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Main script that loads a helper module.
+            load("helpers.star", "standard_labels", "bucket_name")
+            load("bad.star", "x")
+
+            region = get(oxr, "spec.region", "us-east-1")
+            env = get(oxr, "spec.environment", "dev")
+            xr_name = get(oxr, "metadata.name", "unknown")
+
+            labels = standard_labels(xr_name, env)
+
+            for i in range(3):
+                name = bucket_name(xr_name, i)
+                Resource("bucket-%d" % i, {
+                    "apiVersion": "s3.aws.upbound.io/v1beta1",
+                    "kind": "Bucket",
+                    "metadata": {
+                        "name": name,
+                        "labels": labels,
+                    },
+                    "spec": {
+                        "forProvider": {
+                            "region": region,
+                        },
+                    },
+                })
+
+            set_condition(
+                type="Ready",
+                status="True",
+                reason="Available",
+                message="Created 3 buckets using module helpers",
+            )
+          modules:
+            bad.star: |
+              x = 1 / 0
+            helpers.star: |
+              # Reusable helper module.
+              def standard_labels(xr_name, env):
+                  """Return a standard set of labels."""
+                  return {
+                      "app.kubernetes.io/managed-by": "function-starlark",
+                      "app.kubernetes.io/part-of": xr_name,
+                      "environment": env,
+                  }
+
+              def bucket_name(xr_name, index):
+                  """Generate a consistent bucket name."""
+                  return "%s-bucket-%d" % (xr_name, index)
