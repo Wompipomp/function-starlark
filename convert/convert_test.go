@@ -1221,6 +1221,154 @@ func TestPlainDictToStruct_UnsupportedNestedType(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ProtoValueToPlainStarlark tests
+// ---------------------------------------------------------------------------
+
+func TestProtoValueToPlainStarlark_WholeNumber(t *testing.T) {
+	v, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(42.0), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	si, ok := v.(starlark.Int)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Int", v)
+	}
+	got, _ := si.Int64()
+	if got != 42 {
+		t.Errorf("got %d, want 42", got)
+	}
+}
+
+func TestProtoValueToPlainStarlark_Float(t *testing.T) {
+	v, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(3.14), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	f, ok := v.(starlark.Float)
+	if !ok {
+		t.Fatalf("got %T, want starlark.Float", v)
+	}
+	if float64(f) != 3.14 {
+		t.Errorf("got %v, want 3.14", f)
+	}
+}
+
+func TestProtoValueToPlainStarlark_BeyondMaxSafeInt(t *testing.T) {
+	// 2^53 + 1 = 9007199254740993 -- beyond safe integer range for float64.
+	bigVal := float64(1<<53 + 1)
+	v, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(bigVal), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	f, ok := v.(starlark.Float)
+	if !ok {
+		t.Fatalf("2^53+1 = %T, want starlark.Float (not int64 which would truncate)", v)
+	}
+	if float64(f) != bigVal {
+		t.Errorf("got %v, want %v", f, bigVal)
+	}
+}
+
+func TestProtoValueToPlainStarlark_StructProducesPlainDict(t *testing.T) {
+	sv := structpb.NewStructValue(&structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"key": structpb.NewStringValue("val"),
+		},
+	})
+	v, err := ProtoValueToPlainStarlark(sv, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	// Must be plain *starlark.Dict, NOT *StarlarkDict
+	d, ok := v.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.Dict (plain)", v)
+	}
+	val, found, err := d.Get(starlark.String("key"))
+	if err != nil || !found {
+		t.Fatalf("key not found: found=%v, err=%v", found, err)
+	}
+	if val != starlark.String("val") {
+		t.Errorf("key = %v, want 'val'", val)
+	}
+}
+
+func TestProtoValueToPlainStarlark_NestedStructWithList(t *testing.T) {
+	inner := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"items": structpb.NewListValue(&structpb.ListValue{
+				Values: []*structpb.Value{
+					structpb.NewNumberValue(1),
+					structpb.NewStringValue("two"),
+				},
+			}),
+		},
+	}
+	outer := structpb.NewStructValue(&structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"nested": structpb.NewStructValue(inner),
+		},
+	})
+
+	v, err := ProtoValueToPlainStarlark(outer, false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	outerDict, ok := v.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("outer = %T, want *starlark.Dict", v)
+	}
+
+	nestedVal, found, _ := outerDict.Get(starlark.String("nested"))
+	if !found {
+		t.Fatal("nested key not found")
+	}
+	nestedDict, ok := nestedVal.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("nested = %T, want *starlark.Dict", nestedVal)
+	}
+
+	itemsVal, found, _ := nestedDict.Get(starlark.String("items"))
+	if !found {
+		t.Fatal("items key not found")
+	}
+	list, ok := itemsVal.(*starlark.List)
+	if !ok {
+		t.Fatalf("items = %T, want *starlark.List", itemsVal)
+	}
+	if list.Len() != 2 {
+		t.Errorf("items len = %d, want 2", list.Len())
+	}
+	if _, ok := list.Index(0).(starlark.Int); !ok {
+		t.Errorf("items[0] = %T, want starlark.Int", list.Index(0))
+	}
+	if _, ok := list.Index(1).(starlark.String); !ok {
+		t.Errorf("items[1] = %T, want starlark.String", list.Index(1))
+	}
+}
+
+func TestProtoValueToPlainStarlark_FrozenDict(t *testing.T) {
+	sv := structpb.NewStructValue(&structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"x": structpb.NewNumberValue(1),
+		},
+	})
+	v, err := ProtoValueToPlainStarlark(sv, true)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	d, ok := v.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.Dict", v)
+	}
+	// Should be frozen -- mutation must fail.
+	if err := d.SetKey(starlark.String("y"), starlark.MakeInt(2)); err == nil {
+		t.Error("SetKey on frozen dict should return error")
+	}
+}
+
 func TestPlainDictToStruct_MixedNestedTypes(t *testing.T) {
 	// Plain dict with all supported types: string, int, bool, None, nested dict, list.
 	inner := new(starlark.Dict)
