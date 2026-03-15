@@ -1095,6 +1095,50 @@ func TestCollector_SkipResource_Metrics(t *testing.T) {
 	}
 }
 
+// --- readyFromStarlark invalid type tests ---
+
+func TestCollector_ReadyInvalidType(t *testing.T) {
+	tests := []struct {
+		name     string
+		readyVal starlark.Value
+		wantErr  string
+	}{
+		{
+			name:     "string",
+			readyVal: starlark.String("ready"),
+			wantErr:  "ready must be True, False, or None, got string",
+		},
+		{
+			name:     "int",
+			readyVal: starlark.MakeInt(42),
+			wantErr:  "ready must be True, False, or None, got int",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewCollector(NewConditionCollector())
+			thread := new(starlark.Thread)
+
+			body := new(starlark.Dict)
+			_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+			_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+				starlark.String("item"),
+				body,
+			}, []starlark.Tuple{
+				{starlark.String("ready"), tt.readyVal},
+			})
+			if err == nil {
+				t.Fatalf("Resource() with ready=%s should return error", tt.readyVal.Type())
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 // --- getOrCreateNestedStruct standalone tests ---
 
 func TestGetOrCreateNestedStruct_ExistingChild(t *testing.T) {
