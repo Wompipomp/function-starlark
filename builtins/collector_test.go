@@ -613,3 +613,269 @@ func TestCollector_DependenciesCopy(t *testing.T) {
 		t.Error("Dependencies() should return a copy, not a reference")
 	}
 }
+
+// --- external_name kwarg tests ---
+
+func TestCollector_ExternalName_Basic(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("my-bucket")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr := res["bucket"]
+	if cr.Body == nil {
+		t.Fatal("body is nil")
+	}
+
+	// Check metadata.annotations["crossplane.io/external-name"] = "my-bucket"
+	metadata := cr.Body.GetFields()["metadata"].GetStructValue()
+	if metadata == nil {
+		t.Fatal("metadata is nil")
+	}
+	annotations := metadata.GetFields()["annotations"].GetStructValue()
+	if annotations == nil {
+		t.Fatal("annotations is nil")
+	}
+	got := annotations.GetFields()["crossplane.io/external-name"].GetStringValue()
+	if got != "my-bucket" {
+		t.Errorf("external-name annotation = %q, want %q", got, "my-bucket")
+	}
+}
+
+func TestCollector_ExternalName_EmptyBody(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict) // empty -- no metadata
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("x")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr := res["item"]
+
+	// metadata.annotations path should be auto-created
+	metadata := cr.Body.GetFields()["metadata"].GetStructValue()
+	if metadata == nil {
+		t.Fatal("metadata should be auto-created")
+	}
+	annotations := metadata.GetFields()["annotations"].GetStructValue()
+	if annotations == nil {
+		t.Fatal("annotations should be auto-created")
+	}
+	got := annotations.GetFields()["crossplane.io/external-name"].GetStringValue()
+	if got != "x" {
+		t.Errorf("external-name annotation = %q, want %q", got, "x")
+	}
+}
+
+func TestCollector_ExternalName_Omitted(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr := res["item"]
+
+	// No metadata.annotations should be injected
+	if cr.Body.GetFields()["metadata"] != nil {
+		t.Error("metadata should not be present when external_name is omitted")
+	}
+}
+
+func TestCollector_ExternalName_EmptyString(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("")},
+	})
+	if err == nil {
+		t.Fatal("Resource() with external_name='' should return error")
+	}
+	if !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("error = %q, should contain 'must not be empty'", err.Error())
+	}
+}
+
+func TestCollector_ExternalName_NonString(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.MakeInt(123)},
+	})
+	if err == nil {
+		t.Fatal("Resource() with external_name=123 should return error")
+	}
+	if !strings.Contains(err.Error(), "must be string") {
+		t.Errorf("error = %q, should contain 'must be string'", err.Error())
+	}
+}
+
+func TestCollector_ExternalName_Conflict(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	// Build body with existing crossplane.io/external-name annotation
+	annotations := new(starlark.Dict)
+	_ = annotations.SetKey(starlark.String("crossplane.io/external-name"), starlark.String("old"))
+
+	metadata := new(starlark.Dict)
+	_ = metadata.SetKey(starlark.String("annotations"), annotations)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = body.SetKey(starlark.String("metadata"), metadata)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("new")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Kwarg should win
+	res := c.Resources()
+	cr := res["bucket"]
+	md := cr.Body.GetFields()["metadata"].GetStructValue()
+	ann := md.GetFields()["annotations"].GetStructValue()
+	got := ann.GetFields()["crossplane.io/external-name"].GetStringValue()
+	if got != "new" {
+		t.Errorf("external-name annotation = %q, want %q (kwarg should win)", got, "new")
+	}
+
+	// Warning event should be emitted
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	}
+	wantMsg := `Resource "bucket": external_name kwarg "new" overrides annotation "old"`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+func TestCollector_ExternalName_NoConflict(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("my-bucket")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// No warning should be emitted when there's no conflict
+	events := cc.Events()
+	if len(events) != 0 {
+		t.Errorf("Events() len = %d, want 0 (no conflict)", len(events))
+	}
+}
+
+func TestCollector_ExternalName_SharedBody(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	// Use the same body dict for two Resource() calls with different external_name values.
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket-a"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("name-a")},
+	})
+	if err != nil {
+		t.Fatalf("Resource('bucket-a') error: %v", err)
+	}
+
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket-b"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("external_name"), starlark.String("name-b")},
+	})
+	if err != nil {
+		t.Fatalf("Resource('bucket-b') error: %v", err)
+	}
+
+	res := c.Resources()
+
+	// Each resource should have its own correct annotation (no cross-contamination).
+	aAnn := res["bucket-a"].Body.GetFields()["metadata"].GetStructValue().GetFields()["annotations"].GetStructValue()
+	gotA := aAnn.GetFields()["crossplane.io/external-name"].GetStringValue()
+	if gotA != "name-a" {
+		t.Errorf("bucket-a external-name = %q, want %q", gotA, "name-a")
+	}
+
+	bAnn := res["bucket-b"].Body.GetFields()["metadata"].GetStructValue().GetFields()["annotations"].GetStructValue()
+	gotB := bAnn.GetFields()["crossplane.io/external-name"].GetStringValue()
+	if gotB != "name-b" {
+		t.Errorf("bucket-b external-name = %q, want %q", gotB, "name-b")
+	}
+}
