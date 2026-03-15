@@ -11,7 +11,7 @@ import (
 )
 
 func TestNewCollector(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	if c == nil {
 		t.Fatal("NewCollector returned nil")
 	}
@@ -22,7 +22,7 @@ func TestNewCollector(t *testing.T) {
 }
 
 func TestCollector_SingleResource(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -54,7 +54,7 @@ func TestCollector_SingleResource(t *testing.T) {
 }
 
 func TestCollector_ReadyDefault(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -75,7 +75,7 @@ func TestCollector_ReadyDefault(t *testing.T) {
 }
 
 func TestCollector_ReadyTrue(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -98,7 +98,7 @@ func TestCollector_ReadyTrue(t *testing.T) {
 }
 
 func TestCollector_ReadyFalse(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -121,7 +121,7 @@ func TestCollector_ReadyFalse(t *testing.T) {
 }
 
 func TestCollector_LastWins(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body1 := new(starlark.Dict)
@@ -150,7 +150,7 @@ func TestCollector_LastWins(t *testing.T) {
 }
 
 func TestCollector_NonStringName(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -166,7 +166,7 @@ func TestCollector_NonStringName(t *testing.T) {
 }
 
 func TestCollector_NonDictBody(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	// Pass a string as body instead of dict
@@ -180,7 +180,7 @@ func TestCollector_NonDictBody(t *testing.T) {
 }
 
 func TestCollector_ResourcesCopy(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -202,7 +202,7 @@ func TestCollector_ResourcesCopy(t *testing.T) {
 }
 
 func TestCollector_MultipleDistinct(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	names := []string{"bucket", "queue", "topic"}
@@ -239,7 +239,7 @@ func TestCollector_MultipleDistinct(t *testing.T) {
 }
 
 func TestCollector_EmptyBody(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict) // empty
@@ -358,7 +358,7 @@ func TestResourceRef_Freeze(t *testing.T) {
 // --- Resource() returns *ResourceRef ---
 
 func TestCollector_ResourceReturnsRef(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -384,7 +384,7 @@ func TestCollector_ResourceReturnsRef(t *testing.T) {
 // --- depends_on kwarg tests ---
 
 func TestCollector_DependsOn_ResourceRef(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	// Create a resource to get a ResourceRef.
@@ -430,7 +430,7 @@ func TestCollector_DependsOn_ResourceRef(t *testing.T) {
 }
 
 func TestCollector_DependsOn_String(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -463,7 +463,7 @@ func TestCollector_DependsOn_String(t *testing.T) {
 }
 
 func TestCollector_DependsOn_Mixed(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	// Create db resource first.
@@ -510,7 +510,7 @@ func TestCollector_DependsOn_Mixed(t *testing.T) {
 }
 
 func TestCollector_DependsOn_InvalidType(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -533,7 +533,7 @@ func TestCollector_DependsOn_InvalidType(t *testing.T) {
 }
 
 func TestCollector_NoDependsOn(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -554,7 +554,7 @@ func TestCollector_NoDependsOn(t *testing.T) {
 }
 
 func TestCollector_AddDependency_Concurrent(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	const goroutines = 10
 	const depsPerGoroutine = 100
@@ -583,7 +583,7 @@ func TestCollector_AddDependency_Concurrent(t *testing.T) {
 }
 
 func TestCollector_DependenciesCopy(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	// Create db, then app depending on db.

@@ -16,7 +16,7 @@ import (
 // testBuildGlobals wraps BuildGlobals with default (empty) extended collectors
 // so that existing tests don't need to construct them.
 func testBuildGlobals(req *fnv1.RunFunctionRequest, c *Collector) (starlark.StringDict, error) {
-	return BuildGlobals(req, c, NewConditionCollector(), NewConnectionCollector(), NewRequirementsCollector())
+	return BuildGlobals(req, c, c.cc, NewConnectionCollector(), NewRequirementsCollector())
 }
 
 func makeReq(oxrFields, dxrFields map[string]*structpb.Value, observed map[string]*fnv1.Resource) *fnv1.RunFunctionRequest {
@@ -55,7 +55,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -84,7 +84,7 @@ func TestBuildGlobals_OXR_Frozen(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestBuildGlobals_OXR_Fields(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -169,7 +169,7 @@ func TestBuildGlobals_DXR_Mutable(t *testing.T) {
 		},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -194,7 +194,7 @@ func TestBuildGlobals_DXR_NilDesired(t *testing.T) {
 		nil,
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -238,7 +238,7 @@ func TestBuildGlobals_Observed(t *testing.T) {
 			},
 		},
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -280,7 +280,7 @@ func TestBuildGlobals_Observed_Empty(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -322,7 +322,7 @@ func TestGetBuiltin_DotPath(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func TestGetBuiltin_MissingReturnsDefault(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +376,7 @@ func TestGetBuiltin_CustomDefault(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -413,7 +413,7 @@ func TestGetBuiltin_ListPath(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -458,7 +458,7 @@ func TestGetBuiltin_NonMapping(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestApplyResources_Empty(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	rsp := &fnv1.RunFunctionResponse{}
 
 	err := ApplyResources(rsp, c)
@@ -472,7 +472,7 @@ func TestApplyResources_Empty(t *testing.T) {
 }
 
 func TestApplyResources_MergeNew(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -499,7 +499,7 @@ func TestApplyResources_MergeNew(t *testing.T) {
 }
 
 func TestApplyResources_PreservesPrior(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -537,7 +537,7 @@ func TestApplyResources_PreservesPrior(t *testing.T) {
 }
 
 func TestApplyResources_OverwritesSameName(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -572,7 +572,7 @@ func TestApplyResources_OverwritesSameName(t *testing.T) {
 }
 
 func TestApplyResources_ReadyEnum(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body1 := new(starlark.Dict)
@@ -612,7 +612,7 @@ func TestApplyResources_ReadyEnum(t *testing.T) {
 }
 
 func TestApplyResources_NilDesired(t *testing.T) {
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -761,7 +761,7 @@ func TestGetBuiltin_NoneIntermediate(t *testing.T) {
 		map[string]*structpb.Value{},
 		nil,
 	)
-	c := NewCollector()
+	c := NewCollector(NewConditionCollector())
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)

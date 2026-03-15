@@ -86,8 +86,8 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		}
 
 		// Create all collectors for this execution.
-		collector := builtins.NewCollector()
 		condCollector := builtins.NewConditionCollector()
+		collector := builtins.NewCollector(condCollector)
 		connCollector := builtins.NewConnectionCollector()
 		reqCollector := builtins.NewRequirementsCollector()
 

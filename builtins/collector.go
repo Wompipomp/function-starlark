@@ -13,6 +13,8 @@ import (
 	"github.com/wompipomp/function-starlark/convert"
 )
 
+const externalNameAnnotation = "crossplane.io/external-name"
+
 // ResourceRef is a custom Starlark type returned by Resource().
 // It carries the resource name and can be passed to depends_on.
 type ResourceRef struct {
@@ -68,11 +70,17 @@ type Collector struct {
 	mu           sync.Mutex
 	resources    map[string]CollectedResource
 	dependencies []DependencyPair
+	cc           *ConditionCollector
 }
 
-// NewCollector creates an empty Collector.
-func NewCollector() *Collector {
-	return &Collector{resources: make(map[string]CollectedResource)}
+// NewCollector creates an empty Collector. The ConditionCollector is used to
+// emit Warning events when the external_name kwarg conflicts with a manual
+// crossplane.io/external-name annotation in the body.
+func NewCollector(cc *ConditionCollector) *Collector {
+	return &Collector{
+		resources: make(map[string]CollectedResource),
+		cc:        cc,
+	}
 }
 
 // Builtin returns a *starlark.Builtin named "Resource" that scripts call
@@ -112,7 +120,7 @@ func (c *Collector) addDependency(dependent, dependency string, isRef bool) {
 	})
 }
 
-// resourceFn implements the Resource(name, body, ready=None, connection_details=None, depends_on=None) Starlark builtin.
+// resourceFn implements the Resource(name, body, ready=None, connection_details=None, depends_on=None, external_name=None) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -124,17 +132,31 @@ func (c *Collector) resourceFn(
 	var connDetails *starlark.Dict
 	var dependsOn *starlark.List
 	var readyVal starlark.Value = starlark.None
+	var externalNameVal starlark.Value
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"name", &name, "body", &body, "ready?", &readyVal,
 		"connection_details??", &connDetails,
-		"depends_on??", &dependsOn); err != nil {
+		"depends_on??", &dependsOn,
+		"external_name??", &externalNameVal); err != nil {
 		return nil, err
 	}
 
 	s, err := convert.PlainDictToStruct(body)
 	if err != nil {
 		return nil, fmt.Errorf("Resource(%q): %w", name, err)
+	}
+
+	// Process external_name kwarg if provided.
+	if externalNameVal != nil {
+		en, ok := externalNameVal.(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("Resource(%q): external_name must be string, got %s", name, externalNameVal.Type())
+		}
+		if string(en) == "" {
+			return nil, fmt.Errorf("Resource(%q): external_name must not be empty", name)
+		}
+		injectExternalName(s, string(en), name, c.cc)
 	}
 
 	// Convert connection_details dict to map[string][]byte if provided.
@@ -195,4 +217,37 @@ func readyFromStarlark(v starlark.Value) resource.Ready {
 	default:
 		return resource.ReadyFalse
 	}
+}
+
+// getOrCreateNestedStruct returns the child struct at the given key, creating
+// it if it does not exist or if the existing value is not a struct.
+func getOrCreateNestedStruct(parent *structpb.Struct, key string) *structpb.Struct {
+	if v, ok := parent.Fields[key]; ok {
+		if sv := v.GetStructValue(); sv != nil {
+			return sv
+		}
+	}
+	child := &structpb.Struct{Fields: make(map[string]*structpb.Value)}
+	parent.Fields[key] = structpb.NewStructValue(child)
+	return child
+}
+
+// injectExternalName sets the crossplane.io/external-name annotation on the
+// resource body struct. If the annotation already exists, the kwarg value wins
+// and a Warning event is emitted via the ConditionCollector.
+func injectExternalName(s *structpb.Struct, externalName, resourceName string, cc *ConditionCollector) {
+	metadata := getOrCreateNestedStruct(s, "metadata")
+	annotations := getOrCreateNestedStruct(metadata, "annotations")
+
+	if existing, ok := annotations.Fields[externalNameAnnotation]; ok {
+		oldVal := existing.GetStringValue()
+		msg := fmt.Sprintf("Resource %q: external_name kwarg %q overrides annotation %q",
+			resourceName, externalName, oldVal)
+		cc.mu.Lock()
+		cc.events = append(cc.events, CollectedEvent{
+			Severity: "Warning", Message: msg, Target: "Composite",
+		})
+		cc.mu.Unlock()
+	}
+	annotations.Fields[externalNameAnnotation] = structpb.NewStringValue(externalName)
 }
