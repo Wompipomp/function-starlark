@@ -251,11 +251,16 @@ func (c *Collector) resourceFn(
 		}
 	}
 
+	ready, err := readyFromStarlark(readyVal)
+	if err != nil {
+		return nil, fmt.Errorf("Resource(%q): %w", name, err)
+	}
+
 	c.mu.Lock()
 	c.resources[name] = CollectedResource{
 		Name:              name,
 		Body:              s,
-		Ready:             readyFromStarlark(readyVal),
+		Ready:             ready,
 		ConnectionDetails: cd,
 	}
 	c.mu.Unlock()
@@ -267,14 +272,17 @@ func (c *Collector) resourceFn(
 // None -> ReadyUnspecified (let function-auto-ready detect readiness)
 // True -> ReadyTrue (explicitly ready, e.g. ProviderConfig)
 // False -> ReadyFalse (explicitly not ready)
-func readyFromStarlark(v starlark.Value) resource.Ready {
+// Any other type returns an error naming the invalid type.
+func readyFromStarlark(v starlark.Value) (resource.Ready, error) {
 	switch v {
 	case starlark.None:
-		return resource.ReadyUnspecified
+		return resource.ReadyUnspecified, nil
 	case starlark.True:
-		return resource.ReadyTrue
+		return resource.ReadyTrue, nil
+	case starlark.False:
+		return resource.ReadyFalse, nil
 	default:
-		return resource.ReadyFalse
+		return "", fmt.Errorf("ready must be True, False, or None, got %s", v.Type())
 	}
 }
 
