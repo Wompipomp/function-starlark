@@ -10,6 +10,8 @@ import (
 	"github.com/crossplane/function-sdk-go/logging"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+
+	"github.com/wompipomp/function-starlark/metrics"
 )
 
 const maxSteps = 1_000_000
@@ -93,6 +95,7 @@ func (r *Runtime) getOrCompile(source string, predeclared starlark.StringDict, f
 	r.mu.RUnlock()
 	if ok {
 		r.log.Debug("cache hit", "hash", key[:12])
+		metrics.CacheHitsTotal.WithLabelValues(filename).Inc()
 		return prog, nil
 	}
 
@@ -112,6 +115,7 @@ func (r *Runtime) getOrCompile(source string, predeclared starlark.StringDict, f
 	r.cache[key] = prog
 	r.mu.Unlock()
 	r.log.Debug("cache miss -- compiled", "hash", key[:12])
+	metrics.CacheMissesTotal.WithLabelValues(filename).Inc()
 
 	return prog, nil
 }

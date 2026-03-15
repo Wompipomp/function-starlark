@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/convert"
+	"github.com/wompipomp/function-starlark/metrics"
 )
 
 const externalNameAnnotation = "crossplane.io/external-name"
@@ -72,6 +73,7 @@ type Collector struct {
 	skipped      map[string]bool
 	dependencies []DependencyPair
 	cc           *ConditionCollector
+	scriptName   string
 }
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
@@ -83,6 +85,11 @@ func NewCollector(cc *ConditionCollector) *Collector {
 		skipped:   make(map[string]bool),
 		cc:        cc,
 	}
+}
+
+// SetScriptName records the script filename for use in metric labels.
+func (c *Collector) SetScriptName(name string) {
+	c.scriptName = name
 }
 
 // Builtin returns a *starlark.Builtin named "Resource" that scripts call
@@ -126,6 +133,8 @@ func (c *Collector) skipResourceFn(
 	}
 	c.skipped[name] = true
 	c.mu.Unlock()
+
+	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName).Inc()
 
 	// Emit Warning event. Release c.mu before acquiring cc.mu to avoid
 	// lock ordering issues (Pitfall 4 from RESEARCH.md).
