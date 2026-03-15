@@ -32,8 +32,10 @@ func NewRuntime(log logging.Logger) *Runtime {
 // Execute compiles (or retrieves from cache) and runs the Starlark source.
 // predeclared defines the built-in globals available to the script.
 // filename is used in error messages and stack traces (e.g., "my-script.star").
+// loadFn, if non-nil, is used as the Thread.Load callback for load() statements.
+// A nil loadFn falls back to an error stub that rejects all load() calls.
 // Returns post-execution globals.
-func (r *Runtime) Execute(source string, predeclared starlark.StringDict, filename string) (starlark.StringDict, error) {
+func (r *Runtime) Execute(source string, predeclared starlark.StringDict, filename string, loadFn LoadFunc) (starlark.StringDict, error) {
 	prog, err := r.getOrCompile(source, predeclared, filename)
 	if err != nil {
 		return nil, fmt.Errorf("starlark compilation error: %w", err)
@@ -44,9 +46,14 @@ func (r *Runtime) Execute(source string, predeclared starlark.StringDict, filena
 		Print: func(_ *starlark.Thread, msg string) {
 			r.log.Debug("starlark print", "msg", msg)
 		},
-		Load: func(_ *starlark.Thread, _ string) (starlark.StringDict, error) {
+	}
+
+	if loadFn != nil {
+		thread.Load = loadFn
+	} else {
+		thread.Load = func(_ *starlark.Thread, _ string) (starlark.StringDict, error) {
 			return nil, fmt.Errorf("load() is not supported -- define helpers with def in the same script")
-		},
+		}
 	}
 	thread.SetMaxExecutionSteps(maxSteps)
 

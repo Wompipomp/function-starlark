@@ -49,7 +49,7 @@ func TestBasicExecution(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	globals, err := rt.Execute("x = 1 + 2", starlark.StringDict{}, "composition.star")
+	globals, err := rt.Execute("x = 1 + 2", starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestCacheHit(t *testing.T) {
 	source := "x = 1 + 2"
 
 	// First call -- cache miss
-	_, err := rt.Execute(source, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("first execute error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCacheHit(t *testing.T) {
 	}
 
 	// Second call with same source -- cache hit
-	_, err = rt.Execute(source, starlark.StringDict{}, "composition.star")
+	_, err = rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("second execute error: %v", err)
 	}
@@ -99,12 +99,12 @@ func TestCacheMiss(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute("x = 1", starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute("x = 1", starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("first execute error: %v", err)
 	}
 
-	_, err = rt.Execute("x = 2", starlark.StringDict{}, "composition.star")
+	_, err = rt.Execute("x = 2", starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("second execute error: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCompilationError(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute("x = (", starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute("x = (", starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected compilation error, got nil")
 	}
@@ -133,7 +133,7 @@ func TestRuntimeError(t *testing.T) {
 	rt := NewRuntime(log)
 
 	// Use an undefined variable in a runtime context (function call).
-	_, err := rt.Execute("x = undefined_var", starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute("x = undefined_var", starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected runtime error, got nil")
 	}
@@ -144,7 +144,7 @@ func TestRuntimeError(t *testing.T) {
 def f():
     return 1 / 0
 f()
-`, starlark.StringDict{}, "composition.star")
+`, starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected runtime error, got nil")
 	}
@@ -158,7 +158,7 @@ func TestLoadBlocked(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute(`load("foo.star", "bar")`, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(`load("foo.star", "bar")`, starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected error for load(), got nil")
 	}
@@ -180,7 +180,7 @@ for i in range(3):
 if len(result) == 3:
     ok = True
 `
-	globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star")
+	globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestStepLimitExceeded(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute("while True: pass", starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute("while True: pass", starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected step limit error, got nil")
 	}
@@ -216,7 +216,7 @@ func TestPrintRouting(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute(`print("hello world")`, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(`print("hello world")`, starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestSandboxNoOS(t *testing.T) {
 	rt := NewRuntime(log)
 
 	// os is not predeclared, so using it should fail at compile time.
-	_, err := rt.Execute(`x = os.getenv("HOME")`, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(`x = os.getenv("HOME")`, starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected error for os access, got nil")
 	}
@@ -253,7 +253,7 @@ func TestSandboxNoSys(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute(`x = sys.exit(1)`, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(`x = sys.exit(1)`, starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected error for sys access, got nil")
 	}
@@ -263,7 +263,7 @@ func TestSandboxNoIO(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute(`f = open("test.txt")`, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(`f = open("test.txt")`, starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected error for io access, got nil")
 	}
@@ -273,7 +273,7 @@ func TestSandboxNoTime(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	_, err := rt.Execute(`t = time.now()`, starlark.StringDict{}, "composition.star")
+	_, err := rt.Execute(`t = time.now()`, starlark.StringDict{}, "composition.star", nil)
 	if err == nil {
 		t.Fatal("expected error for time access, got nil")
 	}
@@ -291,7 +291,7 @@ func TestConcurrentExecution(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, err := rt.Execute("x = 1 + 2", starlark.StringDict{}, "composition.star")
+			_, err := rt.Execute("x = 1 + 2", starlark.StringDict{}, "composition.star", nil)
 			errs[idx] = err
 		}(i)
 	}
@@ -320,7 +320,7 @@ func TestThreadIsolation(t *testing.T) {
 			defer wg.Done()
 			// Each goroutine sets x to its own index.
 			source := "x = " + starlark.MakeInt(idx).String()
-			globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star")
+			globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 			results[idx] = globals
 			errs[idx] = err
 		}(i)
@@ -376,7 +376,7 @@ func TestCacheKeyIsSourceOnly(t *testing.T) {
 	// Execute with one set of predeclared.
 	_, err := rt.Execute(source, starlark.StringDict{
 		"a": starlark.String("alpha"),
-	}, "composition.star")
+	}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("first execute error: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestCacheKeyIsSourceOnly(t *testing.T) {
 	// Execute same source with different predeclared -- should cache hit.
 	_, err = rt.Execute(source, starlark.StringDict{
 		"b": starlark.String("beta"),
-	}, "composition.star")
+	}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("second execute error: %v", err)
 	}
@@ -403,7 +403,7 @@ def greet(name):
     return "hello " + name
 result = greet("world")
 `
-	globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star")
+	globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestSetLiteral(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	globals, err := rt.Execute("s = set([1, 2, 3, 2])", starlark.StringDict{}, "composition.star")
+	globals, err := rt.Execute("s = set([1, 2, 3, 2])", starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestEmptySource(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	globals, err := rt.Execute("", starlark.StringDict{}, "composition.star")
+	globals, err := rt.Execute("", starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestConcurrentSameSource(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			_, err := rt.Execute(source, starlark.StringDict{}, "composition.star")
+			_, err := rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 			errs[idx] = err
 		}(i)
 	}
@@ -500,7 +500,7 @@ while i[0] < 5:
     i[0] = i[0] + 1
 total = len(acc)
 `
-	globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star")
+	globals, err := rt.Execute(source, starlark.StringDict{}, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestPredeclaredAccess(t *testing.T) {
 		"greeting": starlark.String("hello"),
 	}
 
-	globals, err := rt.Execute("x = greeting", predeclared, "composition.star")
+	globals, err := rt.Execute("x = greeting", predeclared, "composition.star", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -549,7 +549,7 @@ func TestFilenameInError(t *testing.T) {
 def boom():
     return 1 / 0
 boom()
-`, starlark.StringDict{}, "my-script.star")
+`, starlark.StringDict{}, "my-script.star", nil)
 	if err == nil {
 		t.Fatal("expected runtime error, got nil")
 	}
@@ -570,12 +570,12 @@ func TestCacheKeyIncludesFilename(t *testing.T) {
 	source := "x = 42"
 
 	// Execute same source with two different filenames.
-	_, err := rt.Execute(source, starlark.StringDict{}, "a.star")
+	_, err := rt.Execute(source, starlark.StringDict{}, "a.star", nil)
 	if err != nil {
 		t.Fatalf("first execute error: %v", err)
 	}
 
-	_, err = rt.Execute(source, starlark.StringDict{}, "b.star")
+	_, err = rt.Execute(source, starlark.StringDict{}, "b.star", nil)
 	if err != nil {
 		t.Fatalf("second execute error: %v", err)
 	}

@@ -93,7 +93,27 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 			return rsp, nil
 		}
 
-		_, err = f.runtime.Execute(source, globals, filename)
+		// Determine script directory for filesystem module resolution.
+		var scriptSearchDir string
+		if in.Spec.ScriptConfigRef != nil {
+			dir := f.scriptDir
+			if dir == "" {
+				dir = "/scripts"
+			}
+			scriptSearchDir = filepath.Join(dir, in.Spec.ScriptConfigRef.Name)
+		}
+
+		// Build search paths: script's own dir first (if ConfigMap), then configured modulePaths.
+		var searchPaths []string
+		if scriptSearchDir != "" {
+			searchPaths = append(searchPaths, scriptSearchDir)
+		}
+		searchPaths = append(searchPaths, in.Spec.ModulePaths...)
+
+		// Create module loader with inline modules, search paths, and same builtins.
+		loader := runtime.NewModuleLoader(in.Spec.Modules, searchPaths, globals, f.runtime)
+
+		_, err = f.runtime.Execute(source, globals, filename, loader.LoadFunc())
 		if err != nil {
 			// Check for FatalError from fatal() builtin before generic error handling.
 			var fatalErr *builtins.FatalError

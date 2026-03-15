@@ -45,7 +45,7 @@ func BenchmarkCachedExecution(b *testing.B) {
 	predeclared := starlark.StringDict{}
 
 	// Pre-warm the cache.
-	if _, err := rt.Execute(fixtureScript, predeclared, "bench.star"); err != nil {
+	if _, err := rt.Execute(fixtureScript, predeclared, "bench.star", nil); err != nil {
 		b.Fatalf("pre-warm failed: %v", err)
 	}
 
@@ -53,7 +53,7 @@ func BenchmarkCachedExecution(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		if _, err := rt.Execute(fixtureScript, predeclared, "bench.star"); err != nil {
+		if _, err := rt.Execute(fixtureScript, predeclared, "bench.star", nil); err != nil {
 			b.Fatalf("execute failed: %v", err)
 		}
 	}
@@ -73,7 +73,7 @@ func BenchmarkIdleMemory(b *testing.B) {
 	// Create runtime and execute one composition.
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	if _, err := rt.Execute(fixtureScript, starlark.StringDict{}, "bench.star"); err != nil {
+	if _, err := rt.Execute(fixtureScript, starlark.StringDict{}, "bench.star", nil); err != nil {
 		b.Fatalf("execute failed: %v", err)
 	}
 
@@ -114,7 +114,7 @@ for j in range(10):
     resources.append({"name": name, "index": j})
 total_%d = len(resources)
 `, i, i)
-				if _, err := rt.Execute(src, starlark.StringDict{}, "bench.star"); err != nil {
+				if _, err := rt.Execute(src, starlark.StringDict{}, "bench.star", nil); err != nil {
 					b.Fatalf("execute %d failed: %v", i, err)
 				}
 			}
