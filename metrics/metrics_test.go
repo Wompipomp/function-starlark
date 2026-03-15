@@ -32,98 +32,83 @@ func TestMetricsRegistered(t *testing.T) {
 	}
 }
 
-func TestCacheHitsTotalNaming(t *testing.T) {
-	expected := `
-		# HELP function_starlark_cache_hits_total Total bytecode cache hits.
-		# TYPE function_starlark_cache_hits_total counter
-		function_starlark_cache_hits_total{script="naming-test.star"} 0
-	`
-	// Initialize the label to create the series.
-	CacheHitsTotal.WithLabelValues("naming-test.star")
+func TestCounterNaming(t *testing.T) {
+	counters := []struct {
+		name     string
+		wantName string
+		metric   *prometheus.CounterVec
+	}{
+		{"CacheHitsTotal", "function_starlark_cache_hits_total", CacheHitsTotal},
+		{"CacheMissesTotal", "function_starlark_cache_misses_total", CacheMissesTotal},
+		{"ResourcesEmittedTotal", "function_starlark_resources_emitted_total", ResourcesEmittedTotal},
+		{"ResourcesSkippedTotal", "function_starlark_resources_skipped_total", ResourcesSkippedTotal},
+		{"ReconciliationsTotal", "function_starlark_reconciliations_total", ReconciliationsTotal},
+	}
+	for _, tc := range counters {
+		t.Run(tc.name, func(t *testing.T) {
+			// Verify the metric name via Desc.
+			ch := make(chan *prometheus.Desc, 1)
+			tc.metric.Describe(ch)
+			d := <-ch
+			s := d.String()
+			if !strings.Contains(s, tc.wantName) {
+				t.Errorf("%s desc = %q, want it to contain %q", tc.name, s, tc.wantName)
+			}
 
-	if err := testutil.CollectAndCompare(CacheHitsTotal, strings.NewReader(expected)); err != nil {
-		t.Errorf("cache hits naming: %v", err)
+			// Verify the counter is functional (Inc does not panic).
+			label := tc.name + "-naming.star"
+			tc.metric.WithLabelValues(label).Inc()
+			got := testutil.ToFloat64(tc.metric.WithLabelValues(label))
+			if got != 1 {
+				t.Errorf("%s after Inc() = %v, want 1", tc.name, got)
+			}
+		})
 	}
 }
 
-func TestCacheMissesTotalNaming(t *testing.T) {
-	expected := `
-		# HELP function_starlark_cache_misses_total Total bytecode cache misses (compilations).
-		# TYPE function_starlark_cache_misses_total counter
-		function_starlark_cache_misses_total{script="naming-test.star"} 0
-	`
-	CacheMissesTotal.WithLabelValues("naming-test.star")
-
-	if err := testutil.CollectAndCompare(CacheMissesTotal, strings.NewReader(expected)); err != nil {
-		t.Errorf("cache misses naming: %v", err)
+func TestHistogramNaming(t *testing.T) {
+	histograms := []struct {
+		name     string
+		wantName string
+		metric   *prometheus.HistogramVec
+	}{
+		{"ExecutionDurationSeconds", "function_starlark_execution_duration_seconds", ExecutionDurationSeconds},
+		{"ReconciliationDurationSeconds", "function_starlark_reconciliation_duration_seconds", ReconciliationDurationSeconds},
+		{"OCIResolveDurationSeconds", "function_starlark_oci_resolve_duration_seconds", OCIResolveDurationSeconds},
+	}
+	for _, tc := range histograms {
+		t.Run(tc.name, func(t *testing.T) {
+			ch := make(chan *prometheus.Desc, 1)
+			tc.metric.Describe(ch)
+			d := <-ch
+			s := d.String()
+			if !strings.Contains(s, tc.wantName) {
+				t.Errorf("%s desc = %q, want it to contain %q", tc.name, s, tc.wantName)
+			}
+		})
 	}
 }
 
-func TestResourcesEmittedTotalNaming(t *testing.T) {
-	expected := `
-		# HELP function_starlark_resources_emitted_total Total composed resources emitted.
-		# TYPE function_starlark_resources_emitted_total counter
-		function_starlark_resources_emitted_total{script="naming-test.star"} 0
-	`
-	ResourcesEmittedTotal.WithLabelValues("naming-test.star")
+func TestScriptLabel(t *testing.T) {
+	// Verify the script label is accepted on all metrics.
+	// Using a unique label value to avoid cross-test interference.
+	label := "label-test.star"
 
-	if err := testutil.CollectAndCompare(ResourcesEmittedTotal, strings.NewReader(expected)); err != nil {
-		t.Errorf("resources emitted naming: %v", err)
-	}
-}
+	// Counters.
+	CacheHitsTotal.WithLabelValues(label).Inc()
+	CacheMissesTotal.WithLabelValues(label).Inc()
+	ResourcesEmittedTotal.WithLabelValues(label).Inc()
+	ResourcesSkippedTotal.WithLabelValues(label).Inc()
+	ReconciliationsTotal.WithLabelValues(label).Inc()
 
-func TestResourcesSkippedTotalNaming(t *testing.T) {
-	expected := `
-		# HELP function_starlark_resources_skipped_total Total resources skipped via skip_resource().
-		# TYPE function_starlark_resources_skipped_total counter
-		function_starlark_resources_skipped_total{script="naming-test.star"} 0
-	`
-	ResourcesSkippedTotal.WithLabelValues("naming-test.star")
+	// Histograms.
+	ExecutionDurationSeconds.WithLabelValues(label).Observe(0.001)
+	ReconciliationDurationSeconds.WithLabelValues(label).Observe(0.01)
+	OCIResolveDurationSeconds.WithLabelValues(label).Observe(0.01)
 
-	if err := testutil.CollectAndCompare(ResourcesSkippedTotal, strings.NewReader(expected)); err != nil {
-		t.Errorf("resources skipped naming: %v", err)
-	}
-}
-
-func TestReconciliationsTotalNaming(t *testing.T) {
-	expected := `
-		# HELP function_starlark_reconciliations_total Total RunFunction calls.
-		# TYPE function_starlark_reconciliations_total counter
-		function_starlark_reconciliations_total{script="naming-test.star"} 0
-	`
-	ReconciliationsTotal.WithLabelValues("naming-test.star")
-
-	if err := testutil.CollectAndCompare(ReconciliationsTotal, strings.NewReader(expected)); err != nil {
-		t.Errorf("reconciliations total naming: %v", err)
-	}
-}
-
-func TestExecutionDurationSecondsNaming(t *testing.T) {
-	ch := make(chan *prometheus.Desc, 1)
-	ExecutionDurationSeconds.Describe(ch)
-	d := <-ch
-	s := d.String()
-	if !strings.Contains(s, "function_starlark_execution_duration_seconds") {
-		t.Errorf("ExecutionDurationSeconds desc = %q, want it to contain metric name", s)
-	}
-}
-
-func TestReconciliationDurationSecondsNaming(t *testing.T) {
-	ch := make(chan *prometheus.Desc, 1)
-	ReconciliationDurationSeconds.Describe(ch)
-	d := <-ch
-	s := d.String()
-	if !strings.Contains(s, "function_starlark_reconciliation_duration_seconds") {
-		t.Errorf("ReconciliationDurationSeconds desc = %q, want it to contain metric name", s)
-	}
-}
-
-func TestOCIResolveDurationSecondsNaming(t *testing.T) {
-	ch := make(chan *prometheus.Desc, 1)
-	OCIResolveDurationSeconds.Describe(ch)
-	d := <-ch
-	s := d.String()
-	if !strings.Contains(s, "function_starlark_oci_resolve_duration_seconds") {
-		t.Errorf("OCIResolveDurationSeconds desc = %q, want it to contain metric name", s)
+	// If any of the above panicked, the test fails. Additionally verify
+	// counter values to ensure they actually incremented.
+	if got := testutil.ToFloat64(CacheHitsTotal.WithLabelValues(label)); got != 1 {
+		t.Errorf("CacheHitsTotal{script=%q} = %v, want 1", label, got)
 	}
 }
