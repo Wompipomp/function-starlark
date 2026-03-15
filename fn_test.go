@@ -1716,6 +1716,228 @@ func TestRunFunction(t *testing.T) {
 				}(),
 			},
 		},
+
+		// -----------------------------------------------------------------
+		// E2E tests for Phase 8 requirements (MOD-01 through MOD-08)
+		// Module loading through RunFunction pipeline
+		// -----------------------------------------------------------------
+
+		"InlineModuleLoad": {
+			reason: "MOD-01: Script loads an inline module and calls its exported function.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "load(\"helpers.star\", \"greet\")\nresult = greet(\"world\")\nResource(\"test\", {\"greeting\": result})",
+							"modules": {
+								"helpers.star": "def greet(name):\n    return \"hello \" + name"
+							}
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "load(\"helpers.star\", \"greet\")\nresult = greet(\"world\")\nResource(\"test\", {\"greeting\": result})",
+								"modules": {
+									"helpers.star": "def greet(name):\n    return \"hello \" + name"
+								}
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"test": {
+								Resource: resource.MustStructJSON(`{"greeting": "hello world"}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"InlineModuleUsesResource": {
+			reason: "MOD-02: Module calls Resource() and the resource appears in desired state -- proves shared collector.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "load(\"infra.star\", \"make_bucket\")\nmake_bucket(\"my-bucket\", \"us-east-1\")",
+							"modules": {
+								"infra.star": "def make_bucket(name, region):\n    Resource(name, {\"apiVersion\": \"s3.aws.upbound.io/v1beta1\", \"kind\": \"Bucket\", \"spec\": {\"forProvider\": {\"region\": region}}})"
+							}
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "load(\"infra.star\", \"make_bucket\")\nmake_bucket(\"my-bucket\", \"us-east-1\")",
+								"modules": {
+									"infra.star": "def make_bucket(name, region):\n    Resource(name, {\"apiVersion\": \"s3.aws.upbound.io/v1beta1\", \"kind\": \"Bucket\", \"spec\": {\"forProvider\": {\"region\": region}}})"
+								}
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"my-bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","spec":{"forProvider":{"region":"us-east-1"}}}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"InlineModuleAccessesXR": {
+			reason: "MOD-03: Module accesses oxr global to read composite resource data -- proves shared globals.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "load(\"reader.star\", \"read_region\")\nregion = read_region()\nResource(\"test\", {\"region\": region})",
+							"modules": {
+								"reader.star": "def read_region():\n    return get(oxr, \"spec.parameters.region\", \"default\")"
+							}
+						}
+					}`),
+					Observed: &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{
+								"apiVersion": "example.crossplane.io/v1",
+								"kind": "XBucket",
+								"spec": {
+									"parameters": {"region": "ap-southeast-1"}
+								}
+							}`),
+						},
+					},
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "load(\"reader.star\", \"read_region\")\nregion = read_region()\nResource(\"test\", {\"region\": region})",
+								"modules": {
+									"reader.star": "def read_region():\n    return get(oxr, \"spec.parameters.region\", \"default\")"
+								}
+							}
+						}`),
+						Observed: &fnv1.State{
+							Composite: &fnv1.Resource{
+								Resource: resource.MustStructJSON(`{
+									"apiVersion": "example.crossplane.io/v1",
+									"kind": "XBucket",
+									"spec": {
+										"parameters": {"region": "ap-southeast-1"}
+									}
+								}`),
+							},
+						},
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"test": {
+								Resource: resource.MustStructJSON(`{"region": "ap-southeast-1"}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"InlineModuleTransitiveLoad": {
+			reason: "MOD-04: Module A loads Module B (both inline), transitive loading works.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "load(\"a.star\", \"from_a\")\nResource(\"test\", {\"value\": from_a()})",
+							"modules": {
+								"a.star": "load(\"b.star\", \"from_b\")\ndef from_a():\n    return \"a+\" + from_b()",
+								"b.star": "def from_b():\n    return \"b\""
+							}
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "load(\"a.star\", \"from_a\")\nResource(\"test\", {\"value\": from_a()})",
+								"modules": {
+									"a.star": "load(\"b.star\", \"from_b\")\ndef from_a():\n    return \"a+\" + from_b()",
+									"b.star": "def from_b():\n    return \"b\""
+								}
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"test": {
+								Resource: resource.MustStructJSON(`{"value": "a+b"}`),
+								Ready:    fnv1.Ready_READY_TRUE,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
 	}
 
 	for name, tc := range cases {
@@ -2329,6 +2551,250 @@ func TestRunFunctionDependsOnEmptyList(t *testing.T) {
 	for _, r := range rsp.GetResults() {
 		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING {
 			t.Errorf("unexpected warning: %s", r.GetMessage())
+		}
+	}
+}
+
+// TestRunFunctionModuleCircularLoad verifies that circular load() produces Fatal.
+func TestRunFunctionModuleCircularLoad(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"a.star\", \"fn_a\")",
+				"modules": {
+					"a.star": "load(\"b.star\", \"fn_b\")\ndef fn_a():\n    return fn_b()",
+					"b.star": "load(\"a.star\", \"fn_a\")\ndef fn_b():\n    return fn_a()"
+				}
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "cycle in load graph")
+}
+
+// TestRunFunctionModuleNotFound verifies that loading a missing module produces Fatal.
+func TestRunFunctionModuleNotFound(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"missing.star\", \"fn\")"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "not found")
+}
+
+// TestRunFunctionModuleErrorShowsFilename verifies that errors in modules
+// include the module filename in the error message.
+func TestRunFunctionModuleErrorShowsFilename(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"bad.star\", \"boom\")",
+				"modules": {
+					"bad.star": "def boom():\n    return 1/0\nboom()"
+				}
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "bad.star")
+}
+
+// TestRunFunctionModuleFilesystem verifies filesystem module loading:
+// - Loading modules from the ConfigMap script directory
+// - Loading modules from configured modulePaths
+// - Inline modules taking priority over filesystem modules
+func TestRunFunctionModuleFilesystem(t *testing.T) {
+	t.Run("FilesystemModuleLoad", func(t *testing.T) {
+		rt := runtime.NewRuntime(logging.NewNopLogger())
+
+		// Create temp directory simulating ConfigMap mount.
+		tmpDir := t.TempDir()
+		scriptDir := filepath.Join(tmpDir, "my-scripts")
+		if err := os.MkdirAll(scriptDir, 0o750); err != nil {
+			t.Fatalf("creating script dir: %v", err)
+		}
+
+		// Write main script and a helper module.
+		mainScript := `load("helpers.star", "tag")
+Resource("test", {"tag": tag("prod")})`
+		if err := os.WriteFile(filepath.Join(scriptDir, "main.star"), []byte(mainScript), 0o600); err != nil {
+			t.Fatalf("writing main.star: %v", err)
+		}
+
+		helperModule := `def tag(env):
+    return "env-" + env`
+		if err := os.WriteFile(filepath.Join(scriptDir, "helpers.star"), []byte(helperModule), 0o600); err != nil {
+			t.Fatalf("writing helpers.star: %v", err)
+		}
+
+		f := &Function{log: logging.NewNopLogger(), runtime: rt, scriptDir: tmpDir}
+
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {
+					"scriptConfigRef": {
+						"name": "my-scripts",
+						"key": "main.star"
+					}
+				}
+			}`),
+		}
+
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+
+		assertNormalResult(t, rsp)
+
+		// Verify the resource was created with the module's tag function.
+		testRes, ok := rsp.GetDesired().GetResources()["test"]
+		if !ok {
+			t.Fatal("expected 'test' resource in desired state")
+		}
+		tag := testRes.GetResource().GetFields()["tag"].GetStringValue()
+		if tag != "env-prod" {
+			t.Errorf("tag = %q, want 'env-prod'", tag)
+		}
+	})
+
+	t.Run("ModulePathsConfig", func(t *testing.T) {
+		rt := runtime.NewRuntime(logging.NewNopLogger())
+
+		// Create a separate directory for shared modules.
+		sharedDir := t.TempDir()
+		sharedModule := `def shared_fn():
+    return "from-shared"`
+		if err := os.WriteFile(filepath.Join(sharedDir, "shared.star"), []byte(sharedModule), 0o600); err != nil {
+			t.Fatalf("writing shared.star: %v", err)
+		}
+
+		f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(fmt.Sprintf(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {
+					"source": "load(\"shared.star\", \"shared_fn\")\nResource(\"test\", {\"value\": shared_fn()})",
+					"modulePaths": [%q]
+				}
+			}`, sharedDir)),
+		}
+
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+
+		assertNormalResult(t, rsp)
+
+		testRes, ok := rsp.GetDesired().GetResources()["test"]
+		if !ok {
+			t.Fatal("expected 'test' resource in desired state")
+		}
+		value := testRes.GetResource().GetFields()["value"].GetStringValue()
+		if value != "from-shared" {
+			t.Errorf("value = %q, want 'from-shared'", value)
+		}
+	})
+
+	t.Run("InlineBeforeFilesystem", func(t *testing.T) {
+		rt := runtime.NewRuntime(logging.NewNopLogger())
+
+		// Create filesystem module with different content.
+		fsDir := t.TempDir()
+		fsModule := `def origin():
+    return "filesystem"`
+		if err := os.WriteFile(filepath.Join(fsDir, "helpers.star"), []byte(fsModule), 0o600); err != nil {
+			t.Fatalf("writing helpers.star: %v", err)
+		}
+
+		f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+		// Inline module has same name but different implementation.
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(fmt.Sprintf(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {
+					"source": "load(\"helpers.star\", \"origin\")\nResource(\"test\", {\"from\": origin()})",
+					"modules": {
+						"helpers.star": "def origin():\n    return \"inline\""
+					},
+					"modulePaths": [%q]
+				}
+			}`, fsDir)),
+		}
+
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+
+		assertNormalResult(t, rsp)
+
+		testRes, ok := rsp.GetDesired().GetResources()["test"]
+		if !ok {
+			t.Fatal("expected 'test' resource in desired state")
+		}
+		from := testRes.GetResource().GetFields()["from"].GetStringValue()
+		if from != "inline" {
+			t.Errorf("from = %q, want 'inline' (inline should take priority over filesystem)", from)
+		}
+	})
+}
+
+// assertFatalResult verifies the response has a Fatal severity result
+// whose message contains all the specified substrings.
+func assertFatalResult(t *testing.T, rsp *fnv1.RunFunctionResponse, substrings ...string) {
+	t.Helper()
+	if len(rsp.GetResults()) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_FATAL {
+		t.Fatalf("expected SEVERITY_FATAL, got %v (message: %s)",
+			rsp.GetResults()[0].GetSeverity(), rsp.GetResults()[0].GetMessage())
+	}
+	msg := rsp.GetResults()[0].GetMessage()
+	for _, sub := range substrings {
+		if !strings.Contains(msg, sub) {
+			t.Errorf("expected Fatal message to contain %q, got: %s", sub, msg)
 		}
 	}
 }
