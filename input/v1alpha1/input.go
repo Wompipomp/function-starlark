@@ -28,6 +28,12 @@ type StarlarkInputSpec struct {
 	// This field is reserved for Phase 5 and is not used in the current version.
 	// +optional
 	ScriptConfigRef *ScriptConfigRef `json:"scriptConfigRef,omitempty"`
+
+	// UsageAPIVersion overrides the auto-detected Crossplane Usage API version.
+	// Valid values: "v1" (apiextensions.crossplane.io/v1alpha1) or "v2" (protection.crossplane.io/v1beta1).
+	// If empty, defaults to v1 for maximum backward compatibility.
+	// +optional
+	UsageAPIVersion string `json:"usageAPIVersion,omitempty"`
 }
 
 // ScriptConfigRef references a ConfigMap containing a Starlark script.

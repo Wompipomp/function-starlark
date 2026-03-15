@@ -61,6 +61,12 @@ spec:
               source:
                 description: Source is the inline Starlark script to execute.
                 type: string
+              usageAPIVersion:
+                description: |-
+                  UsageAPIVersion overrides the auto-detected Crossplane Usage API version.
+                  Valid values: "v1" (apiextensions.crossplane.io/v1alpha1) or "v2" (protection.crossplane.io/v1beta1).
+                  If empty, defaults to v1 for maximum backward compatibility.
+                type: string
             required:
             - source
             type: object
