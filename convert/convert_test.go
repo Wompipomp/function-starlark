@@ -1687,3 +1687,124 @@ func TestProtoValueToPlainStarlark_FrozenNestedList(t *testing.T) {
 		t.Error("Append on frozen list should fail")
 	}
 }
+
+func TestConvertNumber_Boundaries(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   float64
+		wantErr string
+		wantVal starlark.Value
+	}{
+		{
+			name:    "exactly 2^53 returns Int64",
+			input:   float64(1 << 53),
+			wantVal: starlark.MakeInt64(1 << 53),
+		},
+		{
+			name:    "exactly -2^53 returns Int64",
+			input:   -float64(1 << 53),
+			wantVal: starlark.MakeInt64(-(1 << 53)),
+		},
+		{
+			name:    "negative imprecise zone returns Float",
+			input:   -float64(1 << 54),
+			wantVal: starlark.Float(-float64(1 << 54)),
+		},
+		{
+			name:    "exactly float64(MinInt64) returns error",
+			input:   float64(math.MinInt64),
+			wantErr: "exceeds int64 range",
+		},
+		{
+			name:    "zero returns Int64(0)",
+			input:   0.0,
+			wantVal: starlark.MakeInt64(0),
+		},
+		{
+			name:    "-Inf returns Float",
+			input:   math.Inf(-1),
+			wantVal: starlark.Float(math.Inf(-1)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := convertNumber(tt.input)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("convertNumber(%g) = %v, want error containing %q", tt.input, got, tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("convertNumber(%g) error = %q, want error containing %q", tt.input, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("convertNumber(%g) unexpected error: %v", tt.input, err)
+			}
+			// starlark.Int wraps big.Int, so use string comparison.
+			if got.String() != tt.wantVal.String() || got.Type() != tt.wantVal.Type() {
+				t.Errorf("convertNumber(%g) = %v (%s), want %v (%s)", tt.input, got, got.Type(), tt.wantVal, tt.wantVal.Type())
+			}
+		})
+	}
+}
+
+func TestConvertListValue_OverflowPropagation(t *testing.T) {
+	lv := &structpb.ListValue{
+		Values: []*structpb.Value{
+			structpb.NewNumberValue(42),
+			structpb.NewNumberValue(1e19), // exceeds int64 range
+		},
+	}
+	_, err := convertListValue(lv, false, plainDictFactory)
+	if err == nil {
+		t.Fatal("convertListValue with overflow number should return error")
+	}
+	if !strings.Contains(err.Error(), "exceeds int64 range") {
+		t.Errorf("error = %q, want error containing 'exceeds int64 range'", err)
+	}
+}
+
+func TestConversionParity_Primitives(t *testing.T) {
+	// Both conversion paths should produce identical primitive values.
+	s := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"name":    structpb.NewStringValue("hello"),
+			"count":   structpb.NewNumberValue(42),
+			"enabled": structpb.NewBoolValue(true),
+			"empty":   structpb.NewNullValue(),
+		},
+	}
+
+	// Path 1: StructToStarlark (returns *StarlarkDict)
+	sd, err := StructToStarlark(s, false)
+	if err != nil {
+		t.Fatalf("StructToStarlark error: %v", err)
+	}
+
+	// Path 2: ProtoValueToPlainStarlark (returns *starlark.Dict)
+	pv, err := ProtoValueToPlainStarlark(structpb.NewStructValue(s), false)
+	if err != nil {
+		t.Fatalf("ProtoValueToPlainStarlark error: %v", err)
+	}
+	pd, ok := pv.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("ProtoValueToPlainStarlark returned %T, want *starlark.Dict", pv)
+	}
+
+	// Compare primitive values by key.
+	for _, key := range []string{"name", "count", "enabled", "empty"} {
+		sdVal, err := sd.Attr(key)
+		if err != nil {
+			t.Fatalf("StarlarkDict.Attr(%q) error: %v", key, err)
+		}
+		pdVal, _, err := pd.Get(starlark.String(key))
+		if err != nil {
+			t.Fatalf("Dict.Get(%q) error: %v", key, err)
+		}
+		if sdVal.String() != pdVal.String() {
+			t.Errorf("key %q: StarlarkDict=%v, Dict=%v", key, sdVal, pdVal)
+		}
+	}
+}

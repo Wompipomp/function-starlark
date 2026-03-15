@@ -3222,6 +3222,16 @@ func TestLoadScript_PathTraversal(t *testing.T) {
 			ref:     ScriptConfigRefForTest{Name: "my-config", Key: "main.star"},
 			wantErr: "",
 		},
+		{
+			name:    "absolute path in name",
+			ref:     ScriptConfigRefForTest{Name: "/etc/shadow", Key: "main.star"},
+			wantErr: "path traversal",
+		},
+		{
+			name:    "empty name",
+			ref:     ScriptConfigRefForTest{Name: "", Key: "main.star"},
+			wantErr: "path traversal",
+		},
 	}
 
 	for _, tc := range cases {
