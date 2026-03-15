@@ -224,6 +224,103 @@ func TestValidateDependencies(t *testing.T) {
 	})
 }
 
+func TestWarnUnmatchedStringRefs(t *testing.T) {
+	t.Run("unmatched string ref returns warning", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "external-vpc", IsRef: false},
+		}
+		resourceNames := map[string]bool{"app": true, "db": true}
+
+		warnings := WarnUnmatchedStringRefs(deps, resourceNames)
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
+		}
+		w := warnings[0]
+		if !strings.Contains(w, "external-vpc") {
+			t.Errorf("warning should mention unmatched ref: %s", w)
+		}
+		if !strings.Contains(w, "string ref") {
+			t.Errorf("warning should mention 'string ref': %s", w)
+		}
+		if !strings.Contains(w, "does not match") {
+			t.Errorf("warning should contain 'does not match': %s", w)
+		}
+		// Available resources should be sorted alphabetically.
+		if !strings.Contains(w, "[app, db]") {
+			t.Errorf("warning should list available resources sorted: %s", w)
+		}
+	})
+
+	t.Run("matched string ref returns no warning", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: false},
+		}
+		resourceNames := map[string]bool{"app": true, "db": true}
+
+		warnings := WarnUnmatchedStringRefs(deps, resourceNames)
+		if len(warnings) != 0 {
+			t.Errorf("expected 0 warnings for matched string ref, got %d: %v", len(warnings), warnings)
+		}
+	})
+
+	t.Run("mixed deps warns only for unmatched string ref", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},          // ResourceRef -- skip
+			{Dependent: "app", Dependency: "external-vpc", IsRef: false}, // unmatched string ref
+		}
+		resourceNames := map[string]bool{"app": true, "db": true}
+
+		warnings := WarnUnmatchedStringRefs(deps, resourceNames)
+		if len(warnings) != 1 {
+			t.Fatalf("expected 1 warning (string ref only), got %d: %v", len(warnings), warnings)
+		}
+		if !strings.Contains(warnings[0], "external-vpc") {
+			t.Errorf("warning should mention unmatched ref: %s", warnings[0])
+		}
+	})
+
+	t.Run("all ResourceRef returns no warnings", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+			{Dependent: "app", Dependency: "cache", IsRef: true},
+		}
+		resourceNames := map[string]bool{"app": true, "db": true, "cache": true}
+
+		warnings := WarnUnmatchedStringRefs(deps, resourceNames)
+		if len(warnings) != 0 {
+			t.Errorf("expected 0 warnings for all-ResourceRef deps, got %d: %v", len(warnings), warnings)
+		}
+	})
+
+	t.Run("multiple unmatched string refs", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "missing-a", IsRef: false},
+			{Dependent: "web", Dependency: "missing-b", IsRef: false},
+		}
+		resourceNames := map[string]bool{"app": true, "web": true}
+
+		warnings := WarnUnmatchedStringRefs(deps, resourceNames)
+		if len(warnings) != 2 {
+			t.Fatalf("expected 2 warnings, got %d: %v", len(warnings), warnings)
+		}
+		foundA, foundB := false, false
+		for _, w := range warnings {
+			if strings.Contains(w, "missing-a") {
+				foundA = true
+			}
+			if strings.Contains(w, "missing-b") {
+				foundB = true
+			}
+		}
+		if !foundA {
+			t.Error("expected a warning mentioning 'missing-a'")
+		}
+		if !foundB {
+			t.Error("expected a warning mentioning 'missing-b'")
+		}
+	})
+}
+
 // assertUsageResource verifies a Usage protobuf Struct has the correct structure.
 func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependency, apiVersion string) {
 	t.Helper()
