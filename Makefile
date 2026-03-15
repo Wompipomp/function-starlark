@@ -1,4 +1,4 @@
-.PHONY: generate lint test bench build render render-check xpkg clean
+.PHONY: generate lint test bench build render render-check xpkg clean stdlib-push stdlib-push-local
 
 # Run code generation (deepcopy methods + CRD schemas)
 generate:
@@ -35,3 +35,17 @@ xpkg: build
 # Clean build artifacts
 clean:
 	rm -rf package/input/ function-starlark.xpkg
+
+# Stdlib publishing
+STDLIB_REGISTRY ?= ghcr.io/wompipomp/starlark-stdlib
+STDLIB_VERSION ?= dev
+
+stdlib-push: ## Push stdlib to registry (STDLIB_REGISTRY and STDLIB_VERSION configurable)
+	cd stdlib && oras push $(STDLIB_REGISTRY):$(STDLIB_VERSION) \
+		--artifact-type application/vnd.fn-starlark.modules.v1+tar \
+		networking.star naming.star labels.star conditions.star
+
+stdlib-push-local: ## Push stdlib to localhost:5000 for local testing
+	cd stdlib && oras push localhost:5000/starlark-stdlib:dev \
+		--artifact-type application/vnd.fn-starlark.modules.v1+tar \
+		networking.star naming.star labels.star conditions.star

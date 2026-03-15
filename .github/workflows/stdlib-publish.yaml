@@ -1,0 +1,34 @@
+name: Publish stdlib
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  packages: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install oras
+        run: |
+          curl -LO https://github.com/oras-project/oras/releases/download/v1.2.2/oras_1.2.2_linux_amd64.tar.gz
+          tar xzf oras_1.2.2_linux_amd64.tar.gz
+          sudo mv oras /usr/local/bin/
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push stdlib
+        run: |
+          cd stdlib
+          VERSION=${GITHUB_REF#refs/tags/}
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          oras push ghcr.io/wompipomp/starlark-stdlib:${VERSION} \
+            --artifact-type application/vnd.fn-starlark.modules.v1+tar \
+            networking.star naming.star labels.star conditions.star
+          oras tag ghcr.io/wompipomp/starlark-stdlib:${VERSION} ${MAJOR}
