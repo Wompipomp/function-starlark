@@ -156,6 +156,30 @@ func ValidateDependencies(deps []DependencyPair, resourceNames map[string]bool) 
 	return nil
 }
 
+// WarnUnmatchedStringRefs checks for string refs (IsRef=false) in depends_on
+// that do not match any resource created by the script. Returns a warning
+// string for each unmatched ref. ResourceRef deps (IsRef=true) are skipped
+// because they are already validated by ValidateDependencies.
+func WarnUnmatchedStringRefs(deps []DependencyPair, resourceNames map[string]bool) []string {
+	var warnings []string
+	for _, d := range deps {
+		if d.IsRef {
+			continue
+		}
+		if !resourceNames[d.Dependency] {
+			available := make([]string, 0, len(resourceNames))
+			for name := range resourceNames {
+				available = append(available, name)
+			}
+			sort.Strings(available)
+			warnings = append(warnings, fmt.Sprintf(
+				"depends_on: %q (string ref in Resource(%q)) does not match any resource created by this script; available resources: [%s]",
+				d.Dependency, d.Dependent, strings.Join(available, ", ")))
+		}
+	}
+	return warnings
+}
+
 // DetectUsageAPIVersion returns the Usage API version based on the user override.
 // "v1" returns UsageAPIVersionV1, "v2" returns UsageAPIVersionV2.
 // Empty or unrecognized values default to UsageAPIVersionV1 for maximum compatibility.
