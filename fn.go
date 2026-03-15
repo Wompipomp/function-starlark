@@ -12,9 +12,11 @@ import (
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
 	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/wompipomp/function-starlark/builtins"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
+	"github.com/wompipomp/function-starlark/metrics"
 	"github.com/wompipomp/function-starlark/runtime"
 	"github.com/wompipomp/function-starlark/runtime/oci"
 )
@@ -33,6 +35,16 @@ type Function struct {
 func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
 	log := f.log.WithValues("tag", req.GetMeta().GetTag())
 	log.Info("Running function")
+
+	// Metrics: track reconciliation duration and count with final filename label.
+	filename := "unknown"
+	reconcileTimer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
+		metrics.ReconciliationDurationSeconds.WithLabelValues(filename).Observe(v)
+	}))
+	defer reconcileTimer.ObserveDuration()
+	defer func() {
+		metrics.ReconciliationsTotal.WithLabelValues(filename).Inc()
+	}()
 
 	// CRITICAL: response.To copies desired state from the request,
 	// preserving resources set by previous functions in the pipeline.
@@ -56,7 +68,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	// Resolve script source and filename.
 	// Inline scripts use "composition.star"; ConfigMap scripts use the real key.
 	source := in.Spec.Source
-	filename := "composition.star"
+	filename = "composition.star"
 	if source == "" && in.Spec.ScriptConfigRef != nil {
 		key := in.Spec.ScriptConfigRef.Key
 		if key == "" {
@@ -88,6 +100,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		// Create all collectors for this execution.
 		condCollector := builtins.NewConditionCollector()
 		collector := builtins.NewCollector(condCollector)
+		collector.SetScriptName(filename)
 		connCollector := builtins.NewConnectionCollector()
 		reqCollector := builtins.NewRequirementsCollector()
 
@@ -124,7 +137,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log)
 
+			ociTimer := prometheus.NewTimer(metrics.OCIResolveDurationSeconds.WithLabelValues(filename))
 			resolvedModules, resolveErr := resolver.Resolve(ctx, ociTargets)
+			ociTimer.ObserveDuration()
 			if resolveErr != nil {
 				response.Fatal(rsp, errors.Wrapf(resolveErr, "resolving OCI modules"))
 				return rsp, nil
@@ -163,7 +178,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			return rsp, nil
 		}
 
+		execTimer := prometheus.NewTimer(metrics.ExecutionDurationSeconds.WithLabelValues(filename))
 		_, err = f.runtime.Execute(source, globals, filename, loader.LoadFunc())
+		execTimer.ObserveDuration()
 		if err != nil {
 			// Check for FatalError from fatal() builtin before generic error handling.
 			var fatalErr *builtins.FatalError
@@ -224,6 +241,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			response.Fatal(rsp, errors.Wrapf(err, "applying composed resources"))
 			return rsp, nil
 		}
+		metrics.ResourcesEmittedTotal.WithLabelValues(filename).Add(float64(len(collector.Resources())))
 
 		// Apply dxr status changes to response desired composite.
 		if err := builtins.ApplyDXR(rsp, globals["dxr"]); err != nil {

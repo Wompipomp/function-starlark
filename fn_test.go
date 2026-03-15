@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
 	"github.com/wompipomp/function-starlark/metrics"
@@ -3291,9 +3292,27 @@ skip_resource("metrics-skipped", "not needed for metrics test")
 	baseCacheMisses := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(scriptLabel))
 	baseCacheHits := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(scriptLabel))
 
-	// Count baseline histogram observations.
-	baseReconciliationDuration := testutil.CollectAndCount(metrics.ReconciliationDurationSeconds)
-	baseExecutionDuration := testutil.CollectAndCount(metrics.ExecutionDurationSeconds)
+	// Helper to get histogram sample count for a specific label value.
+	histSampleCount := func(name, label string) uint64 {
+		mfs, _ := prometheus.DefaultGatherer.Gather()
+		for _, mf := range mfs {
+			if mf.GetName() != name {
+				continue
+			}
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "script" && lp.GetValue() == label {
+						return m.GetHistogram().GetSampleCount()
+					}
+				}
+			}
+		}
+		return 0
+	}
+
+	// Baseline histogram observation counts for our specific label.
+	baseReconciliationCount := histSampleCount("function_starlark_reconciliation_duration_seconds", scriptLabel)
+	baseExecutionCount := histSampleCount("function_starlark_execution_duration_seconds", scriptLabel)
 
 	// First call: should increment all counters and record histogram observations.
 	req := &fnv1.RunFunctionRequest{
@@ -3339,17 +3358,17 @@ skip_resource("metrics-skipped", "not needed for metrics test")
 		t.Errorf("CacheMissesTotal delta = %v, want 1 (first execution = miss)", cacheMissesDelta)
 	}
 
-	// Assert histogram observations increased.
-	postReconciliationDuration := testutil.CollectAndCount(metrics.ReconciliationDurationSeconds)
-	if postReconciliationDuration <= baseReconciliationDuration {
-		t.Errorf("ReconciliationDurationSeconds observation count did not increase: before=%d, after=%d",
-			baseReconciliationDuration, postReconciliationDuration)
+	// Assert histogram observation counts increased.
+	postReconciliationCount := histSampleCount("function_starlark_reconciliation_duration_seconds", scriptLabel)
+	if postReconciliationCount <= baseReconciliationCount {
+		t.Errorf("ReconciliationDurationSeconds sample count did not increase: before=%d, after=%d",
+			baseReconciliationCount, postReconciliationCount)
 	}
 
-	postExecutionDuration := testutil.CollectAndCount(metrics.ExecutionDurationSeconds)
-	if postExecutionDuration <= baseExecutionDuration {
-		t.Errorf("ExecutionDurationSeconds observation count did not increase: before=%d, after=%d",
-			baseExecutionDuration, postExecutionDuration)
+	postExecutionCount := histSampleCount("function_starlark_execution_duration_seconds", scriptLabel)
+	if postExecutionCount <= baseExecutionCount {
+		t.Errorf("ExecutionDurationSeconds sample count did not increase: before=%d, after=%d",
+			baseExecutionCount, postExecutionCount)
 	}
 
 	// Second call with same source: should produce a cache hit.
