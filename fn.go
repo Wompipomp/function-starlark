@@ -99,8 +99,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 		// Create all collectors for this execution.
 		condCollector := builtins.NewConditionCollector()
-		collector := builtins.NewCollector(condCollector)
-		collector.SetScriptName(filename)
+		collector := builtins.NewCollector(condCollector, filename)
 		connCollector := builtins.NewConnectionCollector()
 		reqCollector := builtins.NewRequirementsCollector()
 

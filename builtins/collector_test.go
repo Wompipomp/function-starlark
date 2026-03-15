@@ -15,7 +15,7 @@ import (
 )
 
 func TestNewCollector(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	if c == nil {
 		t.Fatal("NewCollector returned nil")
 	}
@@ -26,7 +26,7 @@ func TestNewCollector(t *testing.T) {
 }
 
 func TestCollector_SingleResource(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -58,7 +58,7 @@ func TestCollector_SingleResource(t *testing.T) {
 }
 
 func TestCollector_ReadyDefault(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -79,7 +79,7 @@ func TestCollector_ReadyDefault(t *testing.T) {
 }
 
 func TestCollector_ReadyTrue(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -102,7 +102,7 @@ func TestCollector_ReadyTrue(t *testing.T) {
 }
 
 func TestCollector_ReadyFalse(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -125,7 +125,7 @@ func TestCollector_ReadyFalse(t *testing.T) {
 }
 
 func TestCollector_LastWins(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body1 := new(starlark.Dict)
@@ -154,7 +154,7 @@ func TestCollector_LastWins(t *testing.T) {
 }
 
 func TestCollector_NonStringName(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -170,7 +170,7 @@ func TestCollector_NonStringName(t *testing.T) {
 }
 
 func TestCollector_NonDictBody(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	// Pass a string as body instead of dict
@@ -184,7 +184,7 @@ func TestCollector_NonDictBody(t *testing.T) {
 }
 
 func TestCollector_ResourcesCopy(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -206,7 +206,7 @@ func TestCollector_ResourcesCopy(t *testing.T) {
 }
 
 func TestCollector_MultipleDistinct(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	names := []string{"bucket", "queue", "topic"}
@@ -243,7 +243,7 @@ func TestCollector_MultipleDistinct(t *testing.T) {
 }
 
 func TestCollector_EmptyBody(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict) // empty
@@ -362,7 +362,7 @@ func TestResourceRef_Freeze(t *testing.T) {
 // --- Resource() returns *ResourceRef ---
 
 func TestCollector_ResourceReturnsRef(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -388,7 +388,7 @@ func TestCollector_ResourceReturnsRef(t *testing.T) {
 // --- depends_on kwarg tests ---
 
 func TestCollector_DependsOn_ResourceRef(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	// Create a resource to get a ResourceRef.
@@ -434,7 +434,7 @@ func TestCollector_DependsOn_ResourceRef(t *testing.T) {
 }
 
 func TestCollector_DependsOn_String(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -467,7 +467,7 @@ func TestCollector_DependsOn_String(t *testing.T) {
 }
 
 func TestCollector_DependsOn_Mixed(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	// Create db resource first.
@@ -514,7 +514,7 @@ func TestCollector_DependsOn_Mixed(t *testing.T) {
 }
 
 func TestCollector_DependsOn_InvalidType(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -537,7 +537,7 @@ func TestCollector_DependsOn_InvalidType(t *testing.T) {
 }
 
 func TestCollector_NoDependsOn(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -558,7 +558,7 @@ func TestCollector_NoDependsOn(t *testing.T) {
 }
 
 func TestCollector_AddDependency_Concurrent(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 
 	const goroutines = 10
 	const depsPerGoroutine = 100
@@ -587,7 +587,7 @@ func TestCollector_AddDependency_Concurrent(t *testing.T) {
 }
 
 func TestCollector_DependenciesCopy(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	// Create db, then app depending on db.
@@ -622,7 +622,7 @@ func TestCollector_DependenciesCopy(t *testing.T) {
 
 func TestCollector_ExternalName_Basic(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -662,7 +662,7 @@ func TestCollector_ExternalName_Basic(t *testing.T) {
 
 func TestCollector_ExternalName_EmptyBody(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict) // empty -- no metadata
@@ -697,7 +697,7 @@ func TestCollector_ExternalName_EmptyBody(t *testing.T) {
 
 func TestCollector_ExternalName_Omitted(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -722,7 +722,7 @@ func TestCollector_ExternalName_Omitted(t *testing.T) {
 
 func TestCollector_ExternalName_EmptyString(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -744,7 +744,7 @@ func TestCollector_ExternalName_EmptyString(t *testing.T) {
 
 func TestCollector_ExternalName_NonString(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -766,7 +766,7 @@ func TestCollector_ExternalName_NonString(t *testing.T) {
 
 func TestCollector_ExternalName_Conflict(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	// Build body with existing crossplane.io/external-name annotation
@@ -816,7 +816,7 @@ func TestCollector_ExternalName_Conflict(t *testing.T) {
 
 func TestCollector_ExternalName_NoConflict(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -843,7 +843,7 @@ func TestCollector_ExternalName_NoConflict(t *testing.T) {
 
 func TestCollector_SkipResource_ReturnsNone(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	val, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -860,7 +860,7 @@ func TestCollector_SkipResource_ReturnsNone(t *testing.T) {
 
 func TestCollector_SkipResource_NotInResources(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -879,7 +879,7 @@ func TestCollector_SkipResource_NotInResources(t *testing.T) {
 
 func TestCollector_SkipResource_Warning(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -908,7 +908,7 @@ func TestCollector_SkipResource_Warning(t *testing.T) {
 
 func TestCollector_SkipResource_AfterEmit(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	// Emit a resource first via Resource().
@@ -938,7 +938,7 @@ func TestCollector_SkipResource_AfterEmit(t *testing.T) {
 
 func TestCollector_SkipResource_Dedup(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	// Skip "x" twice.
@@ -967,7 +967,7 @@ func TestCollector_SkipResource_Dedup(t *testing.T) {
 
 func TestCollector_SkipResource_ThenResource(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	// Skip "x" first.
@@ -999,7 +999,7 @@ func TestCollector_SkipResource_ThenResource(t *testing.T) {
 
 func TestCollector_SkipResource_BadArgs(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	// Call with wrong number of args (only 1 instead of 2).
@@ -1013,7 +1013,7 @@ func TestCollector_SkipResource_BadArgs(t *testing.T) {
 
 func TestCollector_ExternalName_SharedBody(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 	thread := new(starlark.Thread)
 
 	// Use the same body dict for two Resource() calls with different external_name values.
@@ -1058,8 +1058,7 @@ func TestCollector_ExternalName_SharedBody(t *testing.T) {
 
 func TestCollector_SkipResource_Metrics(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
-	c.SetScriptName("skip-metrics-test.star")
+	c := NewCollector(cc, "skip-metrics-test.star")
 	thread := new(starlark.Thread)
 
 	label := "skip-metrics-test.star"
@@ -1117,7 +1116,7 @@ func TestCollector_ReadyInvalidType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := NewCollector(NewConditionCollector())
+			c := NewCollector(NewConditionCollector(), "test.star")
 			thread := new(starlark.Thread)
 
 			body := new(starlark.Dict)
@@ -1178,7 +1177,7 @@ func TestGetOrCreateNestedStruct_OverwriteNonStruct(t *testing.T) {
 
 func TestCollector_SkipResource_Concurrent(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
+	c := NewCollector(cc, "test.star")
 
 	const goroutines = 10
 	const skipsPerGoroutine = 50
@@ -1208,20 +1207,20 @@ func TestCollector_SkipResource_Concurrent(t *testing.T) {
 	}
 }
 
-// --- SetScriptName tests ---
+// --- NewCollector scriptName tests ---
 
-func TestSetScriptName(t *testing.T) {
+func TestNewCollector_ScriptName(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc)
 
-	// Default scriptName should be empty string.
-	if c.scriptName != "" {
-		t.Errorf("default scriptName = %q, want empty string", c.scriptName)
+	// Empty scriptName should work.
+	c1 := NewCollector(cc, "")
+	if c1.scriptName != "" {
+		t.Errorf("scriptName = %q, want empty string", c1.scriptName)
 	}
 
-	// SetScriptName should propagate the value.
-	c.SetScriptName("my-script.star")
-	if c.scriptName != "my-script.star" {
-		t.Errorf("scriptName after Set = %q, want %q", c.scriptName, "my-script.star")
+	// Constructor should set scriptName.
+	c2 := NewCollector(cc, "my-script.star")
+	if c2.scriptName != "my-script.star" {
+		t.Errorf("scriptName = %q, want %q", c2.scriptName, "my-script.star")
 	}
 }

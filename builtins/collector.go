@@ -78,18 +78,15 @@ type Collector struct {
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
 // emit Warning events when the external_name kwarg conflicts with a manual
-// crossplane.io/external-name annotation in the body.
-func NewCollector(cc *ConditionCollector) *Collector {
+// crossplane.io/external-name annotation in the body. The scriptName is
+// recorded for use in metric labels.
+func NewCollector(cc *ConditionCollector, scriptName string) *Collector {
 	return &Collector{
-		resources: make(map[string]CollectedResource),
-		skipped:   make(map[string]bool),
-		cc:        cc,
+		resources:  make(map[string]CollectedResource),
+		skipped:    make(map[string]bool),
+		cc:         cc,
+		scriptName: scriptName,
 	}
-}
-
-// SetScriptName records the script filename for use in metric labels.
-func (c *Collector) SetScriptName(name string) {
-	c.scriptName = name
 }
 
 // Builtin returns a *starlark.Builtin named "Resource" that scripts call

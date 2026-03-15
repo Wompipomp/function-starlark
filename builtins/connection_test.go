@@ -235,7 +235,7 @@ func TestApplyConnectionDetails_MergesExisting(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCollector_ConnectionDetails_Kwarg(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -273,7 +273,7 @@ func TestCollector_ConnectionDetails_Kwarg(t *testing.T) {
 
 func TestCollector_ConnectionDetails_BackwardCompatible(t *testing.T) {
 	// Resource() without connection_details kwarg should still work
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -294,7 +294,7 @@ func TestCollector_ConnectionDetails_BackwardCompatible(t *testing.T) {
 }
 
 func TestCollector_ConnectionDetails_NonStringKey(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -315,7 +315,7 @@ func TestCollector_ConnectionDetails_NonStringKey(t *testing.T) {
 }
 
 func TestCollector_ConnectionDetails_NonStringValue(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -337,7 +337,7 @@ func TestCollector_ConnectionDetails_NonStringValue(t *testing.T) {
 
 func TestCollector_StringToByteConversion(t *testing.T) {
 	// Verify that string values are converted to []byte via []byte(string)
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -367,7 +367,7 @@ func TestCollector_StringToByteConversion(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestApplyResources_WithConnectionDetails(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -401,7 +401,7 @@ func TestApplyResources_WithConnectionDetails(t *testing.T) {
 }
 
 func TestApplyResources_WithoutConnectionDetails(t *testing.T) {
-	c := NewCollector(NewConditionCollector())
+	c := NewCollector(NewConditionCollector(), "test.star")
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
