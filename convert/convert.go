@@ -57,6 +57,11 @@ func convertNumber(f float64) (starlark.Value, error) {
 		// Guard: values at or beyond int64 boundaries must error.
 		// float64(math.MaxInt64) rounds up to 2^63 exactly, so >= catches overflow.
 		// float64(math.MinInt64) is exactly -2^63, so <= catches underflow.
+		// Note: MinInt64 (-2^63) IS a valid int64 value, but we treat both boundaries
+		// symmetrically with <= / >= for simplicity. This is moot in practice because
+		// both float64(MaxInt64) and float64(MinInt64) fall in the imprecise zone
+		// (|x| > 2^53), so the earlier imprecise-zone check returns them as
+		// starlark.Float before this boundary check is reached.
 		if f >= float64(math.MaxInt64) || f <= float64(math.MinInt64) {
 			return nil, fmt.Errorf("value %g exceeds int64 range", f)
 		}
