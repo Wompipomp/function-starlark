@@ -3388,3 +3388,64 @@ skip_resource("metrics-skipped", "not needed for metrics test")
 		t.Errorf("Total CacheHitsTotal delta = %v, want 1 (only second call should hit)", totalCacheHitsDelta)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// HARD-02: No metrics recorded with script="unknown" on early failure
+// ---------------------------------------------------------------------------
+
+func TestRunFunction_MetricsNoUnknownLabel(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// MissingInput: empty request fails before filename resolution.
+	req := &fnv1.RunFunctionRequest{}
+	_, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunFunction() error: %v", err)
+	}
+
+	// Verify no metric was recorded with script="unknown" label.
+	mfs, gatherErr := prometheus.DefaultGatherer.Gather()
+	if gatherErr != nil {
+		t.Fatalf("Gather() error: %v", gatherErr)
+	}
+	for _, mf := range mfs {
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "script" && lp.GetValue() == "unknown" {
+					t.Errorf("metric %q has label script=%q; want no 'unknown' label metrics after early failure",
+						mf.GetName(), lp.GetValue())
+				}
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DOC-01: Warning emitted when Usage resources are generated
+// ---------------------------------------------------------------------------
+
+func TestRunFunctionDependsOnUsageWarning(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	// Verify a SEVERITY_WARNING result exists advising about compositeDeletePolicy.
+	assertWarningResult(t, rsp, "compositeDeletePolicy=Foreground")
+}
