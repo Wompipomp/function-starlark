@@ -110,6 +110,40 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 			return rsp, nil
 		}
 
+		// Validate and generate dependency Usage resources.
+		deps := collector.Dependencies()
+		if len(deps) > 0 {
+			// Build resource name set for validation.
+			resourceNames := make(map[string]bool, len(collector.Resources()))
+			for name := range collector.Resources() {
+				resourceNames[name] = true
+			}
+
+			if err := builtins.ValidateDependencies(deps, resourceNames); err != nil {
+				response.Fatal(rsp, errors.Wrapf(err, "dependency validation failed"))
+				return rsp, nil
+			}
+
+			// Generate Usage resources and insert into response.
+			apiVersion := builtins.DetectUsageAPIVersion(in.Spec.UsageAPIVersion)
+			usageResources := builtins.BuildUsageResources(deps, apiVersion)
+
+			// Ensure Desired and Resources maps exist.
+			if rsp.Desired == nil {
+				rsp.Desired = &fnv1.State{}
+			}
+			if rsp.Desired.Resources == nil {
+				rsp.Desired.Resources = make(map[string]*fnv1.Resource)
+			}
+
+			for name, body := range usageResources {
+				rsp.Desired.Resources[name] = &fnv1.Resource{
+					Resource: body,
+					Ready:    fnv1.Ready_READY_TRUE,
+				}
+			}
+		}
+
 		// Apply collected resources to response (merges with prior desired state).
 		if err := builtins.ApplyResources(rsp, collector); err != nil {
 			response.Fatal(rsp, errors.Wrapf(err, "applying composed resources"))
@@ -139,6 +173,11 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 
 		// Apply requirements.
 		builtins.ApplyRequirements(rsp, reqCollector.Requirements())
+
+		// Emit warnings collected during execution.
+		for _, w := range reqCollector.Warnings() {
+			response.Warning(rsp, errors.New(w))
+		}
 
 		response.Normal(rsp, "function-starlark: executed successfully")
 	} else {
