@@ -3,6 +3,7 @@ package builtins
 import (
 	"crypto/sha256"
 	"fmt"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -108,6 +109,119 @@ func TestDetectUsageAPIVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateDependencies(t *testing.T) {
+	allResources := map[string]bool{
+		"app":   true,
+		"db":    true,
+		"cache": true,
+	}
+
+	t.Run("all targets present", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+			{Dependent: "app", Dependency: "cache", IsRef: true},
+		}
+		if err := ValidateDependencies(deps, allResources); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("missing ResourceRef target", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "missing-svc", IsRef: true},
+		}
+		err := ValidateDependencies(deps, allResources)
+		if err == nil {
+			t.Fatal("expected error for missing target, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "missing-svc") {
+			t.Errorf("error should mention missing target: %v", err)
+		}
+		if !strings.Contains(msg, "available resources") {
+			t.Errorf("error should list available resources: %v", err)
+		}
+	})
+
+	t.Run("string ref not validated", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "external-vpc", IsRef: false},
+		}
+		if err := ValidateDependencies(deps, allResources); err != nil {
+			t.Errorf("string refs should not be validated, got: %v", err)
+		}
+	})
+
+	t.Run("self-reference cycle", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "A", Dependency: "A", IsRef: true},
+		}
+		err := ValidateDependencies(deps, map[string]bool{"A": true})
+		if err == nil {
+			t.Fatal("expected cycle error, got nil")
+		}
+		if !strings.Contains(err.Error(), "circular dependency") {
+			t.Errorf("error should mention circular dependency: %v", err)
+		}
+	})
+
+	t.Run("2-node cycle", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "A", Dependency: "B", IsRef: true},
+			{Dependent: "B", Dependency: "A", IsRef: true},
+		}
+		err := ValidateDependencies(deps, map[string]bool{"A": true, "B": true})
+		if err == nil {
+			t.Fatal("expected cycle error, got nil")
+		}
+		if !strings.Contains(err.Error(), "circular dependency") {
+			t.Errorf("error should mention circular dependency: %v", err)
+		}
+	})
+
+	t.Run("3-node cycle", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "A", Dependency: "B", IsRef: true},
+			{Dependent: "B", Dependency: "C", IsRef: true},
+			{Dependent: "C", Dependency: "A", IsRef: true},
+		}
+		err := ValidateDependencies(deps, map[string]bool{"A": true, "B": true, "C": true})
+		if err == nil {
+			t.Fatal("expected cycle error, got nil")
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "circular dependency") {
+			t.Errorf("error should mention circular dependency: %v", err)
+		}
+		// Should contain the cycle path with ->
+		if !strings.Contains(msg, " -> ") {
+			t.Errorf("error should show cycle path with ' -> ': %v", err)
+		}
+	})
+
+	t.Run("valid chain no cycle", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "A", Dependency: "B", IsRef: true},
+			{Dependent: "B", Dependency: "C", IsRef: true},
+		}
+		err := ValidateDependencies(deps, map[string]bool{"A": true, "B": true, "C": true})
+		if err != nil {
+			t.Errorf("valid chain should not error: %v", err)
+		}
+	})
+
+	t.Run("mixed refs and string refs", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+			{Dependent: "app", Dependency: "external-vpc", IsRef: false},
+		}
+		err := ValidateDependencies(deps, map[string]bool{"app": true, "db": true})
+		if err != nil {
+			t.Errorf("mixed valid refs should not error: %v", err)
+		}
+	})
 }
 
 // assertUsageResource verifies a Usage protobuf Struct has the correct structure.
