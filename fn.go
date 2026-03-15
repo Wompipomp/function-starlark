@@ -37,13 +37,18 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	log.Info("Running function")
 
 	// Metrics: track reconciliation duration and count with final filename label.
+	// Guard: skip recording when filename was never resolved (early failures).
 	filename := "unknown"
 	reconcileTimer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
-		metrics.ReconciliationDurationSeconds.WithLabelValues(filename).Observe(v)
+		if filename != "unknown" {
+			metrics.ReconciliationDurationSeconds.WithLabelValues(filename).Observe(v)
+		}
 	}))
 	defer reconcileTimer.ObserveDuration()
 	defer func() {
-		metrics.ReconciliationsTotal.WithLabelValues(filename).Inc()
+		if filename != "unknown" {
+			metrics.ReconciliationsTotal.WithLabelValues(filename).Inc()
+		}
 	}()
 
 	// CRITICAL: response.To copies desired state from the request,
@@ -233,6 +238,11 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 					Ready:    fnv1.Ready_READY_TRUE,
 				}
 			}
+
+			response.Warning(rsp, errors.Errorf(
+				"depends_on: %d Usage resource(s) generated; compositeDeletePolicy=Foreground is required on the claim for deletion ordering to take effect",
+				len(usageResources),
+			))
 		}
 
 		// Apply collected resources to response (merges with prior desired state).

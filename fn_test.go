@@ -2312,12 +2312,18 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])`
 
 	assertNormalResult(t, rsp)
 
-	// No warnings should be emitted -- "db" matches a created resource.
+	// No unmatched-ref warnings should be emitted -- "db" matches a created resource.
+	// The compositeDeletePolicy warning is expected for any depends_on usage.
 	for _, r := range rsp.GetResults() {
 		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING {
-			t.Errorf("unexpected warning when string ref matches: %s", r.GetMessage())
+			if strings.Contains(r.GetMessage(), "does not match") {
+				t.Errorf("unexpected unmatched-ref warning when string ref matches: %s", r.GetMessage())
+			}
 		}
 	}
+
+	// Verify the compositeDeletePolicy warning IS present.
+	assertWarningResult(t, rsp, "compositeDeletePolicy=Foreground")
 
 	resources := rsp.GetDesired().GetResources()
 
