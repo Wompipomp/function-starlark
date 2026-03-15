@@ -261,15 +261,16 @@ func TestModuleNameValidationNoStar(t *testing.T) {
 func TestModuleNameValidationOCI(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
+	// OCI module not in inline map -- should get "not resolved" error (not "not yet supported").
 	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
-	_, err := thread.Load(thread, "oci://registry.example.com/module.star")
+	_, err := thread.Load(thread, "oci://registry.example.com/repo:v1/module.star")
 	if err == nil {
-		t.Fatal("expected error for OCI reference, got nil")
+		t.Fatal("expected error for unresolved OCI module, got nil")
 	}
-	if !strings.Contains(err.Error(), "OCI module loading is not yet supported") {
-		t.Errorf("error = %q, want it to contain OCI hint", err.Error())
+	if !strings.Contains(err.Error(), "not resolved") {
+		t.Errorf("error = %q, want it to contain 'not resolved'", err.Error())
 	}
 }
 
@@ -435,6 +436,253 @@ func TestModuleBytecodeCache(t *testing.T) {
 	cacheAfter := rt.CacheLen()
 	if cacheAfter <= cacheBefore {
 		t.Errorf("CacheLen before=%d, after=%d; expected bytecode cache to grow", cacheBefore, cacheAfter)
+	}
+}
+
+// ========================
+// Star Import Tests
+// ========================
+
+func TestStarImportAllExports(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `x = 1
+y = 2
+_private = 3`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+
+	// ResolveStarImports should expand "*" to "x", "y" (not _private).
+	source := `load("m.star", "*")`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	// The rewritten source should not contain "*" and should contain x and y.
+	if strings.Contains(rewritten, `"*"`) {
+		t.Errorf("rewritten source still contains \"*\": %s", rewritten)
+	}
+
+	// Execute the rewritten source to verify names are bound.
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	xVal, _ := starlark.AsInt32(globals["x"].(starlark.Int))
+	if xVal != 1 {
+		t.Errorf("x = %d, want 1", xVal)
+	}
+	yVal, _ := starlark.AsInt32(globals["y"].(starlark.Int))
+	if yVal != 2 {
+		t.Errorf("y = %d, want 2", yVal)
+	}
+	if _, ok := globals["_private"]; ok {
+		t.Error("_private should not be imported by star import")
+	}
+}
+
+func TestStarImportEmptyModule(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"empty.star": `_hidden = 1`, // no public exports
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+
+	source := `load("empty.star", "*")`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	// Should produce a valid source (empty load removed or no bindings).
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	_, err = starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("executing rewritten source for empty module: %v", err)
+	}
+}
+
+func TestStarImportMixedNamedAndStar(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `a = 1
+b = 2
+c = 3`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+
+	// load("m.star", "a", "*") -- named "a" plus star for remaining exports.
+	source := `load("m.star", "a", "*")`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	if strings.Contains(rewritten, `"*"`) {
+		t.Errorf("rewritten source still contains \"*\": %s", rewritten)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	// All three should be available.
+	for _, name := range []string{"a", "b", "c"} {
+		if _, ok := globals[name]; !ok {
+			t.Errorf("expected %q in globals after star import", name)
+		}
+	}
+}
+
+func TestStarImportNoStarUnchanged(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `x = 1`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+
+	source := `load("m.star", "x")`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	if rewritten != source {
+		t.Errorf("expected source unchanged when no star import, got %q", rewritten)
+	}
+}
+
+func TestStarImportFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fs.star"), []byte(`a = 10
+b = 20`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
+
+	source := `load("fs.star", "*")`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	aVal, _ := starlark.AsInt32(globals["a"].(starlark.Int))
+	if aVal != 10 {
+		t.Errorf("a = %d, want 10", aVal)
+	}
+}
+
+// ========================
+// OCI Module Routing Tests
+// ========================
+
+func TestOCIModuleRouting(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Pre-populate inline modules with the base filename that would be
+	// injected by fn.go after OCI resolution.
+	inline := map[string]string{
+		"helpers.star": `def greet(name): return "oci-hello " + name`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	// Load using oci:// URL -- should resolve to inline module by base filename.
+	loaded, err := thread.Load(thread, "oci://ghcr.io/org/lib:v1/helpers.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	greet, ok := loaded["greet"]
+	if !ok {
+		t.Fatal("expected 'greet' in loaded globals")
+	}
+
+	result, err := starlark.Call(thread, greet, starlark.Tuple{starlark.String("world")}, nil)
+	if err != nil {
+		t.Fatalf("calling greet: %v", err)
+	}
+
+	if result.(starlark.String) != "oci-hello world" {
+		t.Errorf("greet('world') = %v, want 'oci-hello world'", result)
+	}
+}
+
+func TestOCIModuleNotResolved(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// No inline modules -- OCI module not pre-resolved.
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "oci://ghcr.io/org/lib:v1/missing.star")
+	if err == nil {
+		t.Fatal("expected error for unresolved OCI module, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "not resolved") {
+		t.Errorf("error = %q, want it to contain 'not resolved'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "missing.star") {
+		t.Errorf("error = %q, want it to contain 'missing.star'", err.Error())
+	}
+}
+
+func TestOCIModuleDigestRouting(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"utils.star": `val = "pinned"`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	loaded, err := thread.Load(thread, "oci://ghcr.io/org/lib@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1/utils.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	v, ok := loaded["val"]
+	if !ok {
+		t.Fatal("expected 'val' in loaded globals")
+	}
+	if v.(starlark.String) != "pinned" {
+		t.Errorf("val = %v, want 'pinned'", v)
 	}
 }
 
