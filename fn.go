@@ -296,8 +296,16 @@ func (f *Function) loadScript(ref *v1alpha1.ScriptConfigRef) (string, error) {
 		dir = "/scripts"
 	}
 
+	// Validate path components to prevent directory traversal.
+	if !filepath.IsLocal(ref.Name) {
+		return "", fmt.Errorf("script ConfigMap name %q contains path traversal", ref.Name)
+	}
+	if !filepath.IsLocal(key) {
+		return "", fmt.Errorf("script key %q contains path traversal", key)
+	}
+
 	path := filepath.Join(dir, ref.Name, key)
-	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from trusted ConfigMap ref
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf(

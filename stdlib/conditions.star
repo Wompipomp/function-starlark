@@ -11,7 +11,7 @@ XR readiness is determined by the Ready field on desired composed resources
 def degraded(reason, message = ""):
     """Signal that the composite resource is degraded and emit a warning event.
 
-    Calls both set_condition (with status=False) and emit_event with
+    Calls both set_condition (with type="Degraded", status="True") and emit_event with
     severity=Warning. Use for recoverable failures where the composition is
     impaired but not completely broken.
 

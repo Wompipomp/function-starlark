@@ -103,6 +103,8 @@ func (c *Collector) Dependencies() []DependencyPair {
 
 // addDependency records a dependency between two resources.
 func (c *Collector) addDependency(dependent, dependency string, isRef bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.dependencies = append(c.dependencies, DependencyPair{
 		Dependent:  dependent,
 		Dependency: dependency,
