@@ -34,6 +34,17 @@ type StarlarkInputSpec struct {
 	// If empty, defaults to v1 for maximum backward compatibility.
 	// +optional
 	UsageAPIVersion string `json:"usageAPIVersion,omitempty"`
+
+	// Modules defines inline Starlark modules loadable by name.
+	// Keys must end in ".star". Values are Starlark source code.
+	// +optional
+	Modules map[string]string `json:"modules,omitempty"`
+
+	// ModulePaths specifies additional filesystem directories to search
+	// for .star modules (after inline modules). Paths are typically
+	// ConfigMap mount points like "/scripts/shared-lib".
+	// +optional
+	ModulePaths []string `json:"modulePaths,omitempty"`
 }
 
 // ScriptConfigRef references a ConfigMap containing a Starlark script.
