@@ -387,8 +387,8 @@ while True:
 
 	// The error should indicate the step limit was exceeded.
 	errStr := err.Error()
-	if !strings.Contains(errStr, "exceeded") && !strings.Contains(errStr, "limit") && !strings.Contains(errStr, "step") {
-		t.Errorf("error = %q, want it to indicate step limit exceeded", errStr)
+	if !strings.Contains(errStr, "exceeded execution limit") {
+		t.Errorf("error = %q, want it to contain 'exceeded execution limit'", errStr)
 	}
 }
 

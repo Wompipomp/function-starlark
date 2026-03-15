@@ -90,11 +90,7 @@ func (r *Runtime) getOrCompile(source string, predeclared starlark.StringDict, f
 	}
 
 	// Slow path: compile and write lock.
-	opts := &syntax.FileOptions{
-		TopLevelControl: true,
-		Set:             true,
-		While:           true,
-	}
+	opts := fileOptions()
 	isPredeclared := func(name string) bool {
 		_, exists := predeclared[name]
 		return exists
@@ -118,6 +114,16 @@ func (r *Runtime) CacheLen() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.cache)
+}
+
+// fileOptions returns the standard FileOptions used for both the main script
+// and loaded modules. Extracted to ensure consistent syntax options.
+func fileOptions() *syntax.FileOptions {
+	return &syntax.FileOptions{
+		TopLevelControl: true,
+		Set:             true,
+		While:           true,
+	}
 }
 
 // contentHash returns the SHA-256 hex digest of the source.
