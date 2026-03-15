@@ -84,11 +84,11 @@ func TestParseOCILoadTarget(t *testing.T) {
 			raw:  "oci://docker.io/library/starlark:v1/init.star",
 			want: &OCILoadTarget{
 				RawURL:   "oci://docker.io/library/starlark:v1/init.star",
-				Registry: "docker.io",
+				Registry: "index.docker.io", // go-containerregistry normalizes docker.io
 				Repo:     "library/starlark",
 				Tag:      "v1",
 				File:     "init.star",
-				RefStr:   "docker.io/library/starlark:v1",
+				RefStr:   "docker.io/library/starlark:v1", // String() keeps short form
 			},
 		},
 		{
