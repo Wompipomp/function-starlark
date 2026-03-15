@@ -1,0 +1,59 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xstorageaccounts.example.io
+  labels:
+    provider: azure
+spec:
+  compositeTypeRef:
+    apiVersion: example.io/v1
+    kind: XStorageAccount
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "ready")
+
+            # Read XR spec
+            location = get(oxr, "spec.location", "eastus")
+            rg_name = get(oxr, "spec.resourceGroupName", "default-rg")
+
+            # Build labels
+            labels = merge_labels(
+                standard_labels("storage", component="blob", part_of="data-platform"),
+                crossplane_labels(),
+                {"azure.io/location": location},
+            )
+
+            # Azure Storage Account
+            Resource("storage-account", {
+                "apiVersion": "storage.azure.upbound.io/v1beta2",
+                "kind": "Account",
+                "metadata": {
+                    "name": resource_name("storage"),
+                    "labels": labels,
+                },
+                "spec": {
+                    "forProvider": {
+                        "location": location,
+                        "resourceGroupName": rg_name,
+                        "accountTier": "Standard",
+                        "accountReplicationType": "LRS",
+                        "accountKind": "StorageV2",
+                        "minTlsVersion": "TLS1_2",
+                        "tags": {
+                            "ManagedBy": "crossplane",
+                        },
+                    },
+                },
+            })
+
+            ready("Storage account configured")

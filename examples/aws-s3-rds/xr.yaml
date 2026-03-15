@@ -1,0 +1,8 @@
+apiVersion: example.io/v1
+kind: XDatabase
+metadata:
+  name: my-database
+spec:
+  region: us-east-1
+  dbInstanceClass: db.t3.micro
+  vpcCidr: "10.0.0.0/16"

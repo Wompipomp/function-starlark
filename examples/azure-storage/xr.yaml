@@ -1,0 +1,7 @@
+apiVersion: example.io/v1
+kind: XStorageAccount
+metadata:
+  name: my-storage
+spec:
+  location: eastus
+  resourceGroupName: platform-rg

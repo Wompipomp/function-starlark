@@ -1,0 +1,80 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdatabases.example.io
+  labels:
+    provider: aws
+spec:
+  compositeTypeRef:
+    apiVersion: example.io/v1
+    kind: XDatabase
+  mode: Pipeline
+  pipeline:
+    - step: create-resources
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr")
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
+            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "progress")
+
+            # Read XR spec
+            region = get(oxr, "spec.region", "us-east-1")
+            db_class = get(oxr, "spec.dbInstanceClass", "db.t3.micro")
+            vpc_cidr = get(oxr, "spec.vpcCidr", "10.0.0.0/16")
+
+            # Derive subnets from VPC CIDR
+            db_subnet_a = subnet_cidr(vpc_cidr, 8, 10)  # e.g. 10.0.10.0/24
+            db_subnet_b = subnet_cidr(vpc_cidr, 8, 11)  # e.g. 10.0.11.0/24
+
+            # Build labels
+            labels = merge_labels(
+                standard_labels("database", component="rds", part_of="data-platform"),
+                crossplane_labels(),
+            )
+
+            # S3 bucket for database backups
+            Resource("bucket", {
+                "apiVersion": "s3.aws.upbound.io/v1beta1",
+                "kind": "Bucket",
+                "metadata": {
+                    "name": resource_name("backups"),
+                    "labels": labels,
+                },
+                "spec": {
+                    "forProvider": {
+                        "region": region,
+                        "tags": {
+                            "Purpose": "database-backups",
+                        },
+                    },
+                },
+            })
+
+            # RDS instance
+            Resource("database", {
+                "apiVersion": "rds.aws.upbound.io/v1beta2",
+                "kind": "Instance",
+                "metadata": {
+                    "name": resource_name("rds"),
+                    "labels": labels,
+                },
+                "spec": {
+                    "forProvider": {
+                        "region": region,
+                        "engine": "postgres",
+                        "engineVersion": "15.4",
+                        "instanceClass": db_class,
+                        "allocatedStorage": 20,
+                        "publiclyAccessible": False,
+                        "skipFinalSnapshot": True,
+                    },
+                },
+            })
+
+            progress(2, 2)

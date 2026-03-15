@@ -1,0 +1,8 @@
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-starlark
+  annotations:
+    meta.crossplane.io/description: Starlark-based composition function
+spec:
+  package: ghcr.io/wompipomp/function-starlark:v0.1.0
