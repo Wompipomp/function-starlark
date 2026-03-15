@@ -18,15 +18,8 @@ func TestModuleLoadInline(t *testing.T) {
 	}
 
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
-	globals, err := rt.Execute(
-		`load("helpers.star", "greet"); result = greet("world")`,
-		starlark.StringDict{},
-		"main.star",
-	)
-	_ = loader // loader will be wired through Execute
-
-	// For now, Execute doesn't accept a loader yet. We test the loader directly.
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
 	loaded, err := thread.Load(thread, "helpers.star")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -37,7 +30,7 @@ func TestModuleLoadInline(t *testing.T) {
 		t.Fatal("expected 'greet' in loaded globals")
 	}
 
-	// Call the function.
+	// Call the loaded function.
 	result, err := starlark.Call(thread, greet, starlark.Tuple{starlark.String("world")}, nil)
 	if err != nil {
 		t.Fatalf("calling greet: %v", err)
@@ -46,8 +39,6 @@ func TestModuleLoadInline(t *testing.T) {
 	if result.(starlark.String) != "hello world" {
 		t.Errorf("greet('world') = %v, want 'hello world'", result)
 	}
-
-	_ = globals // suppress unused warning
 }
 
 func TestModuleLoadFilesystem(t *testing.T) {
