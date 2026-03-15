@@ -115,6 +115,85 @@ func TestRequireResource_BothMatchNameAndLabels_NameWins(t *testing.T) {
 	}
 }
 
+func TestRequireResource_MatchConflictWarning(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	labels := new(starlark.Dict)
+	_ = labels.SetKey(starlark.String("env"), starlark.String("prod"))
+
+	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+		starlark.String("my-vpc"),
+		starlark.String("ec2.aws.upbound.io/v1beta1"),
+		starlark.String("VPC"),
+	}, []starlark.Tuple{
+		{starlark.String("match_name"), starlark.String("my-vpc")},
+		{starlark.String("match_labels"), labels},
+	})
+	if err != nil {
+		t.Fatalf("require_resource error: %v", err)
+	}
+
+	// Should have exactly 1 warning.
+	warnings := rc.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("Warnings() = %d, want 1", len(warnings))
+	}
+	if !strings.Contains(warnings[0], "match_name") || !strings.Contains(warnings[0], "takes precedence") {
+		t.Errorf("warning %q should contain 'match_name' and 'takes precedence'", warnings[0])
+	}
+
+	// Requirement should use match_name, not match_labels.
+	r := rc.Requirements()[0]
+	if r.MatchName != "my-vpc" {
+		t.Errorf("MatchName = %q, want 'my-vpc'", r.MatchName)
+	}
+	if len(r.MatchLabels) != 0 {
+		t.Errorf("MatchLabels should be nil, got %v", r.MatchLabels)
+	}
+}
+
+func TestRequireResource_MatchNameOnly_NoWarning(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+		starlark.String("my-db"),
+		starlark.String("v1"),
+		starlark.String("Instance"),
+	}, []starlark.Tuple{
+		{starlark.String("match_name"), starlark.String("my-database")},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(rc.Warnings()) != 0 {
+		t.Errorf("Warnings() = %v, want empty", rc.Warnings())
+	}
+}
+
+func TestRequireResource_MatchLabelsOnly_NoWarning(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	labels := new(starlark.Dict)
+	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
+
+	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+		starlark.String("my-db"),
+		starlark.String("v1"),
+		starlark.String("Instance"),
+	}, []starlark.Tuple{
+		{starlark.String("match_labels"), labels},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if len(rc.Warnings()) != 0 {
+		t.Errorf("Warnings() = %v, want empty", rc.Warnings())
+	}
+}
+
 func TestRequireResource_NeitherMatchNameNorLabels_Error(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
