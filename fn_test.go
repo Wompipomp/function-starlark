@@ -29,7 +29,9 @@ import (
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
+	"github.com/wompipomp/function-starlark/metrics"
 	"github.com/wompipomp/function-starlark/runtime"
 	"github.com/wompipomp/function-starlark/runtime/oci"
 )
@@ -3264,4 +3266,106 @@ func TestLoadScript_PathTraversal(t *testing.T) {
 type ScriptConfigRefForTest struct {
 	Name string
 	Key  string
+}
+
+// TestRunFunction_Metrics verifies that RunFunction records all Prometheus
+// metrics: reconciliation duration, execution duration, reconciliation counter,
+// resources emitted counter, and that collector.SetScriptName is wired so the
+// skip counter uses the correct label.
+func TestRunFunction_Metrics(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// Use a unique script body to avoid cache collisions with other tests.
+	script := `# TestRunFunction_Metrics unique
+Resource("metrics-item", {"apiVersion": "v1", "kind": "ConfigMap"})
+skip_resource("metrics-skipped", "not needed for metrics test")
+`
+
+	scriptLabel := "composition.star"
+
+	// Capture baseline counter values (global registry is shared across tests).
+	baseReconciliations := testutil.ToFloat64(metrics.ReconciliationsTotal.WithLabelValues(scriptLabel))
+	baseResourcesEmitted := testutil.ToFloat64(metrics.ResourcesEmittedTotal.WithLabelValues(scriptLabel))
+	baseResourcesSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel))
+	baseCacheMisses := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(scriptLabel))
+	baseCacheHits := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(scriptLabel))
+
+	// Count baseline histogram observations.
+	baseReconciliationDuration := testutil.CollectAndCount(metrics.ReconciliationDurationSeconds)
+	baseExecutionDuration := testutil.CollectAndCount(metrics.ExecutionDurationSeconds)
+
+	// First call: should increment all counters and record histogram observations.
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": %q
+			}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunFunction() error: %v", err)
+	}
+
+	// Verify the function succeeded (Normal result, not Fatal).
+	for _, result := range rsp.GetResults() {
+		if result.GetSeverity() == fnv1.Severity_SEVERITY_FATAL {
+			t.Fatalf("RunFunction() returned Fatal: %s", result.GetMessage())
+		}
+	}
+
+	// Assert counter deltas.
+	reconciliationsDelta := testutil.ToFloat64(metrics.ReconciliationsTotal.WithLabelValues(scriptLabel)) - baseReconciliations
+	if reconciliationsDelta != 1 {
+		t.Errorf("ReconciliationsTotal delta = %v, want 1", reconciliationsDelta)
+	}
+
+	resourcesEmittedDelta := testutil.ToFloat64(metrics.ResourcesEmittedTotal.WithLabelValues(scriptLabel)) - baseResourcesEmitted
+	if resourcesEmittedDelta != 1 {
+		t.Errorf("ResourcesEmittedTotal delta = %v, want 1", resourcesEmittedDelta)
+	}
+
+	resourcesSkippedDelta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel)) - baseResourcesSkipped
+	if resourcesSkippedDelta != 1 {
+		t.Errorf("ResourcesSkippedTotal delta = %v, want 1", resourcesSkippedDelta)
+	}
+
+	cacheMissesDelta := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(scriptLabel)) - baseCacheMisses
+	if cacheMissesDelta != 1 {
+		t.Errorf("CacheMissesTotal delta = %v, want 1 (first execution = miss)", cacheMissesDelta)
+	}
+
+	// Assert histogram observations increased.
+	postReconciliationDuration := testutil.CollectAndCount(metrics.ReconciliationDurationSeconds)
+	if postReconciliationDuration <= baseReconciliationDuration {
+		t.Errorf("ReconciliationDurationSeconds observation count did not increase: before=%d, after=%d",
+			baseReconciliationDuration, postReconciliationDuration)
+	}
+
+	postExecutionDuration := testutil.CollectAndCount(metrics.ExecutionDurationSeconds)
+	if postExecutionDuration <= baseExecutionDuration {
+		t.Errorf("ExecutionDurationSeconds observation count did not increase: before=%d, after=%d",
+			baseExecutionDuration, postExecutionDuration)
+	}
+
+	// Second call with same source: should produce a cache hit.
+	baseCacheHits2 := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(scriptLabel))
+	_, err = f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunFunction() second call error: %v", err)
+	}
+	cacheHitsDelta := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(scriptLabel)) - baseCacheHits2
+	if cacheHitsDelta != 1 {
+		t.Errorf("CacheHitsTotal delta = %v, want 1 (second execution = hit)", cacheHitsDelta)
+	}
+
+	// Verify first call didn't produce a cache hit (baseline check).
+	totalCacheHitsDelta := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(scriptLabel)) - baseCacheHits
+	if totalCacheHitsDelta != 1 {
+		t.Errorf("Total CacheHitsTotal delta = %v, want 1 (only second call should hit)", totalCacheHitsDelta)
+	}
 }
