@@ -124,6 +124,11 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 				return rsp, nil
 			}
 
+			// Warn about string refs that don't match any created resource.
+			for _, w := range builtins.WarnUnmatchedStringRefs(deps, resourceNames) {
+				response.Warning(rsp, errors.New(w))
+			}
+
 			// Generate Usage resources and insert into response.
 			apiVersion := builtins.DetectUsageAPIVersion(in.Spec.UsageAPIVersion)
 			usageResources := builtins.BuildUsageResources(deps, apiVersion)

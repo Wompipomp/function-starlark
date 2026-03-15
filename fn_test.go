@@ -2013,7 +2013,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 }
 
 // TestRunFunctionDependsOnStringRef verifies that string refs in depends_on
-// produce Usage resources without validation errors.
+// produce Usage resources and emit a warning when the ref does not match any
+// resource created by the script.
 func TestRunFunctionDependsOnStringRef(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
@@ -2035,6 +2036,9 @@ func TestRunFunctionDependsOnStringRef(t *testing.T) {
 
 	assertNormalResult(t, rsp)
 
+	// Verify a SEVERITY_WARNING result exists for the unmatched string ref.
+	assertWarningResult(t, rsp, "external-vpc", "string ref", "does not match")
+
 	resources := rsp.GetDesired().GetResources()
 
 	// Should have 2 resources: app and usage resource.
@@ -2046,6 +2050,45 @@ func TestRunFunctionDependsOnStringRef(t *testing.T) {
 	usageName := "usage-76593d19" // sha256("app\x00external-vpc")[:4] hex
 	if _, ok := resources[usageName]; !ok {
 		t.Errorf("expected Usage resource %q; got keys: %v", usageName, resourceNames(resources))
+	}
+}
+
+// TestRunFunctionDependsOnStringRefMatched verifies that string refs in
+// depends_on do NOT produce warnings when the ref matches a created resource.
+func TestRunFunctionDependsOnStringRefMatched(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("db", {"apiVersion": "v1", "kind": "DB"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	// No warnings should be emitted -- "db" matches a created resource.
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING {
+			t.Errorf("unexpected warning when string ref matches: %s", r.GetMessage())
+		}
+	}
+
+	resources := rsp.GetDesired().GetResources()
+
+	// Should have 3 resources: app, db, and usage.
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources, got %d: %v", len(resources), resourceNames(resources))
 	}
 }
 
@@ -2260,6 +2303,30 @@ func assertNormalResult(t *testing.T, rsp *fnv1.RunFunctionResponse) {
 		t.Fatalf("expected last result SEVERITY_NORMAL, got %v (message: %s)",
 			lastResult.GetSeverity(), lastResult.GetMessage())
 	}
+}
+
+// assertWarningResult verifies the response has at least one SEVERITY_WARNING
+// result whose message contains all the specified substrings.
+func assertWarningResult(t *testing.T, rsp *fnv1.RunFunctionResponse, substrings ...string) {
+	t.Helper()
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() != fnv1.Severity_SEVERITY_WARNING {
+			continue
+		}
+		msg := r.GetMessage()
+		allMatch := true
+		for _, sub := range substrings {
+			if !strings.Contains(msg, sub) {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
+			return
+		}
+	}
+	t.Errorf("expected a WARNING result containing %v; results: %v",
+		substrings, rsp.GetResults())
 }
 
 // resourceNames extracts the keys from a resource map for diagnostic output.
