@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	"github.com/crossplane/function-sdk-go/resource"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.starlark.net/starlark"
+
+	"github.com/wompipomp/function-starlark/metrics"
 )
 
 func TestNewCollector(t *testing.T) {
@@ -1049,5 +1052,44 @@ func TestCollector_ExternalName_SharedBody(t *testing.T) {
 	gotB := bAnn.GetFields()["crossplane.io/external-name"].GetStringValue()
 	if gotB != "name-b" {
 		t.Errorf("bucket-b external-name = %q, want %q", gotB, "name-b")
+	}
+}
+
+func TestCollector_SkipResource_Metrics(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	c.SetScriptName("skip-metrics-test.star")
+	thread := new(starlark.Thread)
+
+	label := "skip-metrics-test.star"
+	baseSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	// First skip_resource("x", "reason") -- should increment by 1.
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("x"),
+		starlark.String("reason"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("first skip_resource() error: %v", err)
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - baseSkipped
+	if delta != 1 {
+		t.Errorf("skip counter delta after first skip = %v, want 1", delta)
+	}
+
+	// Duplicate skip_resource("x", "other") -- should NOT increment (dedup).
+	baseSkipped = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	_, err = starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("x"),
+		starlark.String("other"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("second skip_resource() error: %v", err)
+	}
+
+	delta = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - baseSkipped
+	if delta != 0 {
+		t.Errorf("skip counter delta after dedup skip = %v, want 0", delta)
 	}
 }

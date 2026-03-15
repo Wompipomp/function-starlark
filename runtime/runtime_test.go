@@ -7,7 +7,10 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"github.com/google/go-cmp/cmp"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.starlark.net/starlark"
+
+	"github.com/wompipomp/function-starlark/metrics"
 )
 
 // testLogger implements logging.Logger for tests.
@@ -583,5 +586,50 @@ func TestCacheKeyIncludesFilename(t *testing.T) {
 	// Different filenames must produce different cache entries.
 	if rt.CacheLen() != 2 {
 		t.Fatalf("cache len = %d, want 2 (different filenames should produce different cache entries)", rt.CacheLen())
+	}
+}
+
+func TestCacheMetrics(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Use a unique filename to avoid cross-test interference with the global registry.
+	filename := "cache-metrics-test.star"
+
+	// Record baselines.
+	baseHits := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(filename))
+	baseMisses := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(filename))
+
+	// First execute -- cache miss.
+	_, err := rt.Execute("x = 42", starlark.StringDict{}, filename, nil)
+	if err != nil {
+		t.Fatalf("first execute error: %v", err)
+	}
+
+	missDelta := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(filename)) - baseMisses
+	hitDelta := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(filename)) - baseHits
+	if missDelta != 1 {
+		t.Errorf("cache miss delta after first execute = %v, want 1", missDelta)
+	}
+	if hitDelta != 0 {
+		t.Errorf("cache hit delta after first execute = %v, want 0", hitDelta)
+	}
+
+	// Second execute with same source -- cache hit.
+	baseMisses = testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(filename))
+	baseHits = testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(filename))
+
+	_, err = rt.Execute("x = 42", starlark.StringDict{}, filename, nil)
+	if err != nil {
+		t.Fatalf("second execute error: %v", err)
+	}
+
+	hitDelta = testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(filename)) - baseHits
+	missDelta = testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(filename)) - baseMisses
+	if hitDelta != 1 {
+		t.Errorf("cache hit delta after second execute = %v, want 1", hitDelta)
+	}
+	if missDelta != 0 {
+		t.Errorf("cache miss delta after second execute = %v, want 0", missDelta)
 	}
 }
