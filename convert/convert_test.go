@@ -1255,18 +1255,34 @@ func TestProtoValueToPlainStarlark_Float(t *testing.T) {
 }
 
 func TestProtoValueToPlainStarlark_BeyondMaxSafeInt(t *testing.T) {
-	// 2^53 + 1 = 9007199254740993 -- beyond safe integer range for float64.
-	bigVal := float64(1<<53 + 1)
+	// 2^54 = 18014398509481984 -- beyond 2^53 safe integer range.
+	// This is a whole number in float64, but converting to int64 and back
+	// would lose precision for nearby odd values, so we keep it as Float.
+	bigVal := float64(1 << 54)
 	v, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(bigVal), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
 	f, ok := v.(starlark.Float)
 	if !ok {
-		t.Fatalf("2^53+1 = %T, want starlark.Float (not int64 which would truncate)", v)
+		t.Fatalf("2^54 = %T, want starlark.Float (beyond maxSafeInt guard)", v)
 	}
 	if float64(f) != bigVal {
 		t.Errorf("got %v, want %v", f, bigVal)
+	}
+
+	// Also test negative beyond maxSafeInt.
+	negBigVal := -float64(1 << 54)
+	v2, err := ProtoValueToPlainStarlark(structpb.NewNumberValue(negBigVal), false)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	f2, ok := v2.(starlark.Float)
+	if !ok {
+		t.Fatalf("-2^54 = %T, want starlark.Float", v2)
+	}
+	if float64(f2) != negBigVal {
+		t.Errorf("got %v, want %v", f2, negBigVal)
 	}
 }
 

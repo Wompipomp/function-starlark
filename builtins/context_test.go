@@ -337,11 +337,11 @@ func TestApplyContext_WrongType(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// protoValueToStarlarkValue tests
+// convert.ProtoValueToPlainStarlark tests (previously protoValueToStarlarkValue)
 // ---------------------------------------------------------------------------
 
 func TestProtoValue_NilInput(t *testing.T) {
-	v, err := protoValueToStarlarkValue(nil, false)
+	v, err := convert.ProtoValueToPlainStarlark(nil, false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestProtoValue_NilInput(t *testing.T) {
 }
 
 func TestProtoValue_NullValue(t *testing.T) {
-	v, err := protoValueToStarlarkValue(structpb.NewNullValue(), false)
+	v, err := convert.ProtoValueToPlainStarlark(structpb.NewNullValue(), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestProtoValue_NullValue(t *testing.T) {
 
 func TestProtoValue_Integer(t *testing.T) {
 	// A whole-number float (42.0) should produce starlark.Int, not Float.
-	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(42.0), false)
+	v, err := convert.ProtoValueToPlainStarlark(structpb.NewNumberValue(42.0), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestProtoValue_Integer(t *testing.T) {
 }
 
 func TestProtoValue_Float(t *testing.T) {
-	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(3.14), false)
+	v, err := convert.ProtoValueToPlainStarlark(structpb.NewNumberValue(3.14), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestProtoValue_Float(t *testing.T) {
 }
 
 func TestProtoValue_NaN(t *testing.T) {
-	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(math.NaN()), false)
+	v, err := convert.ProtoValueToPlainStarlark(structpb.NewNumberValue(math.NaN()), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestProtoValue_NaN(t *testing.T) {
 }
 
 func TestProtoValue_Inf(t *testing.T) {
-	v, err := protoValueToStarlarkValue(structpb.NewNumberValue(math.Inf(1)), false)
+	v, err := convert.ProtoValueToPlainStarlark(structpb.NewNumberValue(math.Inf(1)), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestProtoValue_Inf(t *testing.T) {
 }
 
 func TestProtoValue_Bool(t *testing.T) {
-	v, err := protoValueToStarlarkValue(structpb.NewBoolValue(true), false)
+	v, err := convert.ProtoValueToPlainStarlark(structpb.NewBoolValue(true), false)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestProtoValue_StructFrozen(t *testing.T) {
 			"key": structpb.NewStringValue("val"),
 		},
 	})
-	v, err := protoValueToStarlarkValue(sv, true)
+	v, err := convert.ProtoValueToPlainStarlark(sv, true)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestProtoValue_StructFrozen(t *testing.T) {
 
 func TestProtoValue_ListNilValue(t *testing.T) {
 	// ListValue with nil internal value should return empty list.
-	v, err := protoValueToStarlarkValue(&structpb.Value{
+	v, err := convert.ProtoValueToPlainStarlark(&structpb.Value{
 		Kind: &structpb.Value_ListValue{ListValue: nil},
 	}, false)
 	if err != nil {
@@ -472,7 +472,7 @@ func TestProtoValue_ListFrozen(t *testing.T) {
 	lv := structpb.NewListValue(&structpb.ListValue{
 		Values: []*structpb.Value{structpb.NewStringValue("a")},
 	})
-	v, err := protoValueToStarlarkValue(lv, true)
+	v, err := convert.ProtoValueToPlainStarlark(lv, true)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}

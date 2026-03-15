@@ -103,6 +103,88 @@ func listValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlark.Lis
 	return list, nil
 }
 
+// ProtoValueToPlainStarlark converts a single protobuf Value to its Starlark
+// equivalent, producing plain *starlark.Dict for struct values (not
+// *StarlarkDict). This is used for context data where keys may contain dots
+// and slashes that conflict with StarlarkDict's dot-access.
+func ProtoValueToPlainStarlark(v *structpb.Value, freeze bool) (starlark.Value, error) {
+	if v == nil {
+		return starlark.None, nil
+	}
+
+	switch kind := v.GetKind().(type) {
+	case *structpb.Value_NullValue:
+		return starlark.None, nil
+	case *structpb.Value_NumberValue:
+		f := kind.NumberValue
+		if isWholeNumber(f) {
+			// Guard against int64 overflow: values beyond 2^53 cannot be
+			// represented exactly as float64, so keep them as Float.
+			if f > float64(1<<53) || f < -float64(1<<53) {
+				return starlark.Float(f), nil
+			}
+			return starlark.MakeInt64(int64(f)), nil
+		}
+		return starlark.Float(f), nil
+	case *structpb.Value_StringValue:
+		return starlark.String(kind.StringValue), nil
+	case *structpb.Value_BoolValue:
+		return starlark.Bool(kind.BoolValue), nil
+	case *structpb.Value_StructValue:
+		d := new(starlark.Dict)
+		if kind.StructValue != nil {
+			for k, fv := range kind.StructValue.GetFields() {
+				sv, err := ProtoValueToPlainStarlark(fv, freeze)
+				if err != nil {
+					return nil, fmt.Errorf("field %q: %w", k, err)
+				}
+				if err := d.SetKey(starlark.String(k), sv); err != nil {
+					return nil, fmt.Errorf("field %q: %w", k, err)
+				}
+			}
+		}
+		if freeze {
+			d.Freeze()
+		}
+		return d, nil
+	case *structpb.Value_ListValue:
+		return plainListValueToStarlarkList(kind.ListValue, freeze)
+	case nil:
+		return starlark.None, nil
+	default:
+		return nil, fmt.Errorf("unsupported protobuf value kind: %T", kind)
+	}
+}
+
+// plainListValueToStarlarkList converts a protobuf ListValue to a Starlark
+// list, using ProtoValueToPlainStarlark for element conversion (producing
+// plain dicts for nested structs).
+func plainListValueToStarlarkList(lv *structpb.ListValue, freeze bool) (*starlark.List, error) {
+	if lv == nil {
+		l := starlark.NewList(nil)
+		if freeze {
+			l.Freeze()
+		}
+		return l, nil
+	}
+
+	vals := lv.GetValues()
+	elems := make([]starlark.Value, len(vals))
+	for i, v := range vals {
+		sv, err := ProtoValueToPlainStarlark(v, freeze)
+		if err != nil {
+			return nil, fmt.Errorf("list[%d]: %w", i, err)
+		}
+		elems[i] = sv
+	}
+
+	list := starlark.NewList(elems)
+	if freeze {
+		list.Freeze()
+	}
+	return list, nil
+}
+
 // PlainDictToStruct converts a plain *starlark.Dict (as produced by dict
 // literals in Starlark scripts) to a protobuf Struct. It rejects non-string
 // keys and handles nested dicts recursively via starlarkToProtoValue.
