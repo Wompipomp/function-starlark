@@ -110,7 +110,7 @@ func (c *Collector) addDependency(dependent, dependency string, isRef bool) {
 	})
 }
 
-// resourceFn implements the Resource(name, body, ready=True, connection_details=None, depends_on=None) Starlark builtin.
+// resourceFn implements the Resource(name, body, ready=None, connection_details=None, depends_on=None) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -121,10 +121,10 @@ func (c *Collector) resourceFn(
 	var body *starlark.Dict
 	var connDetails *starlark.Dict
 	var dependsOn *starlark.List
-	ready := true
+	var readyVal starlark.Value = starlark.None
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"name", &name, "body", &body, "ready?", &ready,
+		"name", &name, "body", &body, "ready?", &readyVal,
 		"connection_details??", &connDetails,
 		"depends_on??", &dependsOn); err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (c *Collector) resourceFn(
 	c.resources[name] = CollectedResource{
 		Name:              name,
 		Body:              s,
-		Ready:             readyFromBool(ready),
+		Ready:             readyFromStarlark(readyVal),
 		ConnectionDetails: cd,
 	}
 	c.mu.Unlock()
@@ -180,10 +180,17 @@ func (c *Collector) resourceFn(
 	return &ResourceRef{name: name}, nil
 }
 
-// readyFromBool converts a boolean to the resource.Ready type.
-func readyFromBool(ready bool) resource.Ready {
-	if ready {
+// readyFromStarlark converts a Starlark value to the resource.Ready type.
+// None -> ReadyUnspecified (let function-auto-ready detect readiness)
+// True -> ReadyTrue (explicitly ready, e.g. ProviderConfig)
+// False -> ReadyFalse (explicitly not ready)
+func readyFromStarlark(v starlark.Value) resource.Ready {
+	switch v {
+	case starlark.None:
+		return resource.ReadyUnspecified
+	case starlark.True:
 		return resource.ReadyTrue
+	default:
+		return resource.ReadyFalse
 	}
-	return resource.ReadyFalse
 }

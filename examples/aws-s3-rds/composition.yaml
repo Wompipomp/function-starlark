@@ -21,8 +21,6 @@ spec:
             load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr")
             load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
             load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
-            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "progress")
-
             # Read XR spec
             region = get(oxr, "spec.region", "us-east-1")
             db_class = get(oxr, "spec.dbInstanceClass", "db.t3.micro")
@@ -76,5 +74,6 @@ spec:
                     },
                 },
             })
-
-            progress(2, 2)
+    - step: detect-readiness
+      functionRef:
+        name: function-auto-ready

@@ -11,7 +11,7 @@ Load the modules you need and use them in your composition:
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr")
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "ready", "progress")
+load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "degraded")
 
 name = resource_name("bucket")
 labels = merge_labels(
@@ -27,8 +27,6 @@ Resource("bucket", {
     "metadata": {"name": name, "labels": labels},
     "spec": {"forProvider": {"region": "us-east-1"}},
 })
-
-progress(1, 3)  # Sets "1/3 resources ready" condition
 ```
 
 ---
@@ -347,54 +345,13 @@ merge_labels(
 
 ## conditions.star
 
-Ergonomic wrappers around `set_condition` and `emit_event` for common status
-condition patterns. Eliminates boilerplate for the most frequent condition
-operations.
+Ergonomic wrapper around `set_condition` and `emit_event` for signaling
+operational status. These set **informational** status conditions on the
+composite resource -- they do **not** control XR readiness.
 
-### ready
-
-```python
-def ready(message="")
-```
-
-Set the composite resource as Ready/Available. Calls `set_condition` with
-`type="Ready"`, `status="True"`, `reason="Available"`.
-
-**Args:**
-- `message` -- Optional human-readable status message
-
-**Returns:** None.
-
-**Example:**
-```python
-ready()
-ready("All 5 resources provisioned")
-```
-
----
-
-### not_ready
-
-```python
-def not_ready(reason, message="")
-```
-
-Set the composite resource as not ready. Calls `set_condition` with
-`type="Ready"`, `status="False"`.
-
-**Args:**
-- `reason` -- Machine-readable reason (e.g., `"Creating"`, `"Waiting"`)
-- `message` -- Optional human-readable message
-
-**Returns:** None.
-
-**Example:**
-```python
-not_ready("Creating", "Waiting for database to become available")
-not_ready("MissingDependency")
-```
-
----
+> **Note:** XR readiness is determined by the `Ready` field on desired composed
+> resources, typically managed by `function-auto-ready` or the `ready` parameter
+> on `Resource()`. Do not use `set_condition` to control readiness.
 
 ### degraded
 
@@ -402,9 +359,9 @@ not_ready("MissingDependency")
 def degraded(reason, message="")
 ```
 
-Set the composite resource as degraded and emit a warning event. Calls both
-`set_condition` (with `status="False"`) and `emit_event` with
-`severity="Warning"`. Use for recoverable failures where the composition is
+Signal that the composite resource is degraded and emit a warning event. Calls
+both `set_condition` (with `type="Degraded"`, `status="True"`) and `emit_event`
+with `severity="Warning"`. Use for recoverable failures where the composition is
 impaired but not completely broken.
 
 **Args:**
@@ -417,32 +374,6 @@ impaired but not completely broken.
 ```python
 degraded("ReplicaLag", "Read replica lagging by 30 seconds")
 degraded("QuotaExceeded")
-```
-
----
-
-### progress
-
-```python
-def progress(current, total, message="")
-```
-
-Set a progress condition for multi-resource compositions. Automatically
-generates a progress message and calls `ready()` when `current >= total`, or
-`not_ready()` with reason `"InProgress"` otherwise.
-
-**Args:**
-- `current` -- Number of ready resources
-- `total` -- Total number of expected resources
-- `message` -- Optional override message (default: `"{current}/{total} resources ready"`)
-
-**Returns:** None.
-
-**Example:**
-```python
-progress(2, 5)                        # not_ready: "2/5 resources ready"
-progress(5, 5)                        # ready: "5/5 resources ready"
-progress(3, 3, "All services online") # ready: "All services online"
 ```
 
 ---

@@ -20,8 +20,6 @@ spec:
           source: |
             load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
             load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
-            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "ready")
-
             # Read XR spec
             location = get(oxr, "spec.location", "eastus")
             rg_name = get(oxr, "spec.resourceGroupName", "default-rg")
@@ -55,5 +53,6 @@ spec:
                     },
                 },
             })
-
-            ready("Storage account configured")
+    - step: detect-readiness
+      functionRef:
+        name: function-auto-ready

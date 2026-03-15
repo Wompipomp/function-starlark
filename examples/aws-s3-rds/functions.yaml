@@ -6,3 +6,12 @@ metadata:
     meta.crossplane.io/description: Starlark-based composition function
 spec:
   package: ghcr.io/wompipomp/function-starlark:v0.1.0
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-auto-ready
+  annotations:
+    meta.crossplane.io/description: Detects composed resource readiness
+spec:
+  package: xpkg.upbound.io/crossplane-contrib/function-auto-ready:v0.3.0

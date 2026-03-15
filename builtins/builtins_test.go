@@ -580,7 +580,9 @@ func TestApplyResources_ReadyEnum(t *testing.T) {
 	_, _ = starlark.Call(thread, c.Builtin(), starlark.Tuple{
 		starlark.String("ready-item"),
 		body1,
-	}, nil) // default ready=True
+	}, []starlark.Tuple{
+		{starlark.String("ready"), starlark.True},
+	}) // explicit ready=True
 
 	body2 := new(starlark.Dict)
 	_ = body2.SetKey(starlark.String("kind"), starlark.String("NotReadyRes"))

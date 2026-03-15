@@ -470,39 +470,7 @@ func TestStdlibConditions(t *testing.T) {
 	}
 	exports := loadModule(t, "conditions.star", pre)
 
-	readyFn := exports["ready"]
-	notReadyFn := exports["not_ready"]
 	degradedFn := exports["degraded"]
-	progressFn := exports["progress"]
-
-	t.Run("ready", func(t *testing.T) {
-		recorder.reset()
-		callStarlark(t, readyFn, nil, nil)
-
-		calls := recorder.getCalls()
-		if len(calls) != 1 {
-			t.Fatalf("expected 1 call, got %d", len(calls))
-		}
-		assertCallKwarg(t, calls[0], "type", `"Ready"`)
-		assertCallKwarg(t, calls[0], "status", `"True"`)
-		assertCallKwarg(t, calls[0], "reason", `"Available"`)
-	})
-
-	t.Run("not_ready", func(t *testing.T) {
-		recorder.reset()
-		callStarlark(t, notReadyFn,
-			starlark.Tuple{starlark.String("Creating")},
-			[]starlark.Tuple{{starlark.String("message"), starlark.String("waiting for bucket")}})
-
-		calls := recorder.getCalls()
-		if len(calls) != 1 {
-			t.Fatalf("expected 1 call, got %d", len(calls))
-		}
-		assertCallKwarg(t, calls[0], "type", `"Ready"`)
-		assertCallKwarg(t, calls[0], "status", `"False"`)
-		assertCallKwarg(t, calls[0], "reason", `"Creating"`)
-		assertCallKwarg(t, calls[0], "message", `"waiting for bucket"`)
-	})
 
 	t.Run("degraded_calls_both", func(t *testing.T) {
 		recorder.reset()
@@ -518,7 +486,8 @@ func TestStdlibConditions(t *testing.T) {
 		if calls[0].name != "set_condition" {
 			t.Errorf("first call = %q, want set_condition", calls[0].name)
 		}
-		assertCallKwarg(t, calls[0], "status", `"False"`)
+		assertCallKwarg(t, calls[0], "type", `"Degraded"`)
+		assertCallKwarg(t, calls[0], "status", `"True"`)
 		assertCallKwarg(t, calls[0], "reason", `"DBFailing"`)
 
 		// Second call: emit_event.
@@ -528,38 +497,6 @@ func TestStdlibConditions(t *testing.T) {
 		assertCallKwarg(t, calls[1], "severity", `"Warning"`)
 		if !strings.Contains(calls[1].kwargs["message"], "Degraded") {
 			t.Errorf("emit_event message = %q, want it to contain 'Degraded'", calls[1].kwargs["message"])
-		}
-	})
-
-	t.Run("progress_incomplete", func(t *testing.T) {
-		recorder.reset()
-		callStarlark(t, progressFn,
-			starlark.Tuple{starlark.MakeInt(3), starlark.MakeInt(5)}, nil)
-
-		calls := recorder.getCalls()
-		if len(calls) != 1 {
-			t.Fatalf("expected 1 call, got %d", len(calls))
-		}
-		assertCallKwarg(t, calls[0], "reason", `"InProgress"`)
-		assertCallKwarg(t, calls[0], "status", `"False"`)
-		if !strings.Contains(calls[0].kwargs["message"], "3/5") {
-			t.Errorf("message = %q, want it to contain '3/5'", calls[0].kwargs["message"])
-		}
-	})
-
-	t.Run("progress_complete_calls_ready", func(t *testing.T) {
-		recorder.reset()
-		callStarlark(t, progressFn,
-			starlark.Tuple{starlark.MakeInt(5), starlark.MakeInt(5)}, nil)
-
-		calls := recorder.getCalls()
-		if len(calls) != 1 {
-			t.Fatalf("expected 1 call, got %d", len(calls))
-		}
-		assertCallKwarg(t, calls[0], "status", `"True"`)
-		assertCallKwarg(t, calls[0], "reason", `"Available"`)
-		if !strings.Contains(calls[0].kwargs["message"], "5/5") {
-			t.Errorf("message = %q, want it to contain '5/5'", calls[0].kwargs["message"])
 		}
 	})
 }

@@ -435,7 +435,7 @@ func TestRunFunction(t *testing.T) {
 									"metadata": {"name": "my-bucket"},
 									"spec": {"forProvider": {"region": "us-east-1"}}
 								}`),
-								Ready: fnv1.Ready_READY_TRUE,
+								Ready: fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -514,7 +514,7 @@ func TestRunFunction(t *testing.T) {
 									"note": "test",
 									"ready": "True"
 								}`),
-								Ready: fnv1.Ready_READY_TRUE,
+								Ready: fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -596,7 +596,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"new-bucket": {
 								Resource: resource.MustStructJSON(`{"region": "eu-west-1"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -677,7 +677,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"existing-bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","metadata":{"name":"existing"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					},
@@ -700,7 +700,7 @@ func TestRunFunction(t *testing.T) {
 							Resources: map[string]*fnv1.Resource{
 								"existing-bucket": {
 									Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","metadata":{"name":"existing"}}`),
-									Ready:    fnv1.Ready_READY_TRUE,
+									Ready:    fnv1.Ready_READY_UNSPECIFIED,
 								},
 							},
 						},
@@ -712,7 +712,7 @@ func TestRunFunction(t *testing.T) {
 					// ApplyResources adds new resources, preserving existing ones.
 					rsp.Desired.Resources["new-bucket"] = &fnv1.Resource{
 						Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
-						Ready:    fnv1.Ready_READY_TRUE,
+						Ready:    fnv1.Ready_READY_UNSPECIFIED,
 					}
 					return rsp
 				}(),
@@ -774,7 +774,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -816,15 +816,15 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"instance-0": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"ec2.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"instance-0"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 							"instance-1": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"ec2.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"instance-1"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 							"instance-2": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"ec2.aws.upbound.io/v1beta1","kind":"Instance","metadata":{"name":"instance-2"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -866,7 +866,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"my-bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","spec":{"forProvider":{"region":"us-west-2"}}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -972,7 +972,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"test": {
 								Resource: resource.MustStructJSON(`{"region": "ap-southeast-1", "fallback": "fallback-value"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1083,7 +1083,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"test": {
 								Resource: resource.MustStructJSON(`{"status": "missing"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1125,15 +1125,15 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 							"queue": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"sqs.aws.upbound.io/v1beta1","kind":"Queue"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 							"topic": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"sns.aws.upbound.io/v1beta1","kind":"Topic"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1175,7 +1175,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"v1beta1","kind":"Bucket","spec":{"region":"eu-west-1"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1410,7 +1410,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Bucket","spec":{"region":"eu-west-1"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1519,7 +1519,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"ref": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Reference","spec":{"dbName":"my-database"}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1563,7 +1563,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"my-rds": {
 								Resource:          resource.MustStructJSON(`{"apiVersion":"v1","kind":"RDS"}`),
-								Ready:             fnv1.Ready_READY_TRUE,
+								Ready:             fnv1.Ready_READY_UNSPECIFIED,
 								ConnectionDetails: map[string][]byte{"username": []byte("admin"), "password": []byte("secret")},
 							},
 						},
@@ -1771,7 +1771,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"test": {
 								Resource: resource.MustStructJSON(`{"greeting": "hello world"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1819,7 +1819,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"my-bucket": {
 								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","spec":{"forProvider":{"region":"us-east-1"}}}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1889,7 +1889,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"test": {
 								Resource: resource.MustStructJSON(`{"region": "ap-southeast-1"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}
@@ -1939,7 +1939,7 @@ func TestRunFunction(t *testing.T) {
 						Resources: map[string]*fnv1.Resource{
 							"test": {
 								Resource: resource.MustStructJSON(`{"value": "a+b"}`),
-								Ready:    fnv1.Ready_READY_TRUE,
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
 							},
 						},
 					}

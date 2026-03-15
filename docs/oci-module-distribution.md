@@ -416,7 +416,7 @@ most common composition patterns:
 | `networking.star` | CIDR math, IP address utilities (equivalent to Terraform's `cidrsubnet`) |
 | `naming.star` | Kubernetes-safe resource naming with 63-character limit enforcement |
 | `labels.star` | Kubernetes recommended labels and Crossplane labels with merge utility |
-| `conditions.star` | Status condition helpers (`ready`, `not_ready`, `degraded`, `progress`) |
+| `conditions.star` | Operational status signaling (`degraded`) |
 
 ### Loading stdlib modules
 
@@ -425,7 +425,7 @@ most common composition patterns:
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr", "cidr_contains")
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "ready", "progress")
+load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "degraded")
 
 # Or use star import to get everything from a module
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "*")
@@ -436,7 +436,6 @@ load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "*")
 ```python
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "ready")
 
 name = resource_name("bucket")
 labels = merge_labels(
@@ -450,8 +449,6 @@ Resource("bucket", {
     "metadata": {"name": name, "labels": labels},
     "spec": {"forProvider": {"region": get(oxr, "spec.region", "us-east-1")}},
 })
-
-ready("Bucket configured")
 ```
 
 The stdlib is a public GHCR package -- no authentication is needed to pull it.

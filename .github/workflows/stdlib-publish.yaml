@@ -2,7 +2,7 @@ name: Publish stdlib
 
 on:
   push:
-    tags: ['v*']
+    tags: ['stdlib/v*']
 
 permissions:
   packages: write
@@ -26,7 +26,7 @@ jobs:
       - name: Push stdlib
         run: |
           cd stdlib
-          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${GITHUB_REF#refs/tags/stdlib/}
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
           oras push ghcr.io/wompipomp/starlark-stdlib:${VERSION} \
             --artifact-type application/vnd.fn-starlark.modules.v1+tar \

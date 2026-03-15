@@ -67,6 +67,29 @@ func TestCollector_ReadyDefault(t *testing.T) {
 	}
 
 	cr := c.Resources()["item"]
+	if cr.Ready != resource.ReadyUnspecified {
+		t.Errorf("Ready = %v, want ReadyUnspecified", cr.Ready)
+	}
+}
+
+func TestCollector_ReadyTrue(t *testing.T) {
+	c := NewCollector()
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("ready"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+
+	cr := c.Resources()["item"]
 	if cr.Ready != resource.ReadyTrue {
 		t.Errorf("Ready = %v, want ReadyTrue", cr.Ready)
 	}
