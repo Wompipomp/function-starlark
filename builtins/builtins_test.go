@@ -63,7 +63,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 	}
 
 	expected := []string{
-		"oxr", "dxr", "observed", "Resource", "get",
+		"oxr", "dxr", "observed", "Resource", "skip_resource", "get",
 		"context", "environment", "extra_resources",
 		"set_condition", "emit_event", "fatal",
 		"set_connection_details", "require_resource", "require_resources",
