@@ -1932,3 +1932,350 @@ func TestConfigMapDefaultKey(t *testing.T) {
 			rsp.GetResults()[0].GetSeverity(), rsp.GetResults()[0].GetMessage())
 	}
 }
+
+// TestRunFunctionDependsOnBasic verifies that a script using depends_on with ResourceRef
+// produces a Usage resource in the response alongside normal resources.
+func TestRunFunctionDependsOnBasic(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	// Should succeed.
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// Should have 3 resources: db, app, and one usage resource.
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources, got %d: %v", len(resources), resourceNames(resources))
+	}
+
+	// Check db and app exist.
+	if _, ok := resources["db"]; !ok {
+		t.Error("expected 'db' resource in desired state")
+	}
+	if _, ok := resources["app"]; !ok {
+		t.Error("expected 'app' resource in desired state")
+	}
+
+	// Check usage resource exists with correct structure.
+	usageName := "usage-c2727553" // sha256("app\x00db")[:4] hex
+	usage, ok := resources[usageName]
+	if !ok {
+		t.Fatalf("expected Usage resource %q in desired state; got keys: %v", usageName, resourceNames(resources))
+	}
+
+	// Verify Usage resource structure.
+	body := usage.GetResource()
+	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "apiextensions.crossplane.io/v1alpha1" {
+		t.Errorf("Usage apiVersion = %q, want apiextensions.crossplane.io/v1alpha1", got)
+	}
+	if got := body.GetFields()["kind"].GetStringValue(); got != "Usage" {
+		t.Errorf("Usage kind = %q, want Usage", got)
+	}
+
+	spec := body.GetFields()["spec"].GetStructValue()
+	if got := spec.GetFields()["replayDeletion"].GetBoolValue(); !got {
+		t.Error("Usage spec.replayDeletion should be true")
+	}
+
+	// "of" should reference the dependency (db).
+	ofRef := spec.GetFields()["of"].GetStructValue().GetFields()["resourceRef"].GetStructValue()
+	if got := ofRef.GetFields()["name"].GetStringValue(); got != "db" {
+		t.Errorf("Usage of.resourceRef.name = %q, want 'db'", got)
+	}
+
+	// "by" should reference the dependent (app).
+	byRef := spec.GetFields()["by"].GetStructValue().GetFields()["resourceRef"].GetStructValue()
+	if got := byRef.GetFields()["name"].GetStringValue(); got != "app" {
+		t.Errorf("Usage by.resourceRef.name = %q, want 'app'", got)
+	}
+
+	// Usage should be READY_TRUE.
+	if usage.GetReady() != fnv1.Ready_READY_TRUE {
+		t.Errorf("Usage ready = %v, want READY_TRUE", usage.GetReady())
+	}
+}
+
+// TestRunFunctionDependsOnStringRef verifies that string refs in depends_on
+// produce Usage resources without validation errors.
+func TestRunFunctionDependsOnStringRef(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["external-vpc"])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// Should have 2 resources: app and usage resource.
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d: %v", len(resources), resourceNames(resources))
+	}
+
+	// Usage resource for string ref.
+	usageName := "usage-76593d19" // sha256("app\x00external-vpc")[:4] hex
+	if _, ok := resources[usageName]; !ok {
+		t.Errorf("expected Usage resource %q; got keys: %v", usageName, resourceNames(resources))
+	}
+}
+
+// TestRunFunctionDependsOnForwardRef verifies that forward references work:
+// a resource can depend on another resource via ResourceRef even if the
+// dependency is defined later in the script.
+func TestRunFunctionDependsOnForwardRef(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// Forward reference: app depends on db, but db is created after app.
+	// This requires depends_on to use a string ref since db ResourceRef doesn't exist yet.
+	// Actually, with ResourceRef, db must exist first. For forward ref via string:
+	script := `Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])
+Resource("db", {"apiVersion": "v1", "kind": "Database"})`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	// Forward references via string are trusted -- should succeed.
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// Should have 3 resources: app, db, and usage.
+	if len(resources) != 3 {
+		t.Fatalf("expected 3 resources, got %d: %v", len(resources), resourceNames(resources))
+	}
+}
+
+// TestRunFunctionDependsOnCircularDependency verifies that circular dependencies
+// return a Fatal response with cycle path.
+func TestRunFunctionDependsOnCircularDependency(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// A depends on B, B depends on A -> circular.
+	script := `a = Resource("a", {"apiVersion": "v1", "kind": "A"})
+b = Resource("b", {"apiVersion": "v1", "kind": "B"}, depends_on=[a])
+Resource("a2", {"apiVersion": "v1", "kind": "A"})
+# Overwrite a to create cycle: we need a->b and b->a
+# Actually, depends_on is per-Resource call, so:
+# b depends on a (from above). We need a to depend on b.
+# But a is already created. We need a new resource that creates the cycle.`
+
+	// Simpler approach: use string refs to create cycle.
+	script = `Resource("a", {"apiVersion": "v1", "kind": "A"}, depends_on=["b"])
+Resource("b", {"apiVersion": "v1", "kind": "B"}, depends_on=["a"])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	// Should be Fatal.
+	if len(rsp.GetResults()) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_FATAL {
+		t.Fatalf("expected SEVERITY_FATAL, got %v", rsp.GetResults()[0].GetSeverity())
+	}
+
+	msg := rsp.GetResults()[0].GetMessage()
+	if !strings.Contains(msg, "dependency validation failed") {
+		t.Errorf("expected error to contain 'dependency validation failed', got: %s", msg)
+	}
+	if !strings.Contains(msg, "circular dependency detected") {
+		t.Errorf("expected error to contain 'circular dependency detected', got: %s", msg)
+	}
+	// Should show cycle path with arrow notation.
+	if !strings.Contains(msg, "->") {
+		t.Errorf("expected error to contain '->' cycle path, got: %s", msg)
+	}
+}
+
+// TestRunFunctionDependsOnChain verifies that a dependency chain A->B->C
+// produces 2 Usage resources with correct dependency pairs.
+func TestRunFunctionDependsOnChain(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `cache = Resource("cache", {"apiVersion": "v1", "kind": "Cache"})
+db = Resource("db", {"apiVersion": "v1", "kind": "Database"}, depends_on=[cache])
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// Should have 5 resources: cache, db, app, usage(db->cache), usage(app->db).
+	if len(resources) != 5 {
+		t.Fatalf("expected 5 resources, got %d: %v", len(resources), resourceNames(resources))
+	}
+
+	// Verify both usage resources exist.
+	usageDBCache := "usage-543cc3c8" // sha256("db\x00cache")[:4] hex
+	usageAppDB := "usage-c2727553"   // sha256("app\x00db")[:4] hex
+
+	if _, ok := resources[usageDBCache]; !ok {
+		t.Errorf("expected Usage resource %q (db->cache); got keys: %v", usageDBCache, resourceNames(resources))
+	}
+	if _, ok := resources[usageAppDB]; !ok {
+		t.Errorf("expected Usage resource %q (app->db); got keys: %v", usageAppDB, resourceNames(resources))
+	}
+}
+
+// TestRunFunctionDependsOnUsageAPIVersionV2 verifies that usageAPIVersion="v2"
+// produces Usage resources with protection.crossplane.io/v1beta1 apiVersion.
+func TestRunFunctionDependsOnUsageAPIVersionV2(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q, "usageAPIVersion": "v2"}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	// Check Usage resource has v2 apiVersion.
+	usageName := "usage-c2727553"
+	usage, ok := rsp.GetDesired().GetResources()[usageName]
+	if !ok {
+		t.Fatalf("expected Usage resource %q", usageName)
+	}
+
+	got := usage.GetResource().GetFields()["apiVersion"].GetStringValue()
+	want := "protection.crossplane.io/v1beta1"
+	if got != want {
+		t.Errorf("Usage apiVersion = %q, want %q", got, want)
+	}
+}
+
+// TestRunFunctionResourceRefNameAttr verifies that Resource() return value
+// (ResourceRef) has a .name attribute accessible in the script.
+func TestRunFunctionResourceRefNameAttr(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// Use ref.name to set a field in another resource.
+	script := `ref = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App", "spec": {"dbRef": ref.name}})`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	// Check app resource has dbRef set to "db".
+	app, ok := rsp.GetDesired().GetResources()["app"]
+	if !ok {
+		t.Fatal("expected 'app' resource in desired state")
+	}
+
+	dbRef := app.GetResource().GetFields()["spec"].GetStructValue().GetFields()["dbRef"].GetStringValue()
+	if dbRef != "db" {
+		t.Errorf("app spec.dbRef = %q, want 'db'", dbRef)
+	}
+}
+
+// assertNormalResult verifies the response has a Normal severity result.
+func assertNormalResult(t *testing.T, rsp *fnv1.RunFunctionResponse) {
+	t.Helper()
+	if len(rsp.GetResults()) == 0 {
+		t.Fatal("expected at least one result")
+	}
+	lastResult := rsp.GetResults()[len(rsp.GetResults())-1]
+	if lastResult.GetSeverity() != fnv1.Severity_SEVERITY_NORMAL {
+		t.Fatalf("expected last result SEVERITY_NORMAL, got %v (message: %s)",
+			lastResult.GetSeverity(), lastResult.GetMessage())
+	}
+}
+
+// resourceNames extracts the keys from a resource map for diagnostic output.
+func resourceNames(resources map[string]*fnv1.Resource) []string {
+	names := make([]string, 0, len(resources))
+	for name := range resources {
+		names = append(names, name)
+	}
+	return names
+}
