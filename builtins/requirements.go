@@ -21,6 +21,7 @@ type CollectedRequirement struct {
 type RequirementsCollector struct {
 	mu           sync.Mutex
 	requirements []CollectedRequirement
+	warnings     []string
 }
 
 // NewRequirementsCollector creates an empty RequirementsCollector.
@@ -47,6 +48,15 @@ func (rc *RequirementsCollector) Requirements() []CollectedRequirement {
 	return out
 }
 
+// Warnings returns a copy of all accumulated warnings.
+func (rc *RequirementsCollector) Warnings() []string {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	out := make([]string, len(rc.warnings))
+	copy(out, rc.warnings)
+	return out
+}
+
 // requireResourceFn implements require_resource(name, apiVersion, kind, match_name=None, match_labels=None).
 func (rc *RequirementsCollector) requireResourceFn(
 	_ *starlark.Thread,
@@ -69,9 +79,15 @@ func (rc *RequirementsCollector) requireResourceFn(
 		return nil, fmt.Errorf("require_resource: must specify at least one of match_name or match_labels")
 	}
 
-	// If both provided, match_name takes precedence.
+	// If both provided, match_name takes precedence; emit a warning.
 	var matchLabels map[string]string
 	if matchName != "" {
+		if matchLabelsDict != nil {
+			rc.mu.Lock()
+			rc.warnings = append(rc.warnings, fmt.Sprintf(
+				"require_resource(%q): match_name %q takes precedence; match_labels ignored", name, matchName))
+			rc.mu.Unlock()
+		}
 		matchLabels = nil
 	} else if matchLabelsDict != nil {
 		var err error
