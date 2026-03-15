@@ -835,6 +835,178 @@ func TestCollector_ExternalName_NoConflict(t *testing.T) {
 	}
 }
 
+// --- skip_resource builtin tests ---
+
+func TestCollector_SkipResource_ReturnsNone(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("audit-logs"),
+		starlark.String("encryption disabled"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource() error: %v", err)
+	}
+	if val != starlark.None {
+		t.Errorf("skip_resource() = %v, want None", val)
+	}
+}
+
+func TestCollector_SkipResource_NotInResources(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("audit-logs"),
+		starlark.String("encryption disabled"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	if _, ok := res["audit-logs"]; ok {
+		t.Error("skipped resource should not appear in Resources()")
+	}
+}
+
+func TestCollector_SkipResource_Warning(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("audit-logs"),
+		starlark.String("encryption disabled"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource() error: %v", err)
+	}
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	}
+	wantMsg := `Skipping resource "audit-logs": encryption disabled`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+	if events[0].Target != "Composite" {
+		t.Errorf("event target = %q, want %q", events[0].Target, "Composite")
+	}
+}
+
+func TestCollector_SkipResource_AfterEmit(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	// Emit a resource first via Resource().
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("DB"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Now try to skip the same resource -- should error.
+	_, err = starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.String("not needed"),
+	}, nil)
+	if err == nil {
+		t.Fatal("skip_resource after Resource() should error")
+	}
+	if !strings.Contains(err.Error(), "already emitted, cannot skip") {
+		t.Errorf("error = %q, should contain 'already emitted, cannot skip'", err.Error())
+	}
+}
+
+func TestCollector_SkipResource_Dedup(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	// Skip "x" twice.
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("x"),
+		starlark.String("r1"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("first skip_resource() error: %v", err)
+	}
+
+	_, err = starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("x"),
+		starlark.String("r2"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("second skip_resource() error: %v", err)
+	}
+
+	// Should only have 1 event (dedup).
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Errorf("Events() len = %d, want 1 (dedup)", len(events))
+	}
+}
+
+func TestCollector_SkipResource_ThenResource(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	// Skip "x" first.
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("x"),
+		starlark.String("not needed yet"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource() error: %v", err)
+	}
+
+	// Then emit Resource("x", body) -- should succeed.
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Thing"))
+
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("x"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() after skip_resource() should succeed: %v", err)
+	}
+
+	res := c.Resources()
+	if _, ok := res["x"]; !ok {
+		t.Error("Resource() after skip should appear in Resources()")
+	}
+}
+
+func TestCollector_SkipResource_BadArgs(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc)
+	thread := new(starlark.Thread)
+
+	// Call with wrong number of args (only 1 instead of 2).
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("audit-logs"),
+	}, nil)
+	if err == nil {
+		t.Fatal("skip_resource with wrong arg count should error")
+	}
+}
+
 func TestCollector_ExternalName_SharedBody(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc)
