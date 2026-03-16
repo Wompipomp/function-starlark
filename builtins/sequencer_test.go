@@ -379,3 +379,153 @@ func TestAddEventMultiple(t *testing.T) {
 		t.Errorf("Events[1].Message = %q, want \"msg2\"", events[1].Message)
 	}
 }
+
+func TestQuotedJoin(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		want  string
+	}{
+		{name: "Empty", input: nil, want: ""},
+		{name: "Single", input: []string{"db"}, want: `"db"`},
+		{name: "Multiple", input: []string{"cache", "db"}, want: `"cache", "db"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := quotedJoin(tt.input)
+			if got != tt.want {
+				t.Errorf("quotedJoin(%v) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSequencerEdgeCases(t *testing.T) {
+	tests := []struct {
+		name            string
+		deps            []DependencyPair
+		resourceNames   map[string]bool
+		observedNames   map[string]bool
+		ttlSeconds      int
+		wantDeferred    []string
+		wantAnyDeferred bool
+		wantEventCount  int
+		wantEventMsgs   []string
+	}{
+		{
+			name:            "EmptyDepsSlice",
+			deps:            []DependencyPair{},
+			resourceNames:   map[string]bool{"app": true},
+			observedNames:   map[string]bool{},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "SelfDependency",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "app", IsRef: true},
+			},
+			resourceNames:   map[string]bool{"app": true},
+			observedNames:   map[string]bool{},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`Creation sequencing: resource "app" deferred, waiting for "app" to be observed`,
+			},
+		},
+		{
+			name: "DependencyNotInResourceNames",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "external-db", IsRef: false},
+			},
+			resourceNames:   map[string]bool{"app": true},
+			observedNames:   map[string]bool{},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`Creation sequencing: resource "app" deferred, waiting for "external-db" to be observed`,
+			},
+		},
+		{
+			name: "ZeroTTL",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+			},
+			resourceNames:   map[string]bool{"app": true, "db": true},
+			observedNames:   map[string]bool{},
+			ttlSeconds:      0,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`requeuing in 0s`,
+			},
+		},
+		{
+			name: "DependentNotInResourceNames",
+			deps: []DependencyPair{
+				{Dependent: "phantom", Dependency: "db", IsRef: true},
+			},
+			resourceNames:   map[string]bool{"db": true},
+			observedNames:   map[string]bool{},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"phantom"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`Creation sequencing: resource "phantom" deferred, waiting for "db" to be observed`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seq := NewSequencer(tt.deps, tt.resourceNames, tt.observedNames, tt.ttlSeconds)
+			result := seq.Evaluate()
+
+			if result.AnyDeferred != tt.wantAnyDeferred {
+				t.Errorf("AnyDeferred = %v, want %v", result.AnyDeferred, tt.wantAnyDeferred)
+			}
+
+			if tt.wantDeferred == nil && result.Deferred != nil {
+				if len(result.Deferred) != 0 {
+					t.Errorf("Deferred = %v, want nil", result.Deferred)
+				}
+			} else if len(result.Deferred) != len(tt.wantDeferred) {
+				t.Errorf("Deferred = %v, want %v", result.Deferred, tt.wantDeferred)
+			} else {
+				for i, got := range result.Deferred {
+					if got != tt.wantDeferred[i] {
+						t.Errorf("Deferred[%d] = %q, want %q", i, got, tt.wantDeferred[i])
+					}
+				}
+			}
+
+			if len(result.Events) != tt.wantEventCount {
+				t.Errorf("Events count = %d, want %d", len(result.Events), tt.wantEventCount)
+				for i, e := range result.Events {
+					t.Logf("  Events[%d]: %s", i, e.Message)
+				}
+			}
+
+			for _, want := range tt.wantEventMsgs {
+				found := false
+				for _, e := range result.Events {
+					if strings.Contains(e.Message, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no event message contains %q", want)
+				}
+			}
+		})
+	}
+}
