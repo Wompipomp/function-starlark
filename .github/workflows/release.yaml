@@ -54,9 +54,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}
-            ${{ steps.version.outputs.image }}:latest
+          tags: ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}-runtime
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -69,14 +67,17 @@ jobs:
         run: make generate
 
       - name: Pull runtime image
-        run: docker pull ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}
+        run: docker pull ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}-runtime
 
       - name: Build and push xpkg
         run: |
           crossplane xpkg build \
             -f package \
-            --embed-runtime-image=${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }} \
+            --embed-runtime-image=${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}-runtime \
             -o function-starlark.xpkg
           crossplane xpkg push \
             -f function-starlark.xpkg \
-            ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}-xpkg
+            ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}
+          crossplane xpkg push \
+            -f function-starlark.xpkg \
+            ${{ steps.version.outputs.image }}:latest

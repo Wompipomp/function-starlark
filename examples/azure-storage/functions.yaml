@@ -5,7 +5,7 @@ metadata:
   annotations:
     meta.crossplane.io/description: Starlark-based composition function
 spec:
-  package: ghcr.io/wompipomp/function-starlark:v1.4.1-xpkg
+  package: ghcr.io/wompipomp/function-starlark:v1.4.1
 ---
 apiVersion: pkg.crossplane.io/v1beta1
 kind: Function

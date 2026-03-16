@@ -10,4 +10,4 @@ kind: Function
 metadata:
   name: function-starlark
 spec:
-  package: ghcr.io/wompipomp/function-starlark:v1.4.1-xpkg
+  package: ghcr.io/wompipomp/function-starlark:v1.4.1
