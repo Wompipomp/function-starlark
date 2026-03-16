@@ -55,6 +55,12 @@ type StarlarkInputSpec struct {
 	// registry credentials. The secret should be mounted via DeploymentRuntimeConfig.
 	// +optional
 	DockerConfigSecret string `json:"dockerConfigSecret,omitempty"`
+
+	// SequencingTTL configures the response TTL when resources are deferred
+	// by creation sequencing. Parsed as Go duration (e.g. "10s", "30s").
+	// Default: 10s. Only applied when at least one resource is deferred.
+	// +optional
+	SequencingTTL string `json:"sequencingTTL,omitempty"`
 }
 
 // ScriptConfigRef references a ConfigMap containing a Starlark script.

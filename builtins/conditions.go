@@ -75,6 +75,14 @@ func (cc *ConditionCollector) Events() []CollectedEvent {
 	return out
 }
 
+// AddEvent appends an event to the collector. Used by fn.go post-processing
+// (creation sequencing) to emit events outside of Starlark execution.
+func (cc *ConditionCollector) AddEvent(e CollectedEvent) {
+	cc.mu.Lock()
+	cc.events = append(cc.events, e)
+	cc.mu.Unlock()
+}
+
 // setConditionFn implements set_condition(type, status, reason, message, target="Composite").
 func (cc *ConditionCollector) setConditionFn(
 	_ *starlark.Thread,

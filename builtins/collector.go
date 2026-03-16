@@ -165,6 +165,16 @@ func (c *Collector) Dependencies() []DependencyPair {
 	return out
 }
 
+// RemoveResources removes the named resources from the collector.
+// Used by creation sequencing to withhold deferred resources from desired state.
+func (c *Collector) RemoveResources(names []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, name := range names {
+		delete(c.resources, name)
+	}
+}
+
 // addDependency records a dependency between two resources.
 func (c *Collector) addDependency(dependent, dependency string, isRef bool) {
 	c.mu.Lock()

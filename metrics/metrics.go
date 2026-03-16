@@ -86,3 +86,13 @@ var ReconciliationsTotal = promauto.NewCounterVec(
 	},
 	[]string{"script"},
 )
+
+// ResourcesDeferredTotal counts resources deferred by creation sequencing.
+// Distinct from ResourcesSkippedTotal (user-initiated skip_resource() calls).
+var ResourcesDeferredTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "function_starlark_resources_deferred_total",
+		Help: "Total resources deferred by creation sequencing.",
+	},
+	[]string{"script"},
+)
