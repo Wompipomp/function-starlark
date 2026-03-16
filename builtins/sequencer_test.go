@@ -7,52 +7,58 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// emptyStruct returns a *structpb.Struct with no fields, used for
+// existing tests that only need existence checks (no field path).
+func emptyStruct() *structpb.Struct {
+	return &structpb.Struct{Fields: map[string]*structpb.Value{}}
+}
+
 func TestSequencer(t *testing.T) {
 	tests := []struct {
-		name            string
-		deps            []DependencyPair
-		resourceNames   map[string]bool
-		observedNames   map[string]bool
-		ttlSeconds      int
-		wantDeferred    []string
-		wantAnyDeferred bool
-		wantEventCount  int
+		name              string
+		deps              []DependencyPair
+		resourceNames     map[string]bool
+		observedResources map[string]*structpb.Struct
+		ttlSeconds        int
+		wantDeferred      []string
+		wantAnyDeferred   bool
+		wantEventCount    int
 		// Optional: check specific event message substrings.
 		wantEventMsgs []string
 	}{
 		{
-			name:            "NoDeps",
-			deps:            nil,
-			resourceNames:   map[string]bool{"app": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    nil,
-			wantAnyDeferred: false,
-			wantEventCount:  0,
+			name:              "NoDeps",
+			deps:              nil,
+			resourceNames:     map[string]bool{"app": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
 		},
 		{
 			name: "AllDepsObserved",
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true},
-			observedNames:   map[string]bool{"db": true},
-			ttlSeconds:      10,
-			wantDeferred:    nil,
-			wantAnyDeferred: false,
-			wantEventCount:  0,
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
 		},
 		{
 			name: "SingleDepMissing",
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2, // per-resource + summary
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2, // per-resource + summary
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "app" deferred, waiting for "db" to be observed`,
 				`Creation sequencing: 1 resource(s) deferred; requeuing in 10s`,
@@ -64,12 +70,12 @@ func TestSequencer(t *testing.T) {
 				{Dependent: "app", Dependency: "db", IsRef: true},
 				{Dependent: "app", Dependency: "cache", IsRef: false},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true, "cache": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"app": true, "db": true, "cache": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				// Missing deps listed sorted: "cache", "db"
 				`Creation sequencing: resource "app" deferred, waiting for "cache", "db" to be observed`,
@@ -81,24 +87,24 @@ func TestSequencer(t *testing.T) {
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true},
-			observedNames:   map[string]bool{"app": true}, // app observed, db NOT
-			ttlSeconds:      10,
-			wantDeferred:    nil,
-			wantAnyDeferred: false,
-			wantEventCount:  0,
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"app": emptyStruct()}, // app observed, db NOT
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
 		},
 		{
 			name: "BothObservedNeitherDeferred",
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true},
-			observedNames:   map[string]bool{"app": true, "db": true},
-			ttlSeconds:      10,
-			wantDeferred:    nil,
-			wantAnyDeferred: false,
-			wantEventCount:  0,
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"app": emptyStruct(), "db": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
 		},
 		{
 			name: "TransitiveChainNothingObserved",
@@ -107,12 +113,12 @@ func TestSequencer(t *testing.T) {
 				{Dependent: "B", Dependency: "A", IsRef: true},
 				{Dependent: "C", Dependency: "B", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"A": true, "B": true, "C": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"B", "C"}, // sorted
-			wantAnyDeferred: true,
-			wantEventCount:  3, // 2 per-resource + 1 summary
+			resourceNames:     map[string]bool{"A": true, "B": true, "C": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"B", "C"}, // sorted
+			wantAnyDeferred:   true,
+			wantEventCount:    3, // 2 per-resource + 1 summary
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "B" deferred, waiting for "A" to be observed`,
 				`Creation sequencing: resource "C" deferred, waiting for "B" to be observed`,
@@ -127,12 +133,12 @@ func TestSequencer(t *testing.T) {
 				{Dependent: "B", Dependency: "A", IsRef: true},
 				{Dependent: "C", Dependency: "B", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"A": true, "B": true, "C": true},
-			observedNames:   map[string]bool{"A": true},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"C"},
-			wantAnyDeferred: true,
-			wantEventCount:  2, // per-resource + summary
+			resourceNames:     map[string]bool{"A": true, "B": true, "C": true},
+			observedResources: map[string]*structpb.Struct{"A": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"C"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2, // per-resource + summary
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "C" deferred, waiting for "B" to be observed`,
 				`Creation sequencing: 1 resource(s) deferred; requeuing in 10s`,
@@ -143,12 +149,12 @@ func TestSequencer(t *testing.T) {
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      30,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        30,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "app" deferred, waiting for "db" to be observed`,
 				`requeuing in 30s`, // TTL=30s in summary
@@ -161,12 +167,12 @@ func TestSequencer(t *testing.T) {
 				{Dependent: "beta", Dependency: "alpha", IsRef: true},
 				{Dependent: "gamma", Dependency: "alpha", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"alpha": true, "beta": true, "gamma": true, "zeta": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"beta", "gamma", "zeta"}, // sorted
-			wantAnyDeferred: true,
-			wantEventCount:  4, // 3 per-resource + 1 summary
+			resourceNames:     map[string]bool{"alpha": true, "beta": true, "gamma": true, "zeta": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"beta", "gamma", "zeta"}, // sorted
+			wantAnyDeferred:   true,
+			wantEventCount:    4, // 3 per-resource + 1 summary
 		},
 		{
 			name: "ANDSemantics",
@@ -176,12 +182,12 @@ func TestSequencer(t *testing.T) {
 				{Dependent: "app", Dependency: "db", IsRef: true},
 				{Dependent: "app", Dependency: "cache", IsRef: false},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true, "cache": true},
-			observedNames:   map[string]bool{"db": true},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"app": true, "db": true, "cache": true},
+			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				// Only cache is listed as missing (db is observed)
 				`Creation sequencing: resource "app" deferred, waiting for "cache" to be observed`,
@@ -194,21 +200,251 @@ func TestSequencer(t *testing.T) {
 			deps: []DependencyPair{
 				{Dependent: "svc", Dependency: "ns", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"svc": true, "ns": true},
-			observedNames:   map[string]bool{},
+			resourceNames:     map[string]bool{"svc": true, "ns": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"svc"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
+			wantEventMsgs: []string{
+				`Creation sequencing:`,
+			},
+		},
+		// --- Field path tests ---
+		{
+			name: "FieldPathMissing",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.id"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{
+				"db": emptyStruct(), // db observed but no status.id field
+			},
 			ttlSeconds:      10,
-			wantDeferred:    []string{"svc"},
+			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
 			wantEventCount:  2,
 			wantEventMsgs: []string{
-				`Creation sequencing:`,
+				`field "status.id" to be ready`,
+			},
+		},
+		{
+			name: "FieldPathEmptyString",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.id"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"id": ""},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+		},
+		{
+			name: "FieldPathNonEmptyString",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.id"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"id": "abc123"},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "FieldPathZeroNumber",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.count"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"count": 0},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+		},
+		{
+			name: "FieldPathNonZeroNumber",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.count"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"count": 42},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "FieldPathNull",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.id"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"id": nil},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+		},
+		{
+			name: "FieldPathBoolTrue",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.ready"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"ready": true},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "FieldPathBoolFalse",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.ready"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"ready": false},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+		},
+		{
+			name: "FieldPathNested",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.atProvider.id"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{
+						"atProvider": map[string]interface{}{
+							"id": "proj-123",
+						},
+					},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "FieldPathNoFieldPath",
+			// Existing behavior: no FieldPath, just existence check.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+			},
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
+		},
+		{
+			name: "FieldPathMixed",
+			// Mix of deps with and without FieldPath.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},                              // existence only
+				{Dependent: "app", Dependency: "project", IsRef: true, FieldPath: "status.id"}, // field path
+			},
+			resourceNames: map[string]bool{"app": true, "db": true, "project": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{"id": "proj-123"},
+				})
+				return map[string]*structpb.Struct{
+					"db":      emptyStruct(),
+					"project": s,
+				}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "FieldPathMixedOneUnmet",
+			// Mix: db observed (existence ok), project observed but field not ready.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+				{Dependent: "app", Dependency: "project", IsRef: true, FieldPath: "status.id"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true, "project": true},
+			observedResources: map[string]*structpb.Struct{
+				"db":      emptyStruct(),
+				"project": emptyStruct(), // no status.id
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`field "status.id" to be ready`,
+			},
+		},
+		{
+			name: "FieldPathEventMessage",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.atProvider.objectId"},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{
+				"db": emptyStruct(),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`Creation sequencing: resource "app" deferred, waiting for "db" field "status.atProvider.objectId" to be ready`,
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq := NewSequencer(tt.deps, tt.resourceNames, tt.observedNames, tt.ttlSeconds)
+			seq := NewSequencer(tt.deps, tt.resourceNames, tt.observedResources, tt.ttlSeconds)
 			result := seq.Evaluate()
 
 			// Check AnyDeferred.
@@ -403,37 +639,37 @@ func TestQuotedJoin(t *testing.T) {
 
 func TestSequencerEdgeCases(t *testing.T) {
 	tests := []struct {
-		name            string
-		deps            []DependencyPair
-		resourceNames   map[string]bool
-		observedNames   map[string]bool
-		ttlSeconds      int
-		wantDeferred    []string
-		wantAnyDeferred bool
-		wantEventCount  int
-		wantEventMsgs   []string
+		name              string
+		deps              []DependencyPair
+		resourceNames     map[string]bool
+		observedResources map[string]*structpb.Struct
+		ttlSeconds        int
+		wantDeferred      []string
+		wantAnyDeferred   bool
+		wantEventCount    int
+		wantEventMsgs     []string
 	}{
 		{
-			name:            "EmptyDepsSlice",
-			deps:            []DependencyPair{},
-			resourceNames:   map[string]bool{"app": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    nil,
-			wantAnyDeferred: false,
-			wantEventCount:  0,
+			name:              "EmptyDepsSlice",
+			deps:              []DependencyPair{},
+			resourceNames:     map[string]bool{"app": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
 		},
 		{
 			name: "SelfDependency",
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "app", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"app": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "app" deferred, waiting for "app" to be observed`,
 			},
@@ -443,12 +679,12 @@ func TestSequencerEdgeCases(t *testing.T) {
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "external-db", IsRef: false},
 			},
-			resourceNames:   map[string]bool{"app": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"app": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "app" deferred, waiting for "external-db" to be observed`,
 			},
@@ -458,12 +694,12 @@ func TestSequencerEdgeCases(t *testing.T) {
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"app": true, "db": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      0,
-			wantDeferred:    []string{"app"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        0,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				`requeuing in 0s`,
 			},
@@ -473,12 +709,12 @@ func TestSequencerEdgeCases(t *testing.T) {
 			deps: []DependencyPair{
 				{Dependent: "phantom", Dependency: "db", IsRef: true},
 			},
-			resourceNames:   map[string]bool{"db": true},
-			observedNames:   map[string]bool{},
-			ttlSeconds:      10,
-			wantDeferred:    []string{"phantom"},
-			wantAnyDeferred: true,
-			wantEventCount:  2,
+			resourceNames:     map[string]bool{"db": true},
+			observedResources: map[string]*structpb.Struct{},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"phantom"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "phantom" deferred, waiting for "db" to be observed`,
 			},
@@ -487,7 +723,7 @@ func TestSequencerEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seq := NewSequencer(tt.deps, tt.resourceNames, tt.observedNames, tt.ttlSeconds)
+			seq := NewSequencer(tt.deps, tt.resourceNames, tt.observedResources, tt.ttlSeconds)
 			result := seq.Evaluate()
 
 			if result.AnyDeferred != tt.wantAnyDeferred {

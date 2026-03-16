@@ -619,6 +619,271 @@ func TestCollector_DependenciesCopy(t *testing.T) {
 	}
 }
 
+// --- depends_on tuple tests ---
+
+func TestCollector_DependsOn_Tuple(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	// Create db resource to get a ResourceRef.
+	dbBody := new(starlark.Dict)
+	_ = dbBody.SetKey(starlark.String("kind"), starlark.String("DB"))
+
+	dbVal, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		dbBody,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource('db') error: %v", err)
+	}
+
+	// Create app with depends_on=[(db_ref, "status.atProvider.id")].
+	appBody := new(starlark.Dict)
+	_ = appBody.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	tup := starlark.Tuple{dbVal, starlark.String("status.atProvider.id")}
+	depsList := starlark.NewList([]starlark.Value{tup})
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		appBody,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err != nil {
+		t.Fatalf("Resource('app') error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 1 {
+		t.Fatalf("Dependencies() len = %d, want 1", len(deps))
+	}
+	if deps[0].Dependent != "app" {
+		t.Errorf("Dependent = %q, want %q", deps[0].Dependent, "app")
+	}
+	if deps[0].Dependency != "db" {
+		t.Errorf("Dependency = %q, want %q", deps[0].Dependency, "db")
+	}
+	if !deps[0].IsRef {
+		t.Error("IsRef = false, want true")
+	}
+	if deps[0].FieldPath != "status.atProvider.id" {
+		t.Errorf("FieldPath = %q, want %q", deps[0].FieldPath, "status.atProvider.id")
+	}
+}
+
+func TestCollector_DependsOn_TupleString(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	tup := starlark.Tuple{starlark.String("external-db"), starlark.String("status.ready")}
+	depsList := starlark.NewList([]starlark.Value{tup})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err != nil {
+		t.Fatalf("Resource('app') error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 1 {
+		t.Fatalf("Dependencies() len = %d, want 1", len(deps))
+	}
+	if deps[0].Dependency != "external-db" {
+		t.Errorf("Dependency = %q, want %q", deps[0].Dependency, "external-db")
+	}
+	if deps[0].IsRef {
+		t.Error("IsRef = true, want false")
+	}
+	if deps[0].FieldPath != "status.ready" {
+		t.Errorf("FieldPath = %q, want %q", deps[0].FieldPath, "status.ready")
+	}
+}
+
+func TestCollector_DependsOn_TupleEmptyFieldPath(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	tup := starlark.Tuple{starlark.String("db"), starlark.String("")}
+	depsList := starlark.NewList([]starlark.Value{tup})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty field path")
+	}
+	if !strings.Contains(err.Error(), "depends_on[0]") {
+		t.Errorf("error = %q, should mention depends_on[0]", err.Error())
+	}
+}
+
+func TestCollector_DependsOn_TupleBadFirstElement(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	tup := starlark.Tuple{starlark.MakeInt(42), starlark.String("field.path")}
+	depsList := starlark.NewList([]starlark.Value{tup})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err == nil {
+		t.Fatal("expected error for bad first tuple element")
+	}
+	if !strings.Contains(err.Error(), "depends_on[0]") {
+		t.Errorf("error = %q, should mention depends_on[0]", err.Error())
+	}
+}
+
+func TestCollector_DependsOn_TupleBadSecondElement(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	dbBody := new(starlark.Dict)
+	_ = dbBody.SetKey(starlark.String("kind"), starlark.String("DB"))
+
+	dbVal, _ := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		dbBody,
+	}, nil)
+
+	tup := starlark.Tuple{dbVal, starlark.MakeInt(42)}
+	depsList := starlark.NewList([]starlark.Value{tup})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err == nil {
+		t.Fatal("expected error for bad second tuple element")
+	}
+	if !strings.Contains(err.Error(), "depends_on[0]") {
+		t.Errorf("error = %q, should mention depends_on[0]", err.Error())
+	}
+}
+
+func TestCollector_DependsOn_TupleWrongLength(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	// 1-element tuple
+	tup1 := starlark.Tuple{starlark.String("db")}
+	depsList := starlark.NewList([]starlark.Value{tup1})
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err == nil {
+		t.Fatal("expected error for 1-element tuple")
+	}
+	if !strings.Contains(err.Error(), "exactly 2 elements") {
+		t.Errorf("error = %q, should mention 'exactly 2 elements'", err.Error())
+	}
+
+	// 3-element tuple
+	tup3 := starlark.Tuple{starlark.String("db"), starlark.String("path"), starlark.String("extra")}
+	depsList = starlark.NewList([]starlark.Value{tup3})
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app2"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err == nil {
+		t.Fatal("expected error for 3-element tuple")
+	}
+	if !strings.Contains(err.Error(), "exactly 2 elements") {
+		t.Errorf("error = %q, should mention 'exactly 2 elements'", err.Error())
+	}
+}
+
+func TestCollector_DependsOn_MixedTupleAndBare(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	// Create db resource.
+	dbBody := new(starlark.Dict)
+	_ = dbBody.SetKey(starlark.String("kind"), starlark.String("DB"))
+
+	dbVal, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		dbBody,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource('db') error: %v", err)
+	}
+
+	// Create app with depends_on=[db_ref, (db_ref, "status.id"), "external"].
+	appBody := new(starlark.Dict)
+	_ = appBody.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	tup := starlark.Tuple{dbVal, starlark.String("status.id")}
+	depsList := starlark.NewList([]starlark.Value{dbVal, tup, starlark.String("external")})
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("app"),
+		appBody,
+	}, []starlark.Tuple{
+		{starlark.String("depends_on"), depsList},
+	})
+	if err != nil {
+		t.Fatalf("Resource('app') error: %v", err)
+	}
+
+	deps := c.Dependencies()
+	if len(deps) != 3 {
+		t.Fatalf("Dependencies() len = %d, want 3", len(deps))
+	}
+
+	// First: bare ResourceRef (no FieldPath).
+	if deps[0].FieldPath != "" {
+		t.Errorf("deps[0].FieldPath = %q, want empty", deps[0].FieldPath)
+	}
+	if !deps[0].IsRef {
+		t.Error("deps[0].IsRef = false, want true")
+	}
+
+	// Second: tuple (ResourceRef, field_path).
+	if deps[1].FieldPath != "status.id" {
+		t.Errorf("deps[1].FieldPath = %q, want %q", deps[1].FieldPath, "status.id")
+	}
+	if !deps[1].IsRef {
+		t.Error("deps[1].IsRef = false, want true")
+	}
+
+	// Third: bare string (no FieldPath).
+	if deps[2].FieldPath != "" {
+		t.Errorf("deps[2].FieldPath = %q, want empty", deps[2].FieldPath)
+	}
+	if deps[2].IsRef {
+		t.Error("deps[2].IsRef = true, want false")
+	}
+}
+
 // --- external_name kwarg tests ---
 
 func TestCollector_ExternalName_Basic(t *testing.T) {
