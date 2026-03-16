@@ -83,4 +83,3 @@ func ApplyContext(rsp *fnv1.RunFunctionResponse, ctxVal starlark.Value) error {
 	}
 	return nil
 }
-

@@ -125,11 +125,6 @@ func TestModuleCache(t *testing.T) {
 		t.Fatalf("second load error: %v", err)
 	}
 
-	// Cached: same map instance.
-	if &g1 == nil || &g2 == nil {
-		t.Fatal("nil globals")
-	}
-
 	// Both should have same value.
 	x1, _ := starlark.AsInt32(g1["x"].(starlark.Int))
 	x2, _ := starlark.AsInt32(g2["x"].(starlark.Int))

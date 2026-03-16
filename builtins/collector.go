@@ -28,9 +28,9 @@ var (
 	_ starlark.HasAttrs = (*ResourceRef)(nil)
 )
 
-func (r *ResourceRef) String() string      { return r.name }
-func (r *ResourceRef) Type() string        { return "ResourceRef" }
-func (r *ResourceRef) Freeze()             {} // immutable by construction
+func (r *ResourceRef) String() string       { return r.name }
+func (r *ResourceRef) Type() string         { return "ResourceRef" }
+func (r *ResourceRef) Freeze()              {} // immutable by construction
 func (r *ResourceRef) Truth() starlark.Bool { return starlark.True }
 func (r *ResourceRef) Hash() (uint32, error) {
 	h := uint32(2166136261) // FNV-1a offset basis

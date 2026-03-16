@@ -3969,4 +3969,3 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Errorf("ResourcesSkippedTotal delta = %v, want 0 (sequencing should not use skip metric)", skippedDelta)
 	}
 }
-

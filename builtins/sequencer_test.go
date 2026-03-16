@@ -217,14 +217,15 @@ func TestSequencer(t *testing.T) {
 			}
 
 			// Check Deferred list.
-			if tt.wantDeferred == nil && result.Deferred != nil {
+			switch {
+			case tt.wantDeferred == nil && result.Deferred != nil:
 				// Allow empty slice to match nil expectation.
 				if len(result.Deferred) != 0 {
 					t.Errorf("Deferred = %v, want nil", result.Deferred)
 				}
-			} else if len(result.Deferred) != len(tt.wantDeferred) {
+			case len(result.Deferred) != len(tt.wantDeferred):
 				t.Errorf("Deferred = %v, want %v", result.Deferred, tt.wantDeferred)
-			} else {
+			default:
 				for i, got := range result.Deferred {
 					if got != tt.wantDeferred[i] {
 						t.Errorf("Deferred[%d] = %q, want %q", i, got, tt.wantDeferred[i])
@@ -493,13 +494,14 @@ func TestSequencerEdgeCases(t *testing.T) {
 				t.Errorf("AnyDeferred = %v, want %v", result.AnyDeferred, tt.wantAnyDeferred)
 			}
 
-			if tt.wantDeferred == nil && result.Deferred != nil {
+			switch {
+			case tt.wantDeferred == nil && result.Deferred != nil:
 				if len(result.Deferred) != 0 {
 					t.Errorf("Deferred = %v, want nil", result.Deferred)
 				}
-			} else if len(result.Deferred) != len(tt.wantDeferred) {
+			case len(result.Deferred) != len(tt.wantDeferred):
 				t.Errorf("Deferred = %v, want %v", result.Deferred, tt.wantDeferred)
-			} else {
+			default:
 				for i, got := range result.Deferred {
 					if got != tt.wantDeferred[i] {
 						t.Errorf("Deferred[%d] = %q, want %q", i, got, tt.wantDeferred[i])

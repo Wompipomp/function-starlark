@@ -300,7 +300,7 @@ func TestWarnUnmatchedStringRefs(t *testing.T) {
 
 	t.Run("mixed deps warns only for unmatched string ref", func(t *testing.T) {
 		deps := []DependencyPair{
-			{Dependent: "app", Dependency: "db", IsRef: true},          // ResourceRef -- skip
+			{Dependent: "app", Dependency: "db", IsRef: true},            // ResourceRef -- skip
 			{Dependent: "app", Dependency: "external-vpc", IsRef: false}, // unmatched string ref
 		}
 		resourceNames := map[string]bool{"app": true, "db": true}

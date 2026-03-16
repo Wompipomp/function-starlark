@@ -62,7 +62,8 @@ func ParseOCILoadTarget(raw string) (*OCILoadTarget, error) {
 		File:   file,
 	}
 
-	if strings.Contains(refStr, "@sha256:") {
+	switch {
+	case strings.Contains(refStr, "@sha256:"):
 		// Digest reference.
 		ref, err := name.NewDigest(refStr, name.StrictValidation)
 		if err != nil {
@@ -72,7 +73,7 @@ func ParseOCILoadTarget(raw string) (*OCILoadTarget, error) {
 		target.Repo = ref.Context().RepositoryStr()
 		target.Digest = ref.DigestStr()
 		target.RefStr = ref.String()
-	} else if strings.Contains(refStr, ":") {
+	case strings.Contains(refStr, ":"):
 		// Tag reference: the portion after the last ":" that doesn't contain "/" is the tag.
 		ref, err := name.NewTag(refStr, name.StrictValidation)
 		if err != nil {
@@ -82,7 +83,7 @@ func ParseOCILoadTarget(raw string) (*OCILoadTarget, error) {
 		target.Repo = ref.Context().RepositoryStr()
 		target.Tag = ref.TagStr()
 		target.RefStr = ref.String()
-	} else {
+	default:
 		return nil, fmt.Errorf(
 			"OCI load target %q: tag or digest required; use explicit :tag or @sha256:digest (implicit :latest is not supported)",
 			raw,

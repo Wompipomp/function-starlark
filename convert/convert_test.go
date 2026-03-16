@@ -1556,7 +1556,7 @@ func TestConvertNumber_ExceedsInt64Range(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   float64
-		wantErr string        // non-empty means expect error containing this
+		wantErr string         // non-empty means expect error containing this
 		wantVal starlark.Value // expected value when no error
 	}{
 		{

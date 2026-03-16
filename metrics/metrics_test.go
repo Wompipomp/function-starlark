@@ -118,16 +118,11 @@ func TestHistogramBuckets_Execution(t *testing.T) {
 	// documented in CONTEXT.md.
 	wantBuckets := []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5}
 
-	// Collect metric families from the default gatherer.
-	families, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("Gather() error: %v", err)
-	}
-
 	// Ensure at least one observation exists so Gather returns the metric.
 	ExecutionDurationSeconds.WithLabelValues("bucket-test.star").Observe(0.001)
 
-	families, err = prometheus.DefaultGatherer.Gather()
+	// Collect metric families from the default gatherer.
+	families, err := prometheus.DefaultGatherer.Gather()
 	if err != nil {
 		t.Fatalf("Gather() error: %v", err)
 	}

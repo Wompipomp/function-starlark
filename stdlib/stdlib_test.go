@@ -20,8 +20,8 @@ import (
 // testLogger implements logging.Logger for tests.
 type testLogger struct{}
 
-func (l *testLogger) Info(_ string, _ ...any)              {}
-func (l *testLogger) Debug(_ string, _ ...any)             {}
+func (l *testLogger) Info(_ string, _ ...any)            {}
+func (l *testLogger) Debug(_ string, _ ...any)           {}
 func (l *testLogger) WithValues(_ ...any) logging.Logger { return l }
 
 // callRecord stores the arguments from a mock builtin call.
@@ -234,10 +234,10 @@ func TestStdlibNetworking(t *testing.T) {
 
 	t.Run("subnet_cidr", func(t *testing.T) {
 		tests := []struct {
-			base   string
-			bits   int
-			num    int
-			want   string
+			base string
+			bits int
+			num  int
+			want string
 		}{
 			{"10.0.0.0/16", 8, 0, "10.0.0.0/24"},
 			{"10.0.0.0/16", 8, 1, "10.0.1.0/24"},
@@ -337,10 +337,23 @@ func TestStdlibNaming(t *testing.T) {
 		}
 	})
 
+	t.Run("suffix_preserved_after_truncation", func(t *testing.T) {
+		longXR := strings.Repeat("a", 60)
+		result := callStarlark(t, resourceName,
+			starlark.Tuple{starlark.String("bucket")},
+			[]starlark.Tuple{{starlark.String("xr_name"), starlark.String(longXR)}})
+		got := string(result.(starlark.String))
+		if !strings.Contains(got, "-bucket-") {
+			t.Errorf("suffix not preserved in truncated name: %q", got)
+		}
+		if len(got) > 63 {
+			t.Errorf("result length = %d, want <= 63", len(got))
+		}
+	})
+
 	t.Run("truncated_no_trailing_hyphen", func(t *testing.T) {
-		// Create a name where truncation point would fall on a hyphen.
-		// xr_name ends with hyphens, suffix pushes total past 63 chars.
-		xrName := strings.Repeat("a", 54) + "---"
+		// XR name has hyphens near the truncation boundary so rstrip fires.
+		xrName := strings.Repeat("a", 38) + "--" + strings.Repeat("b", 20)
 		result := callStarlark(t, resourceName,
 			starlark.Tuple{starlark.String("very-long-suffix")},
 			[]starlark.Tuple{{starlark.String("xr_name"), starlark.String(xrName)}})
@@ -348,8 +361,6 @@ func TestStdlibNaming(t *testing.T) {
 		if len(got) > 63 {
 			t.Errorf("result length = %d, want <= 63", len(got))
 		}
-		// The name should not have consecutive hyphens before the hash part
-		// (which would indicate the truncation left a trailing hyphen).
 		if strings.Contains(got, "--") {
 			t.Errorf("truncated name has double hyphen (trailing hyphen not stripped): %q", got)
 		}
@@ -361,6 +372,46 @@ func TestStdlibNaming(t *testing.T) {
 		got := string(result.(starlark.String))
 		if got != "my-xr-bucket" {
 			t.Errorf("resource_name('bucket') = %q, want %q (should read xr_name from oxr)", got, "my-xr-bucket")
+		}
+	})
+
+	t.Run("sanitize_uppercase", func(t *testing.T) {
+		result := callStarlark(t, resourceName,
+			starlark.Tuple{starlark.String("Bucket")},
+			[]starlark.Tuple{{starlark.String("xr_name"), starlark.String("My-XR")}})
+		got := string(result.(starlark.String))
+		if got != "my-xr-bucket" {
+			t.Errorf("resource_name('Bucket', xr_name='My-XR') = %q, want %q", got, "my-xr-bucket")
+		}
+	})
+
+	t.Run("sanitize_underscores_and_spaces", func(t *testing.T) {
+		result := callStarlark(t, resourceName,
+			starlark.Tuple{starlark.String("s3_bucket")},
+			[]starlark.Tuple{{starlark.String("xr_name"), starlark.String("my xr name")}})
+		got := string(result.(starlark.String))
+		if got != "my-xr-name-s3-bucket" {
+			t.Errorf("got %q, want %q", got, "my-xr-name-s3-bucket")
+		}
+	})
+
+	t.Run("sanitize_dots_and_special_chars", func(t *testing.T) {
+		result := callStarlark(t, resourceName,
+			starlark.Tuple{starlark.String("rds")},
+			[]starlark.Tuple{{starlark.String("xr_name"), starlark.String("my.xr@v2")}})
+		got := string(result.(starlark.String))
+		if got != "my-xr-v2-rds" {
+			t.Errorf("got %q, want %q", got, "my-xr-v2-rds")
+		}
+	})
+
+	t.Run("sanitize_consecutive_invalid_chars", func(t *testing.T) {
+		result := callStarlark(t, resourceName,
+			starlark.Tuple{starlark.String("bucket")},
+			[]starlark.Tuple{{starlark.String("xr_name"), starlark.String("my___xr")}})
+		got := string(result.(starlark.String))
+		if got != "my-xr-bucket" {
+			t.Errorf("got %q, want %q", got, "my-xr-bucket")
 		}
 	})
 }
@@ -531,11 +582,11 @@ func TestStdlibConventions(t *testing.T) {
 	getFn := starlark.NewBuiltin("get", mockGetImpl)
 
 	fullPre := starlark.StringDict{
-		"oxr":            mockOxr,
-		"get":            getFn,
-		"set_condition":  setConditionFn,
-		"emit_event":     emitEventFn,
-		"Resource":       resourceFn,
+		"oxr":           mockOxr,
+		"get":           getFn,
+		"set_condition": setConditionFn,
+		"emit_event":    emitEventFn,
+		"Resource":      resourceFn,
 	}
 
 	modules := []string{
