@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // SequencerResult holds the output of creation sequencing evaluation.
@@ -15,38 +17,51 @@ type SequencerResult struct {
 
 // Sequencer evaluates creation ordering based on dependency relationships
 // and observed state. Resources whose dependencies are not yet observed
-// are deferred (withheld from desired state).
+// (or whose field path values are not ready) are deferred (withheld from
+// desired state).
 type Sequencer struct {
-	deps          []DependencyPair
-	resourceNames map[string]bool
-	observedNames map[string]bool
-	ttlSeconds    int
+	deps              []DependencyPair
+	resourceNames     map[string]bool
+	observedResources map[string]*structpb.Struct
+	ttlSeconds        int
 }
 
 // NewSequencer creates a Sequencer with the given inputs.
 func NewSequencer(
 	deps []DependencyPair,
 	resourceNames map[string]bool,
-	observedNames map[string]bool,
+	observedResources map[string]*structpb.Struct,
 	ttlSeconds int,
 ) *Sequencer {
 	return &Sequencer{
-		deps:          deps,
-		resourceNames: resourceNames,
-		observedNames: observedNames,
-		ttlSeconds:    ttlSeconds,
+		deps:              deps,
+		resourceNames:     resourceNames,
+		observedResources: observedResources,
+		ttlSeconds:        ttlSeconds,
 	}
 }
 
 // Evaluate runs creation sequencing and returns the result.
 // Resources already in observed state are NEVER deferred (SEQ-03).
-// A resource is deferred if ANY of its dependencies are not in observed (AND semantics).
+// A resource is deferred if ANY of its dependencies are not met (AND semantics).
+// A dependency is met when:
+//   - FieldPath == "": the dependency resource exists in observed state
+//   - FieldPath != "": the dependency resource exists AND the field path has a truthy value
 func (s *Sequencer) Evaluate() SequencerResult {
-	// Build map: resource -> list of unmet dependencies.
+	// Build map: resource -> list of unmet dependency descriptions.
 	unmetDeps := make(map[string][]string)
 	for _, d := range s.deps {
-		if !s.observedNames[d.Dependency] {
-			unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent], d.Dependency)
+		res, exists := s.observedResources[d.Dependency]
+		if !exists {
+			// Resource not observed at all.
+			unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+				fmt.Sprintf("%q to be observed", d.Dependency))
+			continue
+		}
+		// Resource exists. Check field path if specified.
+		if d.FieldPath != "" && !isFieldReady(res, d.FieldPath) {
+			unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+				fmt.Sprintf("%q field %q to be ready", d.Dependency, d.FieldPath))
 		}
 	}
 
@@ -55,7 +70,7 @@ func (s *Sequencer) Evaluate() SequencerResult {
 
 	for name := range unmetDeps {
 		// SEQ-03: Never defer resources already in observed state.
-		if s.observedNames[name] {
+		if _, observed := s.observedResources[name]; observed {
 			continue
 		}
 		deferred = append(deferred, name)
@@ -66,8 +81,8 @@ func (s *Sequencer) Evaluate() SequencerResult {
 		missing := unmetDeps[name]
 		sort.Strings(missing)
 		msg := fmt.Sprintf(
-			"Creation sequencing: resource %q deferred, waiting for %s to be observed",
-			name, quotedJoin(missing),
+			"Creation sequencing: resource %q deferred, waiting for %s",
+			name, strings.Join(missing, ", "),
 		)
 		events = append(events, CollectedEvent{
 			Severity: "Warning",
@@ -92,6 +107,70 @@ func (s *Sequencer) Evaluate() SequencerResult {
 		Deferred:    deferred,
 		Events:      events,
 		AnyDeferred: anyDeferred,
+	}
+}
+
+// isFieldReady checks whether a dot-separated field path has a truthy value
+// in the given struct. Returns false if any intermediate segment is missing
+// or the final value is falsy (nil, null, empty string, zero, false).
+func isFieldReady(s *structpb.Struct, fieldPath string) bool {
+	if s == nil {
+		return false
+	}
+
+	keys := strings.Split(fieldPath, ".")
+	current := s
+
+	for i, key := range keys {
+		if current.GetFields() == nil {
+			return false
+		}
+		val, ok := current.Fields[key]
+		if !ok || val == nil {
+			return false
+		}
+
+		// Last key: check truthiness of the value.
+		if i == len(keys)-1 {
+			return isValueTruthy(val)
+		}
+
+		// Intermediate key: must be a struct to continue traversal.
+		next := val.GetStructValue()
+		if next == nil {
+			return false
+		}
+		current = next
+	}
+	return false
+}
+
+// isValueTruthy returns whether a structpb.Value is considered "ready".
+//   - nil or missing -> false
+//   - NullValue -> false
+//   - StringValue("") -> false
+//   - NumberValue(0) -> false
+//   - BoolValue(false) -> false
+//   - Everything else (non-empty string, non-zero number, true, struct, list) -> true
+func isValueTruthy(v *structpb.Value) bool {
+	if v == nil {
+		return false
+	}
+	switch k := v.Kind.(type) {
+	case *structpb.Value_NullValue:
+		return false
+	case *structpb.Value_StringValue:
+		return k.StringValue != ""
+	case *structpb.Value_NumberValue:
+		return k.NumberValue != 0
+	case *structpb.Value_BoolValue:
+		return k.BoolValue
+	case *structpb.Value_StructValue:
+		return true
+	case *structpb.Value_ListValue:
+		return true
+	default:
+		return false
 	}
 }
 

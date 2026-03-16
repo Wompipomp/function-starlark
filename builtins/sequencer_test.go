@@ -77,8 +77,9 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    2,
 			wantEventMsgs: []string{
-				// Missing deps listed sorted: "cache", "db"
-				`Creation sequencing: resource "app" deferred, waiting for "cache", "db" to be observed`,
+				// Missing deps listed sorted
+				`"cache" to be observed`,
+				`"db" to be observed`,
 				`Creation sequencing: 1 resource(s) deferred; requeuing in 10s`,
 			},
 		},

@@ -574,6 +574,7 @@ func TestCollector_AddDependency_Concurrent(t *testing.T) {
 					fmt.Sprintf("dependent-%d-%d", id, i),
 					fmt.Sprintf("dependency-%d-%d", id, i),
 					true,
+					"",
 				)
 			}
 		}(g)

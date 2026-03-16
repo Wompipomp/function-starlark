@@ -17,6 +17,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/builtins"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
@@ -250,10 +251,10 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			))
 
 			// --- Creation Sequencing ---
-			// Build observed resource name set.
-			observedNames := make(map[string]bool)
-			for name := range req.GetObserved().GetResources() {
-				observedNames[name] = true
+			// Build observed resource map for field path evaluation.
+			observedResources := make(map[string]*structpb.Struct)
+			for name, r := range req.GetObserved().GetResources() {
+				observedResources[name] = r.GetResource()
 			}
 
 			// Determine sequencing TTL.
@@ -268,7 +269,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			}
 			seqTTLSeconds := int(seqTTLDuration.Seconds())
 
-			seq := builtins.NewSequencer(deps, resourceNames, observedNames, seqTTLSeconds)
+			seq := builtins.NewSequencer(deps, resourceNames, observedResources, seqTTLSeconds)
 			result := seq.Evaluate()
 
 			if result.AnyDeferred {

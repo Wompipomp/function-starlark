@@ -62,6 +62,7 @@ type DependencyPair struct {
 	Dependent  string // resource that depends on another
 	Dependency string // resource being depended upon
 	IsRef      bool   // true if dependency came from ResourceRef (validate), false if string (trust)
+	FieldPath  string // optional dot-separated field path for readiness check (empty = existence only)
 }
 
 // CollectedResource holds a single resource produced by the Resource() builtin.
@@ -186,13 +187,14 @@ func (c *Collector) RemoveResources(names []string) {
 }
 
 // addDependency records a dependency between two resources.
-func (c *Collector) addDependency(dependent, dependency string, isRef bool) {
+func (c *Collector) addDependency(dependent, dependency string, isRef bool, fieldPath string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.dependencies = append(c.dependencies, DependencyPair{
 		Dependent:  dependent,
 		Dependency: dependency,
 		IsRef:      isRef,
+		FieldPath:  fieldPath,
 	})
 }
 
@@ -265,11 +267,42 @@ func (c *Collector) resourceFn(
 			item := dependsOn.Index(i)
 			switch v := item.(type) {
 			case *ResourceRef:
-				c.addDependency(name, v.name, true)
+				c.addDependency(name, v.name, true, "")
 			case starlark.String:
-				c.addDependency(name, string(v), false)
+				c.addDependency(name, string(v), false, "")
+			case starlark.Tuple:
+				if v.Len() != 2 {
+					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple must have exactly 2 elements, got %d",
+						name, i, v.Len())
+				}
+				// Extract first element: must be ResourceRef or string.
+				var depName string
+				var isRef bool
+				switch first := v.Index(0).(type) {
+				case *ResourceRef:
+					depName = first.name
+					isRef = true
+				case starlark.String:
+					depName = string(first)
+					isRef = false
+				default:
+					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple first element must be ResourceRef or string, got %s",
+						name, i, v.Index(0).Type())
+				}
+				// Extract second element: must be non-empty string.
+				fieldPathVal, ok := v.Index(1).(starlark.String)
+				if !ok {
+					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple second element must be string, got %s",
+						name, i, v.Index(1).Type())
+				}
+				fieldPath := string(fieldPathVal)
+				if fieldPath == "" {
+					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple field path must not be empty",
+						name, i)
+				}
+				c.addDependency(name, depName, isRef, fieldPath)
 			default:
-				return nil, fmt.Errorf("Resource(%q): depends_on[%d] must be ResourceRef or string, got %s",
+				return nil, fmt.Errorf("Resource(%q): depends_on[%d] must be ResourceRef, string, or tuple, got %s",
 					name, i, item.Type())
 			}
 		}
