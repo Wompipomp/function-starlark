@@ -106,7 +106,8 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 		// Create all collectors for this execution.
 		condCollector := builtins.NewConditionCollector()
-		collector := builtins.NewCollector(condCollector, filename)
+		collector := builtins.NewCollector(condCollector, filename,
+			req.GetObserved().GetComposite().GetResource())
 		connCollector := builtins.NewConnectionCollector()
 		reqCollector := builtins.NewRequirementsCollector()
 
