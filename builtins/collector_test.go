@@ -11,11 +11,12 @@ import (
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/wompipomp/function-starlark/convert"
 	"github.com/wompipomp/function-starlark/metrics"
 )
 
 func TestNewCollector(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	if c == nil {
 		t.Fatal("NewCollector returned nil")
 	}
@@ -26,7 +27,7 @@ func TestNewCollector(t *testing.T) {
 }
 
 func TestCollector_SingleResource(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -58,7 +59,7 @@ func TestCollector_SingleResource(t *testing.T) {
 }
 
 func TestCollector_ReadyDefault(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -79,7 +80,7 @@ func TestCollector_ReadyDefault(t *testing.T) {
 }
 
 func TestCollector_ReadyTrue(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -102,7 +103,7 @@ func TestCollector_ReadyTrue(t *testing.T) {
 }
 
 func TestCollector_ReadyFalse(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -125,7 +126,7 @@ func TestCollector_ReadyFalse(t *testing.T) {
 }
 
 func TestCollector_LastWins(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body1 := new(starlark.Dict)
@@ -154,7 +155,7 @@ func TestCollector_LastWins(t *testing.T) {
 }
 
 func TestCollector_NonStringName(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -170,7 +171,7 @@ func TestCollector_NonStringName(t *testing.T) {
 }
 
 func TestCollector_NonDictBody(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Pass a string as body instead of dict
@@ -184,7 +185,7 @@ func TestCollector_NonDictBody(t *testing.T) {
 }
 
 func TestCollector_ResourcesCopy(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -206,7 +207,7 @@ func TestCollector_ResourcesCopy(t *testing.T) {
 }
 
 func TestCollector_MultipleDistinct(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	names := []string{"bucket", "queue", "topic"}
@@ -243,7 +244,7 @@ func TestCollector_MultipleDistinct(t *testing.T) {
 }
 
 func TestCollector_EmptyBody(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict) // empty
@@ -362,7 +363,7 @@ func TestResourceRef_Freeze(t *testing.T) {
 // --- Resource() returns *ResourceRef ---
 
 func TestCollector_ResourceReturnsRef(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -388,7 +389,7 @@ func TestCollector_ResourceReturnsRef(t *testing.T) {
 // --- depends_on kwarg tests ---
 
 func TestCollector_DependsOn_ResourceRef(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Create a resource to get a ResourceRef.
@@ -434,7 +435,7 @@ func TestCollector_DependsOn_ResourceRef(t *testing.T) {
 }
 
 func TestCollector_DependsOn_String(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -467,7 +468,7 @@ func TestCollector_DependsOn_String(t *testing.T) {
 }
 
 func TestCollector_DependsOn_Mixed(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Create db resource first.
@@ -514,7 +515,7 @@ func TestCollector_DependsOn_Mixed(t *testing.T) {
 }
 
 func TestCollector_DependsOn_InvalidType(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -537,7 +538,7 @@ func TestCollector_DependsOn_InvalidType(t *testing.T) {
 }
 
 func TestCollector_NoDependsOn(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -558,7 +559,7 @@ func TestCollector_NoDependsOn(t *testing.T) {
 }
 
 func TestCollector_AddDependency_Concurrent(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 
 	const goroutines = 10
 	const depsPerGoroutine = 100
@@ -587,7 +588,7 @@ func TestCollector_AddDependency_Concurrent(t *testing.T) {
 }
 
 func TestCollector_DependenciesCopy(t *testing.T) {
-	c := NewCollector(NewConditionCollector(), "test.star")
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Create db, then app depending on db.
@@ -622,7 +623,7 @@ func TestCollector_DependenciesCopy(t *testing.T) {
 
 func TestCollector_ExternalName_Basic(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -662,7 +663,7 @@ func TestCollector_ExternalName_Basic(t *testing.T) {
 
 func TestCollector_ExternalName_EmptyBody(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict) // empty -- no metadata
@@ -697,7 +698,7 @@ func TestCollector_ExternalName_EmptyBody(t *testing.T) {
 
 func TestCollector_ExternalName_Omitted(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -722,7 +723,7 @@ func TestCollector_ExternalName_Omitted(t *testing.T) {
 
 func TestCollector_ExternalName_EmptyString(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -744,7 +745,7 @@ func TestCollector_ExternalName_EmptyString(t *testing.T) {
 
 func TestCollector_ExternalName_NonString(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -766,7 +767,7 @@ func TestCollector_ExternalName_NonString(t *testing.T) {
 
 func TestCollector_ExternalName_Conflict(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Build body with existing crossplane.io/external-name annotation
@@ -816,7 +817,7 @@ func TestCollector_ExternalName_Conflict(t *testing.T) {
 
 func TestCollector_ExternalName_NoConflict(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	body := new(starlark.Dict)
@@ -843,7 +844,7 @@ func TestCollector_ExternalName_NoConflict(t *testing.T) {
 
 func TestCollector_SkipResource_ReturnsNone(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	val, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -860,7 +861,7 @@ func TestCollector_SkipResource_ReturnsNone(t *testing.T) {
 
 func TestCollector_SkipResource_NotInResources(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -879,7 +880,7 @@ func TestCollector_SkipResource_NotInResources(t *testing.T) {
 
 func TestCollector_SkipResource_Warning(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -908,7 +909,7 @@ func TestCollector_SkipResource_Warning(t *testing.T) {
 
 func TestCollector_SkipResource_AfterEmit(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Emit a resource first via Resource().
@@ -938,7 +939,7 @@ func TestCollector_SkipResource_AfterEmit(t *testing.T) {
 
 func TestCollector_SkipResource_Dedup(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Skip "x" twice.
@@ -967,7 +968,7 @@ func TestCollector_SkipResource_Dedup(t *testing.T) {
 
 func TestCollector_SkipResource_ThenResource(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Skip "x" first.
@@ -999,7 +1000,7 @@ func TestCollector_SkipResource_ThenResource(t *testing.T) {
 
 func TestCollector_SkipResource_BadArgs(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Call with wrong number of args (only 1 instead of 2).
@@ -1013,7 +1014,7 @@ func TestCollector_SkipResource_BadArgs(t *testing.T) {
 
 func TestCollector_ExternalName_SharedBody(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 	thread := new(starlark.Thread)
 
 	// Use the same body dict for two Resource() calls with different external_name values.
@@ -1058,7 +1059,7 @@ func TestCollector_ExternalName_SharedBody(t *testing.T) {
 
 func TestCollector_SkipResource_Metrics(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "skip-metrics-test.star")
+	c := NewCollector(cc, "skip-metrics-test.star", nil)
 	thread := new(starlark.Thread)
 
 	label := "skip-metrics-test.star"
@@ -1116,7 +1117,7 @@ func TestCollector_ReadyInvalidType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := NewCollector(NewConditionCollector(), "test.star")
+			c := NewCollector(NewConditionCollector(), "test.star", nil)
 			thread := new(starlark.Thread)
 
 			body := new(starlark.Dict)
@@ -1177,7 +1178,7 @@ func TestGetOrCreateNestedStruct_OverwriteNonStruct(t *testing.T) {
 
 func TestCollector_SkipResource_Concurrent(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star")
+	c := NewCollector(cc, "test.star", nil)
 
 	const goroutines = 10
 	const skipsPerGoroutine = 50
@@ -1213,14 +1214,530 @@ func TestNewCollector_ScriptName(t *testing.T) {
 	cc := NewConditionCollector()
 
 	// Empty scriptName should work.
-	c1 := NewCollector(cc, "")
+	c1 := NewCollector(cc, "", nil)
 	if c1.scriptName != "" {
 		t.Errorf("scriptName = %q, want empty string", c1.scriptName)
 	}
 
 	// Constructor should set scriptName.
-	c2 := NewCollector(cc, "my-script.star")
+	c2 := NewCollector(cc, "my-script.star", nil)
 	if c2.scriptName != "my-script.star" {
 		t.Errorf("scriptName = %q, want %q", c2.scriptName, "my-script.star")
+	}
+}
+
+// --- Label injection tests ---
+
+// makeOXR builds a *structpb.Struct representing an observed XR with the given
+// metadata.name and optional claim labels.
+func makeOXR(name, claimName, claimNamespace string) *structpb.Struct {
+	mdFields := map[string]*structpb.Value{}
+	if name != "" {
+		mdFields["name"] = structpb.NewStringValue(name)
+	}
+	if claimName != "" || claimNamespace != "" {
+		lblFields := map[string]*structpb.Value{}
+		if claimName != "" {
+			lblFields["crossplane.io/claim-name"] = structpb.NewStringValue(claimName)
+		}
+		if claimNamespace != "" {
+			lblFields["crossplane.io/claim-namespace"] = structpb.NewStringValue(claimNamespace)
+		}
+		mdFields["labels"] = structpb.NewStructValue(&structpb.Struct{Fields: lblFields})
+	}
+	return &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"metadata": structpb.NewStructValue(&structpb.Struct{Fields: mdFields}),
+		},
+	}
+}
+
+func TestCrossplaneLabelsFromOXR(t *testing.T) {
+	oxr := makeOXR("xr-abc", "my-claim", "ns")
+	labels := crossplaneLabelsFromOXR(oxr)
+
+	if len(labels) != 3 {
+		t.Fatalf("labels count = %d, want 3", len(labels))
+	}
+	if labels["crossplane.io/composite"] != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels["crossplane.io/composite"], "xr-abc")
+	}
+	if labels["crossplane.io/claim-name"] != "my-claim" {
+		t.Errorf("claim-name = %q, want %q", labels["crossplane.io/claim-name"], "my-claim")
+	}
+	if labels["crossplane.io/claim-namespace"] != "ns" {
+		t.Errorf("claim-namespace = %q, want %q", labels["crossplane.io/claim-namespace"], "ns")
+	}
+}
+
+func TestCrossplaneLabelsFromOXR_NoClaim(t *testing.T) {
+	oxr := makeOXR("xr-abc", "", "")
+	labels := crossplaneLabelsFromOXR(oxr)
+
+	if len(labels) != 1 {
+		t.Fatalf("labels count = %d, want 1", len(labels))
+	}
+	if labels["crossplane.io/composite"] != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels["crossplane.io/composite"], "xr-abc")
+	}
+}
+
+func TestCrossplaneLabelsFromOXR_Nil(t *testing.T) {
+	labels := crossplaneLabelsFromOXR(nil)
+	if len(labels) != 0 {
+		t.Errorf("labels count = %d, want 0 for nil OXR", len(labels))
+	}
+}
+
+func TestCrossplaneLabelsFromOXR_NilMetadata(t *testing.T) {
+	oxr := &structpb.Struct{Fields: map[string]*structpb.Value{}}
+	labels := crossplaneLabelsFromOXR(oxr)
+	if len(labels) != 0 {
+		t.Errorf("labels count = %d, want 0 for OXR with no metadata", len(labels))
+	}
+}
+
+func TestCollector_Labels_Omitted(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "my-claim", "ns")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr := res["bucket"]
+	metadata := cr.Body.GetFields()["metadata"].GetStructValue()
+	if metadata == nil {
+		t.Fatal("metadata is nil")
+	}
+	labels := metadata.GetFields()["labels"].GetStructValue()
+	if labels == nil {
+		t.Fatal("labels is nil")
+	}
+
+	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	}
+	if labels.GetFields()["crossplane.io/claim-name"].GetStringValue() != "my-claim" {
+		t.Errorf("claim-name = %q, want %q", labels.GetFields()["crossplane.io/claim-name"].GetStringValue(), "my-claim")
+	}
+	if labels.GetFields()["crossplane.io/claim-namespace"].GetStringValue() != "ns" {
+		t.Errorf("claim-namespace = %q, want %q", labels.GetFields()["crossplane.io/claim-namespace"].GetStringValue(), "ns")
+	}
+}
+
+func TestCollector_Labels_BasicDict(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "my-claim", "ns")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	lblDict := new(starlark.Dict)
+	_ = lblDict.SetKey(starlark.String("team"), starlark.String("platform"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblDict},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr := res["bucket"]
+	labels := cr.Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	// User label should be present.
+	if labels.GetFields()["team"].GetStringValue() != "platform" {
+		t.Errorf("team = %q, want %q", labels.GetFields()["team"].GetStringValue(), "platform")
+	}
+	// Crossplane labels should also be present.
+	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	}
+}
+
+func TestCollector_Labels_StarlarkDict(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "", "")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	// Use *convert.StarlarkDict instead of *starlark.Dict.
+	sd := convert.NewStarlarkDict(1)
+	_ = sd.SetField("env", starlark.String("prod"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), sd},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	if labels.GetFields()["env"].GetStringValue() != "prod" {
+		t.Errorf("env = %q, want %q", labels.GetFields()["env"].GetStringValue(), "prod")
+	}
+	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	}
+}
+
+func TestCollector_Labels_MergePriority(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "", "")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	// Body has crossplane.io/composite="old"
+	bodyLabels := new(starlark.Dict)
+	_ = bodyLabels.SetKey(starlark.String("crossplane.io/composite"), starlark.String("old"))
+	metadata := new(starlark.Dict)
+	_ = metadata.SetKey(starlark.String("labels"), bodyLabels)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("metadata"), metadata)
+
+	// Kwarg overrides crossplane.io/composite="custom"
+	lblDict := new(starlark.Dict)
+	_ = lblDict.SetKey(starlark.String("crossplane.io/composite"), starlark.String("custom"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblDict},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	// Kwarg should win over both body and auto-injected.
+	got := labels.GetFields()["crossplane.io/composite"].GetStringValue()
+	if got != "custom" {
+		t.Errorf("composite = %q, want %q (kwarg should win)", got, "custom")
+	}
+
+	// Should have both body-vs-auto and kwarg-vs-auto warnings.
+	events := cc.Events()
+	if len(events) != 2 {
+		t.Fatalf("Events() len = %d, want 2", len(events))
+	}
+}
+
+func TestCollector_Labels_None(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "my-claim", "ns")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	// Body has existing labels.
+	bodyLabels := new(starlark.Dict)
+	_ = bodyLabels.SetKey(starlark.String("existing"), starlark.String("keep-me"))
+	metadata := new(starlark.Dict)
+	_ = metadata.SetKey(starlark.String("labels"), bodyLabels)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("metadata"), metadata)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), starlark.None},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	// Body label should be preserved.
+	if labels.GetFields()["existing"].GetStringValue() != "keep-me" {
+		t.Errorf("existing = %q, want %q", labels.GetFields()["existing"].GetStringValue(), "keep-me")
+	}
+	// No crossplane labels should be injected.
+	if labels.GetFields()["crossplane.io/composite"] != nil {
+		t.Error("crossplane.io/composite should not be present with labels=None")
+	}
+}
+
+func TestCollector_Labels_EmptyDict(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "", "")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	emptyDict := new(starlark.Dict) // empty
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), emptyDict},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	// Auto-injection should still run with empty dict.
+	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	}
+}
+
+func TestCollector_Labels_NonStringKey(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+
+	lblDict := new(starlark.Dict)
+	_ = lblDict.SetKey(starlark.MakeInt(42), starlark.String("val"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblDict},
+	})
+	if err == nil {
+		t.Fatal("Resource() with non-string label key should return error")
+	}
+	if !strings.Contains(err.Error(), "labels key must be string, got int") {
+		t.Errorf("error = %q, should contain 'labels key must be string, got int'", err.Error())
+	}
+}
+
+func TestCollector_Labels_NonStringValue(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+
+	lblDict := new(starlark.Dict)
+	_ = lblDict.SetKey(starlark.String("k"), starlark.True)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblDict},
+	})
+	if err == nil {
+		t.Fatal("Resource() with non-string label value should return error")
+	}
+	if !strings.Contains(err.Error(), "labels value must be string, got bool") {
+		t.Errorf("error = %q, should contain 'labels value must be string, got bool'", err.Error())
+	}
+}
+
+func TestCollector_Labels_BodyConflictWarning(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "", "")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	// Body has crossplane.io/composite="old"
+	bodyLabels := new(starlark.Dict)
+	_ = bodyLabels.SetKey(starlark.String("crossplane.io/composite"), starlark.String("old"))
+	metadata := new(starlark.Dict)
+	_ = metadata.SetKey(starlark.String("labels"), bodyLabels)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("metadata"), metadata)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("severity = %q, want %q", events[0].Severity, "Warning")
+	}
+	wantMsg := `Resource "bucket": body label "crossplane.io/composite"="old" overridden by auto-injected "xr-abc"`
+	if events[0].Message != wantMsg {
+		t.Errorf("message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+func TestCollector_Labels_KwargConflictWarning(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "", "")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+
+	lblDict := new(starlark.Dict)
+	_ = lblDict.SetKey(starlark.String("crossplane.io/composite"), starlark.String("custom"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblDict},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Resource "bucket": labels= kwarg "crossplane.io/composite"="custom" overrides auto-injected "xr-abc"`
+	if events[0].Message != wantMsg {
+		t.Errorf("message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+func TestCollector_Labels_KwargVsBodySilent(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil)
+	thread := new(starlark.Thread)
+
+	// Body has a non-crossplane label.
+	bodyLabels := new(starlark.Dict)
+	_ = bodyLabels.SetKey(starlark.String("team"), starlark.String("old-team"))
+	metadata := new(starlark.Dict)
+	_ = metadata.SetKey(starlark.String("labels"), bodyLabels)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("metadata"), metadata)
+
+	// Kwarg overrides the same non-crossplane label.
+	lblDict := new(starlark.Dict)
+	_ = lblDict.SetKey(starlark.String("team"), starlark.String("new-team"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblDict},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// No warning should be emitted for kwarg-vs-body (no auto-injected involved).
+	events := cc.Events()
+	if len(events) != 0 {
+		t.Errorf("Events() len = %d, want 0 (kwarg-vs-body is silent)", len(events))
+	}
+
+	// Kwarg value should win.
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+	if labels.GetFields()["team"].GetStringValue() != "new-team" {
+		t.Errorf("team = %q, want %q", labels.GetFields()["team"].GetStringValue(), "new-team")
+	}
+}
+
+func TestCollector_Labels_SharedBody(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "", "")
+	c := NewCollector(cc, "test.star", oxr)
+	thread := new(starlark.Thread)
+
+	// Use the same body dict for two Resource() calls.
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	lblA := new(starlark.Dict)
+	_ = lblA.SetKey(starlark.String("team"), starlark.String("alpha"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket-a"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblA},
+	})
+	if err != nil {
+		t.Fatalf("Resource('bucket-a') error: %v", err)
+	}
+
+	lblB := new(starlark.Dict)
+	_ = lblB.SetKey(starlark.String("team"), starlark.String("beta"))
+
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket-b"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblB},
+	})
+	if err != nil {
+		t.Fatalf("Resource('bucket-b') error: %v", err)
+	}
+
+	res := c.Resources()
+
+	labelsA := res["bucket-a"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+	labelsB := res["bucket-b"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	if labelsA.GetFields()["team"].GetStringValue() != "alpha" {
+		t.Errorf("bucket-a team = %q, want %q", labelsA.GetFields()["team"].GetStringValue(), "alpha")
+	}
+	if labelsB.GetFields()["team"].GetStringValue() != "beta" {
+		t.Errorf("bucket-b team = %q, want %q", labelsB.GetFields()["team"].GetStringValue(), "beta")
+	}
+}
+
+func TestCollector_Labels_InvalidType(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), starlark.MakeInt(42)},
+	})
+	if err == nil {
+		t.Fatal("Resource() with labels=42 should return error")
+	}
+	if !strings.Contains(err.Error(), "labels must be dict or None, got int") {
+		t.Errorf("error = %q, should contain 'labels must be dict or None, got int'", err.Error())
 	}
 }
