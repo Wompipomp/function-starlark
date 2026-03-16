@@ -28,6 +28,7 @@ import (
 //   - fatal: builtin for halting execution with a fatal error
 //   - set_connection_details: builtin for setting XR-level connection details
 //   - set_xr_status: builtin for writing values into dxr.status at dot-paths
+//   - get_observed: utility builtin for one-call observed resource field lookup
 //   - require_resource: builtin for requesting a single extra resource
 //   - require_resources: builtin for requesting multiple extra resources
 func BuildGlobals(
@@ -313,13 +314,66 @@ func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, 
 }
 
 // getObservedImpl implements get_observed(name, path, default=None).
+// It looks up an observed resource by name, then traverses the path
+// using the same pathToKeys + Mapping walk as get().
 func getObservedImpl(
 	fnName string,
 	observed *convert.StarlarkDict,
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	return nil, fmt.Errorf("not implemented")
+	var name string
+	var path starlark.Value
+	var dflt starlark.Value = starlark.None
+
+	if err := starlark.UnpackArgs(fnName, args, kwargs,
+		"name", &name, "path", &path, "default?", &dflt); err != nil {
+		return nil, err
+	}
+
+	// Validate name.
+	if name == "" {
+		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	}
+
+	// Validate path not empty (both "" and [] are rejected).
+	switch p := path.(type) {
+	case starlark.String:
+		if string(p) == "" {
+			return nil, fmt.Errorf("%s: path must not be empty", fnName)
+		}
+	case *starlark.List:
+		if p.Len() == 0 {
+			return nil, fmt.Errorf("%s: path must not be empty", fnName)
+		}
+	}
+
+	// Convert path to keys.
+	keys, err := pathToKeys(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 1: Look up resource by name in observed dict.
+	res, found, err := observed.Get(starlark.String(name))
+	if err != nil || !found || res == starlark.None {
+		return dflt, nil
+	}
+
+	// Step 2: Walk the path (same as getFnImpl loop).
+	current := res
+	for _, key := range keys {
+		mapping, ok := current.(starlark.Mapping)
+		if !ok {
+			return dflt, nil
+		}
+		v, found, err := mapping.Get(starlark.String(key))
+		if err != nil || !found || v == starlark.None {
+			return dflt, nil
+		}
+		current = v
+	}
+	return current, nil
 }
 
 // pathToKeys converts a path value to a slice of string keys.
