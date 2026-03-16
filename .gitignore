@@ -13,3 +13,6 @@ function-starlark.xpkg
 
 # Planning docs (local only)
 .planning/
+
+# KCL conversions (local only, may contain internal references)
+.conversions/

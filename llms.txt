@@ -1,0 +1,230 @@
+# function-starlark
+
+> Crossplane composition function using Starlark (Python-like) scripts. ~20MB memory, hermetic sandbox, built-in dependency ordering, auto-injected labels, OCI module system.
+
+## What this is
+
+A Crossplane composition function that lets you write compositions in Starlark instead of KCL or Go templates. Starlark is a subset of Python -- if you know Python, you know Starlark. Scripts run in a hermetic sandbox (no I/O, no network) with bytecode caching for sub-second execution.
+
+## Installation
+
+```yaml
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-starlark
+spec:
+  package: ghcr.io/wompipomp/function-starlark:latest
+```
+
+## StarlarkInput spec fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| source | string | -- | Inline Starlark script |
+| scriptConfigRef.name | string | -- | ConfigMap name containing the script |
+| scriptConfigRef.key | string | main.star | Key within the ConfigMap |
+| modules | map[string]string | -- | Inline modules loadable via load() |
+| sequencingTTL | duration | 10s | Response TTL when creation sequencing defers resources |
+| dockerConfigSecret | string | -- | Secret name for private OCI registry auth |
+
+## Predeclared globals (available in every script)
+
+| Name | Type | Description |
+|------|------|-------------|
+| xr | StarlarkDict (read-only) | Observed composite resource. Use get(xr, "spec.field", default) for safe access. Alias for oxr. |
+| oxr | StarlarkDict (read-only) | Same as xr. |
+| dxr | StarlarkDict (read-write) | Desired composite resource. Write status fields here. |
+| observed | StarlarkDict (read-only) | Observed composed resources keyed by composition resource name. |
+| context | dict (read-write) | Pipeline context shared across steps. |
+| environment | StarlarkDict (read-only) | EnvironmentConfig data. |
+| extra_resources | dict (read-only) | Extra resources from require_resource/require_resources. |
+
+## Predeclared functions
+
+### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None)
+
+Register a desired composed resource. This is the primary function.
+
+- name: Composition resource name (unique string). This replaces KCL's "krm.kcl.dev/composition-resource-name" annotation.
+- body: Dict with apiVersion, kind, metadata, spec.
+- ready: None (auto-detect), True, or False.
+- labels: Omit for auto-injection of crossplane.io/* labels. Dict to merge custom labels. None to opt out.
+- connection_details: Dict of string key-value pairs for per-resource connection details.
+- depends_on: List of ResourceRef (from prior Resource() calls) or strings for creation sequencing. Generates Crossplane Usage resources.
+- external_name: Sugar for crossplane.io/external-name annotation.
+- Returns: ResourceRef with .name attribute for use in depends_on.
+
+Example:
+```python
+bucket = Resource("bucket", {
+    "apiVersion": "s3.aws.upbound.io/v1beta1",
+    "kind": "Bucket",
+    "metadata": {"name": "%s-data" % xr_name},
+    "spec": {"forProvider": {"region": region}},
+})
+Resource("topic", {...}, depends_on=[bucket])
+```
+
+### get(obj, path, default=None)
+
+Safe nested dict access with dot-separated path.
+
+- Dot string: get(xr, "spec.region", "us-east-1")
+- List form for keys with dots: get(xr, ["metadata", "annotations", "app.kubernetes.io/name"], "")
+
+### set_condition(type, status, reason, message)
+
+Set a condition on the XR.
+```python
+set_condition(type="Ready", status="True", reason="Available", message="All resources created")
+```
+
+### emit_event(severity, message)
+
+Emit Normal or Warning event on the XR.
+```python
+emit_event("Normal", "Reconciliation complete")
+emit_event("Warning", "Deprecated API version")
+```
+
+### fatal(message)
+
+Halt execution with a fatal error. Sets ReconcileError condition on XR.
+```python
+if not region:
+    fatal("spec.region is required")
+```
+
+### set_connection_details(details)
+
+Set XR-level connection details.
+```python
+set_connection_details({"endpoint": "https://...", "password": pw})
+```
+
+### set_xr_status(path, value)
+
+Set a status field on the XR using dot-path.
+```python
+set_xr_status("atProvider.projectId", project_id)
+```
+
+### skip_resource(name, reason)
+
+Remove a resource from desired state (e.g., conditionally skip a resource from a previous pipeline step).
+```python
+skip_resource("monitoring", "monitoring only in prod")
+```
+
+### require_resource(name, apiVersion, kind, match_name=None, match_labels=None)
+
+Request a single extra resource. Access via extra_resources[name] on next reconciliation.
+```python
+require_resource("config", "v1", "ConfigMap", match_name="my-config")
+```
+
+### require_resources(name, apiVersion, kind, match_labels)
+
+Request multiple extra resources by label selector.
+```python
+require_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
+```
+
+### sha256(value)
+
+Returns SHA-256 hex digest of a string. Use for deterministic hashing.
+```python
+hash_val = sha256(xr_name)[:5]
+```
+
+## Module system
+
+Load shared code via standard Starlark load():
+
+```python
+# From OCI registry (recommended for shared libraries)
+load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
+
+# From inline modules defined in StarlarkInput spec.modules
+load("helpers.star", "make_tags")
+
+# From ConfigMap-mounted filesystem
+load("shared/utils.star", "validate")
+```
+
+## Standard library (oci://ghcr.io/wompipomp/starlark-stdlib:v1/)
+
+### naming.star
+- resource_name(suffix, xr_name=None): Generate K8s-safe name from XR name + suffix, auto-truncates to 63 chars with hash.
+- hash_suffix(name, length=5): Deterministic base-36 hash suffix.
+
+### networking.star
+- cidr_subnet(base, newbits, netnum): Calculate subnet CIDR from base network.
+- ip_add(ip, offset): Add offset to IP address.
+
+### labels.star
+- standard_labels(oxr, extra={}): Generate standard labels from XR metadata.
+
+### conditions.star
+- ready(oxr): Check if XR has all conditions True.
+- degraded(oxr, message): Set degraded condition.
+
+## Composition pattern: Extract-Transform-Emit
+
+```python
+# 1. Extract
+region = get(xr, "spec.region", "us-east-1")
+env = get(xr, "spec.environment", "dev")
+
+# 2. Transform
+bucket_config = {
+    "apiVersion": "s3.aws.upbound.io/v1beta1",
+    "kind": "Bucket",
+    "spec": {"forProvider": {"region": region}},
+}
+
+# 3. Emit
+Resource("bucket", bucket_config)
+```
+
+## Best practices
+
+- Use get() for all nested access -- never raw bracket chains on XR/observed data.
+- Use resource_name(suffix) from stdlib for metadata.name to handle 63-char K8s limit.
+- Use external_name= kwarg instead of manual crossplane.io/external-name annotation.
+- Use labels= kwarg for custom labels. Let auto-injection handle crossplane.io/* labels.
+- Use fatal() for validation errors (not fail()).
+- Use emit_event() for observability.
+- Use depends_on= for creation ordering between resources.
+- Use set_xr_status() for writing XR status fields.
+- Use %s string formatting (Starlark convention, .format() also works).
+- Put helper functions at the top of the script.
+- End scripts with emit_event("Normal", "Reconciled ...") for observability.
+
+## KCL to Starlark migration cheat sheet
+
+| KCL | Starlark |
+|-----|----------|
+| option("params")?.oxr | xr (predeclared global) |
+| option("params")?.ocds | observed (predeclared global) |
+| oxr?.spec?.field | get(xr, "spec.field", default) |
+| "krm.kcl.dev/composition-resource-name" annotation | First argument to Resource() |
+| items = [resource1, resource2] | Resource("name1", resource1); Resource("name2", resource2) |
+| dxr = {**oxr, status.field = val} | set_xr_status("field", val) |
+| "crossplane.io/external-name" annotation | external_name= kwarg on Resource() |
+| import crypto; crypto.sha256(s) | sha256(s) (builtin) |
+| assert condition, message | if not condition: fatal(message) |
+| import module | load("module.star", "func") |
+
+## Starlark language notes
+
+Starlark is Python-like but NOT Python:
+- No classes, exceptions, try/except, import, with, yield, async/await
+- No set type (use dict with None values)
+- No **kwargs or *args
+- Strings are immutable, no f-strings (use % or .format())
+- Variables assigned in if/for are visible in outer scope
+- Top-level code executes sequentially (no main function)
+- Integers have arbitrary precision (no overflow)
+- for/while loops have a step limit (prevents infinite loops)
