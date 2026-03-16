@@ -3969,3 +3969,373 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Errorf("ResourcesSkippedTotal delta = %v, want 0 (sequencing should not use skip metric)", skippedDelta)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Labels E2E integration tests (LBL-01 through LBL-07)
+// ---------------------------------------------------------------------------
+
+// buildOXRWithClaim creates an OXR struct with metadata.name and claim labels.
+func buildOXRWithClaim(name, claimName, claimNamespace string) *structpb.Struct {
+	lblFields := map[string]*structpb.Value{}
+	if claimName != "" {
+		lblFields["crossplane.io/claim-name"] = structpb.NewStringValue(claimName)
+	}
+	if claimNamespace != "" {
+		lblFields["crossplane.io/claim-namespace"] = structpb.NewStringValue(claimNamespace)
+	}
+	mdFields := map[string]*structpb.Value{
+		"name": structpb.NewStringValue(name),
+	}
+	if len(lblFields) > 0 {
+		mdFields["labels"] = structpb.NewStructValue(&structpb.Struct{Fields: lblFields})
+	}
+	return &structpb.Struct{Fields: map[string]*structpb.Value{
+		"metadata":   structpb.NewStructValue(&structpb.Struct{Fields: mdFields}),
+		"apiVersion": structpb.NewStringValue("example.com/v1"),
+		"kind":       structpb.NewStringValue("XR"),
+	}}
+}
+
+// extractLabels extracts metadata.labels from a response resource struct.
+func extractLabels(t *testing.T, rsp *fnv1.RunFunctionResponse, resourceName string) map[string]string {
+	t.Helper()
+	res, ok := rsp.GetDesired().GetResources()[resourceName]
+	if !ok {
+		t.Fatalf("resource %q not found in desired state", resourceName)
+	}
+	md := res.GetResource().GetFields()["metadata"].GetStructValue()
+	if md == nil {
+		t.Fatalf("resource %q has no metadata", resourceName)
+	}
+	lblStruct := md.GetFields()["labels"].GetStructValue()
+	if lblStruct == nil {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(lblStruct.GetFields()))
+	for k, v := range lblStruct.GetFields() {
+		out[k] = v.GetStringValue()
+	}
+	return out
+}
+
+// TestRunFunctionLabelsAutoInject verifies that Resource() with no labels= kwarg
+// auto-injects all three crossplane traceability labels from the OXR.
+func TestRunFunctionLabelsAutoInject(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"})`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	labels := extractLabels(t, rsp, "bucket")
+	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
+		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
+	}
+	if got := labels["crossplane.io/claim-name"]; got != "my-claim" {
+		t.Errorf("crossplane.io/claim-name = %q, want %q", got, "my-claim")
+	}
+	if got := labels["crossplane.io/claim-namespace"]; got != "default" {
+		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
+	}
+}
+
+// TestRunFunctionLabelsKwargMerge verifies that labels={"team":"platform"} merges
+// user labels with auto-injected crossplane labels, with kwarg taking priority.
+func TestRunFunctionLabelsKwargMerge(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"}, labels={"team": "platform"})`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	labels := extractLabels(t, rsp, "bucket")
+	// Crossplane labels should be present.
+	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
+		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
+	}
+	if got := labels["crossplane.io/claim-name"]; got != "my-claim" {
+		t.Errorf("crossplane.io/claim-name = %q, want %q", got, "my-claim")
+	}
+	if got := labels["crossplane.io/claim-namespace"]; got != "default" {
+		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
+	}
+	// User kwarg label should also be present.
+	if got := labels["team"]; got != "platform" {
+		t.Errorf("team = %q, want %q", got, "platform")
+	}
+}
+
+// TestRunFunctionLabelsNone verifies that labels=None skips all auto-injection,
+// preserving only body labels.
+func TestRunFunctionLabelsNone(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket", "metadata": {"labels": {"existing": "label"}}}, labels=None)`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	labels := extractLabels(t, rsp, "bucket")
+	// Body label should be preserved.
+	if got := labels["existing"]; got != "label" {
+		t.Errorf("existing = %q, want %q", got, "label")
+	}
+	// Crossplane labels should NOT be present.
+	if _, ok := labels["crossplane.io/composite"]; ok {
+		t.Error("crossplane.io/composite should not be present when labels=None")
+	}
+	if _, ok := labels["crossplane.io/claim-name"]; ok {
+		t.Error("crossplane.io/claim-name should not be present when labels=None")
+	}
+	if _, ok := labels["crossplane.io/claim-namespace"]; ok {
+		t.Error("crossplane.io/claim-namespace should not be present when labels=None")
+	}
+}
+
+// TestRunFunctionLabelsNonStringKey verifies that a non-string label key
+// produces a Fatal response with a clear error message.
+func TestRunFunctionLabelsNonStringKey(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"}, labels={42: "val"})`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "labels key must be string", "int")
+}
+
+// TestRunFunctionLabelsKwargConflictWarning verifies that when a labels= kwarg
+// key conflicts with an auto-injected crossplane label, a Warning event is emitted
+// and the kwarg value wins.
+func TestRunFunctionLabelsKwargConflictWarning(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"}, labels={"crossplane.io/composite": "custom"})`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	// Warning should be emitted about kwarg overriding auto-injected.
+	assertWarningResult(t, rsp, "labels= kwarg", "crossplane.io/composite", "overrides auto-injected")
+
+	// Kwarg value should win.
+	labels := extractLabels(t, rsp, "bucket")
+	if got := labels["crossplane.io/composite"]; got != "custom" {
+		t.Errorf("crossplane.io/composite = %q, want %q (kwarg should win)", got, "custom")
+	}
+}
+
+// TestRunFunctionLabelsBodyConflictWarning verifies that when a body dict has
+// metadata.labels with a crossplane label key, a Warning is emitted and the
+// auto-injected value wins over the body value.
+func TestRunFunctionLabelsBodyConflictWarning(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket", "metadata": {"labels": {"crossplane.io/composite": "old-value"}}})`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	// Warning about body label being overridden.
+	assertWarningResult(t, rsp, "body label", "crossplane.io/composite", "overridden by auto-injected")
+
+	// Auto-injected value should win over body.
+	labels := extractLabels(t, rsp, "bucket")
+	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
+		t.Errorf("crossplane.io/composite = %q, want %q (auto-injected should win over body)", got, "xr-abc")
+	}
+}
+
+// TestRunFunctionLabelsClaimOnlyWhenPresent verifies that claim labels are only
+// injected when the OXR actually has claim labels. Direct XRs without claims
+// should only get the crossplane.io/composite label.
+func TestRunFunctionLabelsClaimOnlyWhenPresent(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"})`
+
+	// OXR with name but NO claim labels (direct XR, no claim).
+	oxr := buildOXRWithClaim("xr-abc", "", "")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	labels := extractLabels(t, rsp, "bucket")
+	// Composite label should be present.
+	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
+		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
+	}
+	// Claim labels should NOT be present.
+	if _, ok := labels["crossplane.io/claim-name"]; ok {
+		t.Error("crossplane.io/claim-name should not be present when OXR has no claim")
+	}
+	if _, ok := labels["crossplane.io/claim-namespace"]; ok {
+		t.Error("crossplane.io/claim-namespace should not be present when OXR has no claim")
+	}
+}
+
+// TestRunFunctionLabelsEmptyDict verifies that labels={} behaves the same as
+// omitting the labels kwarg -- crossplane labels are still auto-injected.
+func TestRunFunctionLabelsEmptyDict(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"}, labels={})`
+
+	oxr := buildOXRWithClaim("xr-abc", "my-claim", "default")
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: oxr},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	labels := extractLabels(t, rsp, "bucket")
+	// All crossplane labels should be auto-injected even with empty dict.
+	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
+		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
+	}
+	if got := labels["crossplane.io/claim-name"]; got != "my-claim" {
+		t.Errorf("crossplane.io/claim-name = %q, want %q", got, "my-claim")
+	}
+	if got := labels["crossplane.io/claim-namespace"]; got != "default" {
+		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
+	}
+}
