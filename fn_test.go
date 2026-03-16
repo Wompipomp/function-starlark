@@ -27,7 +27,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/testing/protocmp"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -3971,15 +3970,3 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	}
 }
 
-// assertNoSequencingWarning verifies no "Creation sequencing:" warning in response.
-func assertNoSequencingWarning(t *testing.T, rsp *fnv1.RunFunctionResponse) {
-	t.Helper()
-	for _, r := range rsp.GetResults() {
-		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING && strings.Contains(r.GetMessage(), "Creation sequencing:") {
-			t.Errorf("unexpected creation sequencing warning: %s", r.GetMessage())
-		}
-	}
-}
-
-// Ensure durationpb import is used (compile guard).
-var _ = durationpb.New(0)
