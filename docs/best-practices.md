@@ -176,11 +176,33 @@ ref3 = Resource("subnet-c", {...})
 Resource("route-table", {...}, depends_on=[ref1, ref2, ref3])
 ```
 
+### Field path readiness (Object wrappers)
+
+When a resource is wrapped in a `kubernetes.crossplane.io Object`, the Object
+appears in observed state before the inner resource has its status populated.
+Use tuple syntax to wait for a specific field instead of manual observed-state
+guards:
+
+```python
+# Instead of:
+#   group_oid = get(observed, "group.status.atProvider.manifest.status.atProvider.objectId", "")
+#   if group_oid:
+#       Resource("mapping", {...})
+
+# Use tuple syntax:
+group = Resource("group", object_body)
+Resource("mapping", {
+    "spec": {"forProvider": {"groupId": get(observed, "group.status.atProvider.manifest.status.atProvider.objectId", "")}},
+}, depends_on=[(group, "status.atProvider.manifest.status.atProvider.objectId")])
+```
+
+This is cleaner and ensures the SAML mapping is deferred until the field is
+truthy, while still generating Usage resources for deletion ordering.
+
 ### No circular dependencies
 
-function-starlark does not detect cycles at script execution time. The script
-executes top-to-bottom; `depends_on` only controls Kubernetes creation order.
-Ensure your dependency graph is a DAG.
+function-starlark detects cycles in the dependency graph and reports a fatal
+error. Ensure your dependency graph is a DAG.
 
 ### Tuning sequencingTTL
 

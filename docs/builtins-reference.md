@@ -179,7 +179,7 @@ Kubernetes resources in a composition.
 | `ready` | None \| True \| False | None | Readiness signal. See below. |
 | `labels` | dict \| None \| omitted | auto-inject | Label behavior. See below. |
 | `connection_details` | dict \| None | None | Per-resource connection details (string key-value pairs). |
-| `depends_on` | list \| None | None | List of ResourceRef objects or strings for creation sequencing. |
+| `depends_on` | list \| None | None | List of ResourceRef, string, or `(ref, "field.path")` tuple for creation sequencing. |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
 
 **Returns:** ResourceRef with a `.name` attribute (the composition resource
@@ -208,10 +208,19 @@ name). Use in `depends_on` for other resources.
 
 **depends_on -- creation sequencing:**
 
-Each element can be a ResourceRef (returned by a previous `Resource()` call) or
-a string (resource name). Creates Crossplane Usage resources to ensure the
-depended-on resources are created before this one. See
-[features.md](features.md) for detailed sequencing behavior.
+Each element can be:
+
+- **ResourceRef** (returned by a previous `Resource()` call) or **string** --
+  defers the dependent until the dependency exists in observed state.
+- **Tuple `(ref, "field.path")`** -- defers the dependent until the dependency
+  exists in observed state AND the dot-separated field path has a truthy value
+  (non-empty string, non-zero number, true, struct, or list). This is useful for
+  Object-wrapped resources where the outer Object is observed before the inner
+  resource's status fields are populated.
+
+Creates Crossplane Usage resources to ensure the depended-on resources are
+created before this one. See [features.md](features.md) for detailed sequencing
+behavior.
 
 **external_name:**
 
@@ -256,6 +265,18 @@ Resource("app", {
     "metadata": {"name": "my-app"},
     "spec": {"dbRef": db_ref.name},
 }, depends_on=[db_ref])
+
+# Wait for a specific field before creating dependent resource
+project = Resource("project", {
+    "apiVersion": "project.gcp.upbound.io/v1beta1",
+    "kind": "Project",
+    "spec": {"forProvider": {"name": "my-project"}},
+})
+Resource("iam-binding", {
+    "apiVersion": "cloudplatform.gcp.upbound.io/v1beta1",
+    "kind": "ProjectIAMMember",
+    "spec": {"forProvider": {"project": get(observed, "project.status.atProvider.projectId", "")}},
+}, depends_on=[(project, "status.atProvider.projectId")])
 ```
 
 ---

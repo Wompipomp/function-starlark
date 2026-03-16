@@ -53,7 +53,7 @@ function-starlark provides these predeclared globals:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None)` | Register a desired composed resource; returns ResourceRef |
+| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None)` | Register a desired composed resource; returns ResourceRef. `depends_on` accepts ResourceRef, string, or `(ref, "field.path")` tuple |
 | `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason |
 | `get` | `get(obj, path, default=None)` | Safe nested dict access with dot-path or list-of-keys |
 | `set_condition` | `set_condition(type, status, reason, message, target="Composite")` | Set an XR condition |

@@ -12,8 +12,8 @@ enforce creation and deletion ordering between composed resources.
 
 ### How to use
 
-Pass `ResourceRef` objects (returned by `Resource()`) or resource name strings
-to the `depends_on=` kwarg:
+Pass `ResourceRef` objects (returned by `Resource()`), resource name strings,
+or `(ref, "field.path")` tuples to the `depends_on=` kwarg:
 
 ```python
 db_ref = Resource("database", {
@@ -46,6 +46,31 @@ the dependent resource is emitted.
 This means resources are created in dependency order across reconciliation
 cycles. A Warning event is emitted for each deferred resource (e.g., "waiting
 for database").
+
+### Field path readiness
+
+By default, `depends_on` checks whether the dependency exists in observed state.
+For resources wrapped in a `kubernetes.crossplane.io Object`, the outer Object
+may appear in observed state before the inner resource's status fields are
+populated. Use tuple syntax to wait for a specific field:
+
+```python
+# The Object is observed, but the inner WizEntraIDGroup may not have
+# its objectId yet. Tuple syntax defers until the field is truthy.
+group = Resource("group", object_wrapping_entra_group)
+Resource("mapping", saml_mapping_body, depends_on=[
+    (group, "status.atProvider.manifest.status.atProvider.objectId"),
+])
+```
+
+A field path is a dot-separated string evaluated on the observed resource's full
+struct. The dependent is deferred when:
+
+- The dependency resource does not exist in observed state, OR
+- The field path resolves to a missing key, null, empty string, zero, or false
+
+The dependent is allowed when the field resolves to a non-empty string, non-zero
+number, true, struct, or list.
 
 ```yaml
 apiVersion: starlark.fn.crossplane.io/v1alpha1
