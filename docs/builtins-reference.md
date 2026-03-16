@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 18 predeclared names -- 6 globals and 12 functions --
+function-starlark provides 19 predeclared names -- 6 globals and 13 functions --
 that are automatically available in every Starlark script without import. These
 are the core API for interacting with Crossplane's composite resource model.
 

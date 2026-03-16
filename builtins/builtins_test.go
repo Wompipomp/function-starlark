@@ -829,7 +829,7 @@ func TestGetLabel(t *testing.T) {
 		},
 		{
 			name: "missing labels map returns default",
-			oxr: xrWithLabelsAndAnnotations(nil, nil),
+			oxr:  xrWithLabelsAndAnnotations(nil, nil),
 			key:  starlark.String("key"),
 			want: starlark.None,
 		},
@@ -881,9 +881,10 @@ func TestGetLabel(t *testing.T) {
 			getLabelFn := starlark.NewBuiltin("get_label", getLabelImpl)
 
 			var obj starlark.Value
-			if tt.obj != nil {
+			switch {
+			case tt.obj != nil:
 				obj = tt.obj
-			} else if tt.name == "works on observed resource dict (frozen StarlarkDict)" {
+			case tt.name == "works on observed resource dict (frozen StarlarkDict)":
 				// Build an observed resource with labels.
 				req := makeReq(
 					map[string]*structpb.Value{},
@@ -925,7 +926,7 @@ func TestGetLabel(t *testing.T) {
 					t.Errorf("get_label(observed_res, 'app.kubernetes.io/name') = %v, want 'myapp'", result)
 				}
 				return
-			} else {
+			default:
 				// Build oxr from fields.
 				req := makeReq(tt.oxr, map[string]*structpb.Value{}, nil)
 				c := NewCollector(NewConditionCollector(), "test.star", nil)

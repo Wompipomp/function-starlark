@@ -32,8 +32,7 @@ spec:
 
 | Name | Type | Description |
 |------|------|-------------|
-| xr | StarlarkDict (read-only) | Observed composite resource. Use get(xr, "spec.field", default) for safe access. Alias for oxr. |
-| oxr | StarlarkDict (read-only) | Same as xr. |
+| oxr | StarlarkDict (read-only) | Observed composite resource. Use get(oxr, "spec.field", default) for safe access. |
 | dxr | StarlarkDict (read-write) | Desired composite resource. Write status fields here. |
 | observed | StarlarkDict (read-only) | Observed composed resources keyed by composition resource name. |
 | context | dict (read-write) | Pipeline context shared across steps. |
@@ -80,8 +79,8 @@ Resource("group", {...}, depends_on=[
 
 Safe nested dict access with dot-separated path.
 
-- Dot string: get(xr, "spec.region", "us-east-1")
-- List form for keys with dots: get(xr, ["metadata", "annotations", "app.kubernetes.io/name"], "")
+- Dot string: get(oxr, "spec.region", "us-east-1")
+- List form for keys with dots: get(oxr, ["metadata", "annotations", "app.kubernetes.io/name"], "")
 
 ### get_label(res, key, default=None)
 
@@ -175,13 +174,6 @@ Request multiple extra resources by label selector.
 require_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
 ```
 
-### sha256(value)
-
-Returns SHA-256 hex digest of a string. Use for deterministic hashing.
-```python
-hash_val = sha256(xr_name)[:5]
-```
-
 ## Module system
 
 Load shared code via standard Starlark load():
@@ -218,8 +210,8 @@ load("shared/utils.star", "validate")
 
 ```python
 # 1. Extract
-region = get(xr, "spec.region", "us-east-1")
-env = get(xr, "spec.environment", "dev")
+region = get(oxr, "spec.region", "us-east-1")
+env = get(oxr, "spec.environment", "dev")
 
 # 2. Transform
 bucket_config = {
@@ -252,14 +244,13 @@ Resource("bucket", bucket_config)
 
 | KCL | Starlark |
 |-----|----------|
-| option("params")?.oxr | xr (predeclared global) |
+| option("params")?.oxr | oxr (predeclared global) |
 | option("params")?.ocds | observed (predeclared global) |
-| oxr?.spec?.field | get(xr, "spec.field", default) |
+| oxr?.spec?.field | get(oxr, "spec.field", default) |
 | "krm.kcl.dev/composition-resource-name" annotation | First argument to Resource() |
 | items = [resource1, resource2] | Resource("name1", resource1); Resource("name2", resource2) |
 | dxr = {**oxr, status.field = val} | set_xr_status("field", val) |
 | "crossplane.io/external-name" annotation | external_name= kwarg on Resource() |
-| import crypto; crypto.sha256(s) | sha256(s) (builtin) |
 | assert condition, message | if not condition: fatal(message) |
 | import module | load("module.star", "func") |
 
