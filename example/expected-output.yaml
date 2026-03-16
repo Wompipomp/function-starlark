@@ -4,14 +4,15 @@ kind: XBucket
 metadata:
   name: example-xr
 status:
-  bucketCount: 8
+  atProvider:
+    bucketCount: 8
+    environment: prod
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
     message: 'Unready resources: bucket-0, bucket-1, bucket-2, and 6 more'
     reason: Creating
     status: "False"
     type: Ready
-  environment: prod
   region: us-east-1
 ---
 apiVersion: s3.aws.upbound.io/v1beta1

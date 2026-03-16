@@ -18,8 +18,9 @@ spec:
           source: |
             # Realistic 10-resource composition exercising all builtins.
             #
-            # Globals available: oxr, dxr, observed, context, environment,
-            #   get, Resource, set_condition, emit_event, fatal,
+            # Globals available: oxr, dxr, observed, context, environment, extra_resources
+            #   get, get_label, get_annotation, get_observed, set_xr_status,
+            #   Resource, skip_resource, set_condition, emit_event, fatal,
             #   set_connection_details, require_resource, require_resources
             #
             # Note: context read/write is verified in unit tests (fn_test.go
@@ -30,6 +31,20 @@ spec:
             region = get(oxr, "spec.region", "us-east-1")
             env = get(oxr, "spec.environment", "dev")
             xr_name = get(oxr, "metadata.name", "unknown")
+
+            # --- Metadata access via get_label / get_annotation ---
+            # Read a label from the XR. The XR in xr.yaml has no labels,
+            # so this returns the default "unknown" -- demonstrating safe access.
+            managed_by = get_label(oxr, "app.kubernetes.io/managed-by", "unknown")
+
+            # Read an annotation from the XR. Returns "" when missing.
+            ext_name = get_annotation(oxr, "crossplane.io/external-name", "")
+
+            # --- Observed resource access via get_observed ---
+            # Read from an observed resource with default. On initial
+            # reconciliation, observed state doesn't exist yet, so this
+            # returns "pending" -- a common real-world pattern.
+            bucket_arn = get_observed("bucket-0", "status.atProvider.arn", "pending")
 
             # --- Conditional resource creation (prod-only monitoring) ---
             if env == "prod":
@@ -121,9 +136,8 @@ spec:
                 message="Created 8 buckets + 1 notification topic + 1 dashboard in %s (%s)" % (region, env),
             )
 
-            # --- DXR status update ---
-            dxr["status"] = {
-                "bucketCount": 8,
-                "region": region,
-                "environment": env,
-            }
+            # --- XR status update via set_xr_status ---
+            # Bulk: write related fields at a prefix
+            set_xr_status("atProvider", {"bucketCount": 8, "environment": env})
+            # Individual: write a separate path
+            set_xr_status("region", region)
