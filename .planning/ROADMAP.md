@@ -133,7 +133,7 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 21-01-PLAN.md — Core reference docs: builtins-reference.md and llms.txt with full entries for all 4 new builtins
+- [x] 21-01-PLAN.md — Core reference docs: builtins-reference.md and llms.txt with full entries for all 4 new builtins
 - [ ] 21-02-PLAN.md — Example composition rewrite + cross-doc updates (features, best-practices, migration, README)
 
 ## Progress
@@ -163,4 +163,4 @@ Phases execute in numeric order: 18 -> 19 -> 20 -> 21
 | 18. Metadata Access | 1/1 | Complete    | 2026-03-16 | - |
 | 19. Status Mutation | 1/1 | Complete    | 2026-03-16 | - |
 | 20. Observed Access | 1/1 | Complete    | 2026-03-16 | - |
-| 21. Documentation | v1.5 | 0/2 | Not started | - |
+| 21. Documentation | v1.5 | 1/2 | In progress | - |

@@ -30,8 +30,8 @@ Requirements for v1.5 Builtins milestone. Each maps to roadmap phases.
 
 ### Documentation
 
-- [ ] **DOCS-01**: llms.txt updated with entries for all four new builtins
-- [ ] **DOCS-02**: builtins-reference.md updated with full documentation and examples for each builtin
+- [x] **DOCS-01**: llms.txt updated with entries for all four new builtins
+- [x] **DOCS-02**: builtins-reference.md updated with full documentation and examples for each builtin
 - [ ] **DOCS-03**: features.md, best-practices.md, and migration-from-kcl.md updated to reference new builtins
 - [ ] **DOCS-04**: Example composition updated to use new builtins where applicable
 
@@ -66,8 +66,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OBSV-02 | Phase 20 | Complete |
 | OBSV-03 | Phase 20 | Complete |
 | OBSV-04 | Phase 20 | Complete |
-| DOCS-01 | Phase 21 | Pending |
-| DOCS-02 | Phase 21 | Pending |
+| DOCS-01 | Phase 21 | Complete |
+| DOCS-02 | Phase 21 | Complete |
 | DOCS-03 | Phase 21 | Pending |
 | DOCS-04 | Phase 21 | Pending |
 

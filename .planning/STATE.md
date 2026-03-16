@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Builtins
-status: completed
-stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-03-16T20:42:07.717Z"
-last_activity: 2026-03-16 — Phase 20 Plan 01 complete (get_observed builtin)
+status: in-progress
+stopped_at: Phase 21 Plan 01 complete
+last_updated: "2026-03-16T21:12:08Z"
+last_activity: 2026-03-16 — Phase 21 Plan 01 complete (builtins-reference.md and llms.txt)
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-16)
 
 **Core value:** Platform engineers can write readable, expressive compositions that run with minimal resource overhead
-**Current focus:** v1.5 Builtins — Phase 20 Observed Access
+**Current focus:** v1.5 Builtins — Phase 21 Documentation
 
 ## Current Position
 
-Phase: 20 of 21 (Observed Access)
+Phase: 21 of 21 (Documentation)
 Plan: 1 of 1 (complete)
-Status: Phase 20 complete
-Last activity: 2026-03-16 — Phase 20 Plan 01 complete (get_observed builtin)
+Status: Phase 21 Plan 01 complete
+Last activity: 2026-03-16 — Phase 21 Plan 01 complete (builtins-reference.md and llms.txt)
 
 Progress: [██████████] 100%
 
@@ -42,6 +42,7 @@ Progress: [██████████] 100%
 | 18    | 01   | 3min     | 1     | 2     |
 | 19    | 01   | 3min     | 1     | 2     |
 | 20    | 01   | 3min     | 1     | 2     |
+| 21    | 01   | 3min     | 2     | 2     |
 
 ## Accumulated Context
 
@@ -58,6 +59,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase 20]: name param as Go string in UnpackArgs (auto type-checks)
 - [Phase 20]: None-as-missing throughout entire lookup chain (observed.Get, non-Mapping, path miss, None at leaf)
 - [Phase 20]: No dot-validation on path (follows get() lenient behavior, not set_xr_status strictness)
+- [Phase 21]: Used locked decision count of 18 predeclared names (6 globals + 12 functions) in docs
+- [Phase 21]: Placed get_label/get_annotation near get() in docs for related-function grouping
+- [Phase 21]: Before/after example pattern for reference docs showing old multi-step vs new one-call
 
 ### Pending Todos
 
@@ -75,6 +79,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-16T20:37:18Z
-Stopped at: Completed 20-01-PLAN.md
-Resume: `/gsd:execute-phase 21` to begin Phase 21
+Last session: 2026-03-16T21:12:08Z
+Stopped at: Completed 21-01-PLAN.md
