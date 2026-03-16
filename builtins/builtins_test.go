@@ -67,7 +67,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"context", "environment", "extra_resources",
 		"set_condition", "emit_event", "fatal",
 		"set_connection_details", "require_resource", "require_resources",
-		"get_label", "get_annotation",
+		"get_label", "get_annotation", "set_xr_status",
 	}
 	if len(globals) != len(expected) {
 		t.Errorf("len(globals) = %d, want %d", len(globals), len(expected))
@@ -1051,6 +1051,390 @@ func TestGetAnnotation(t *testing.T) {
 			}
 			if result != tt.want {
 				t.Errorf("get_annotation() = %v, want %v", result, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// set_xr_status builtin tests
+// ---------------------------------------------------------------------------
+
+func TestSetXRStatus(t *testing.T) {
+	// Helper to create a set_xr_status builtin closure over the given dxr.
+	makeSetFn := func(dxr *convert.StarlarkDict) *starlark.Builtin {
+		return starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return setXRStatus(b.Name(), dxr, args, kwargs)
+		})
+	}
+
+	thread := new(starlark.Thread)
+
+	tests := []struct {
+		name    string
+		setup   func() *convert.StarlarkDict // build dxr before test
+		path    starlark.Value
+		value   starlark.Value
+		verify  func(t *testing.T, dxr *convert.StarlarkDict) // verify dxr after call
+		wantErr string
+	}{
+		{
+			name: "nested path atProvider.projectId",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.String("proj-123"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, err := dxr.Attr("status")
+				if err != nil {
+					t.Fatalf("dxr.Attr(status): %v", err)
+				}
+				sd, ok := status.(*convert.StarlarkDict)
+				if !ok {
+					t.Fatalf("status is %T, want *StarlarkDict", status)
+				}
+				ap, err := sd.Attr("atProvider")
+				if err != nil {
+					t.Fatalf("status.Attr(atProvider): %v", err)
+				}
+				apDict, ok := ap.(*convert.StarlarkDict)
+				if !ok {
+					t.Fatalf("atProvider is %T, want *StarlarkDict", ap)
+				}
+				pid, err := apDict.Attr("projectId")
+				if err != nil {
+					t.Fatalf("atProvider.Attr(projectId): %v", err)
+				}
+				if pid != starlark.String("proj-123") {
+					t.Errorf("projectId = %v, want 'proj-123'", pid)
+				}
+			},
+		},
+		{
+			name: "single-segment path ready",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("ready"),
+			value: starlark.True,
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ready, _ := sd.Attr("ready")
+				if ready != starlark.True {
+					t.Errorf("ready = %v, want True", ready)
+				}
+			},
+		},
+		{
+			name: "empty path error",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:    starlark.String(""),
+			value:   starlark.String("val"),
+			wantErr: "path must not be empty",
+		},
+		{
+			name: "malformed path leading dot",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:    starlark.String(".foo"),
+			value:   starlark.String("val"),
+			wantErr: "malformed path",
+		},
+		{
+			name: "malformed path trailing dot",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:    starlark.String("foo."),
+			value:   starlark.String("val"),
+			wantErr: "malformed path",
+		},
+		{
+			name: "malformed path consecutive dots",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:    starlark.String("foo..bar"),
+			value:   starlark.String("val"),
+			wantErr: "malformed path",
+		},
+		{
+			name: "auto-creates status key",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("ready"),
+			value: starlark.True,
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				v, found, err := dxr.Get(starlark.String("status"))
+				if err != nil {
+					t.Fatalf("dxr.Get(status): %v", err)
+				}
+				if !found {
+					t.Fatal("status key not found on dxr")
+				}
+				if _, ok := v.(*convert.StarlarkDict); !ok {
+					t.Errorf("status is %T, want *convert.StarlarkDict", v)
+				}
+			},
+		},
+		{
+			name: "auto-creates intermediate dicts",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("a.b.c"),
+			value: starlark.String("deep"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				a, _ := sd.Attr("a")
+				aDict := a.(*convert.StarlarkDict)
+				b, _ := aDict.Attr("b")
+				bDict := b.(*convert.StarlarkDict)
+				c, _ := bDict.Attr("c")
+				if c != starlark.String("deep") {
+					t.Errorf("a.b.c = %v, want 'deep'", c)
+				}
+			},
+		},
+		{
+			name: "sibling paths both persist",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.String("proj-123"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				// Make a second call for sibling path.
+				setFn := makeSetFn(dxr)
+				_, err := starlark.Call(thread, setFn, starlark.Tuple{
+					starlark.String("atProvider.region"),
+					starlark.String("us-east-1"),
+				}, nil)
+				if err != nil {
+					t.Fatalf("second set_xr_status call: %v", err)
+				}
+
+				// Verify both present.
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ap, _ := sd.Attr("atProvider")
+				apDict := ap.(*convert.StarlarkDict)
+
+				pid, _ := apDict.Attr("projectId")
+				if pid != starlark.String("proj-123") {
+					t.Errorf("projectId = %v, want 'proj-123'", pid)
+				}
+				region, _ := apDict.Attr("region")
+				if region != starlark.String("us-east-1") {
+					t.Errorf("region = %v, want 'us-east-1'", region)
+				}
+			},
+		},
+		{
+			name: "preserves existing top-level status siblings",
+			setup: func() *convert.StarlarkDict {
+				dxr := convert.NewStarlarkDict(0)
+				statusDict := convert.NewStarlarkDict(0)
+				_ = statusDict.SetKey(starlark.String("ready"), starlark.True)
+				_ = dxr.SetKey(starlark.String("status"), statusDict)
+				return dxr
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.String("proj-123"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ready, _ := sd.Attr("ready")
+				if ready != starlark.True {
+					t.Errorf("ready = %v, want True (sibling should be preserved)", ready)
+				}
+				ap, _ := sd.Attr("atProvider")
+				apDict := ap.(*convert.StarlarkDict)
+				pid, _ := apDict.Attr("projectId")
+				if pid != starlark.String("proj-123") {
+					t.Errorf("projectId = %v, want 'proj-123'", pid)
+				}
+			},
+		},
+		{
+			name: "auto-created intermediates are StarlarkDict type",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.String("proj-123"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				statusVal, found, _ := dxr.Get(starlark.String("status"))
+				if !found {
+					t.Fatal("status not found")
+				}
+				if _, ok := statusVal.(*convert.StarlarkDict); !ok {
+					t.Errorf("status is %T, want *convert.StarlarkDict", statusVal)
+				}
+
+				statusDict := statusVal.(*convert.StarlarkDict)
+				apVal, found, _ := statusDict.Get(starlark.String("atProvider"))
+				if !found {
+					t.Fatal("atProvider not found")
+				}
+				if _, ok := apVal.(*convert.StarlarkDict); !ok {
+					t.Errorf("atProvider is %T, want *convert.StarlarkDict", apVal)
+				}
+			},
+		},
+		{
+			name: "dot-access works on auto-created intermediates",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.String("proj-123"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				// Use Attr chain to verify dot-access works.
+				status, err := dxr.Attr("status")
+				if err != nil {
+					t.Fatalf("dxr.Attr(status): %v", err)
+				}
+				statusSD, ok := status.(*convert.StarlarkDict)
+				if !ok {
+					t.Fatalf("status is %T, want *StarlarkDict", status)
+				}
+				ap, err := statusSD.Attr("atProvider")
+				if err != nil {
+					t.Fatalf("status.Attr(atProvider): %v", err)
+				}
+				apSD, ok := ap.(*convert.StarlarkDict)
+				if !ok {
+					t.Fatalf("atProvider is %T, want *StarlarkDict", ap)
+				}
+				pid, err := apSD.Attr("projectId")
+				if err != nil {
+					t.Fatalf("atProvider.Attr(projectId): %v", err)
+				}
+				if pid != starlark.String("proj-123") {
+					t.Errorf("projectId = %v, want 'proj-123'", pid)
+				}
+			},
+		},
+		{
+			name: "non-dict intermediate overwritten with StarlarkDict",
+			setup: func() *convert.StarlarkDict {
+				dxr := convert.NewStarlarkDict(0)
+				statusDict := convert.NewStarlarkDict(0)
+				// Put a string value at "atProvider" -- should be overwritten.
+				_ = statusDict.SetKey(starlark.String("atProvider"), starlark.String("was-a-string"))
+				_ = dxr.SetKey(starlark.String("status"), statusDict)
+				return dxr
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.String("proj-123"),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ap, _ := sd.Attr("atProvider")
+				apDict, ok := ap.(*convert.StarlarkDict)
+				if !ok {
+					t.Fatalf("atProvider is %T after overwrite, want *StarlarkDict", ap)
+				}
+				pid, _ := apDict.Attr("projectId")
+				if pid != starlark.String("proj-123") {
+					t.Errorf("projectId = %v, want 'proj-123'", pid)
+				}
+			},
+		},
+		{
+			name: "writing None stores None at path",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:  starlark.String("atProvider.projectId"),
+			value: starlark.None,
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ap, _ := sd.Attr("atProvider")
+				apDict := ap.(*convert.StarlarkDict)
+				pid, found, _ := apDict.Get(starlark.String("projectId"))
+				if !found {
+					t.Fatal("projectId not found")
+				}
+				if pid != starlark.None {
+					t.Errorf("projectId = %v, want None", pid)
+				}
+			},
+		},
+		{
+			name: "writing a dict replaces at path no deep merge",
+			setup: func() *convert.StarlarkDict {
+				dxr := convert.NewStarlarkDict(0)
+				statusDict := convert.NewStarlarkDict(0)
+				apDict := convert.NewStarlarkDict(0)
+				_ = apDict.SetKey(starlark.String("existing"), starlark.String("val"))
+				_ = statusDict.SetKey(starlark.String("atProvider"), apDict)
+				_ = dxr.SetKey(starlark.String("status"), statusDict)
+				return dxr
+			},
+			path: starlark.String("atProvider"),
+			value: func() starlark.Value {
+				d := convert.NewStarlarkDict(0)
+				_ = d.SetKey(starlark.String("replacement"), starlark.String("new"))
+				return d
+			}(),
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ap, _ := sd.Attr("atProvider")
+				apDict, ok := ap.(*convert.StarlarkDict)
+				if !ok {
+					t.Fatalf("atProvider is %T, want *StarlarkDict", ap)
+				}
+				// "existing" should be gone (replaced, not merged).
+				existing, _ := apDict.Attr("existing")
+				if existing != starlark.None {
+					t.Errorf("existing = %v, want None (should be replaced)", existing)
+				}
+				replacement, _ := apDict.Attr("replacement")
+				if replacement != starlark.String("new") {
+					t.Errorf("replacement = %v, want 'new'", replacement)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dxr := tt.setup()
+			setFn := makeSetFn(dxr)
+
+			result, err := starlark.Call(thread, setFn, starlark.Tuple{
+				tt.path,
+				tt.value,
+			}, nil)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("set_xr_status() error: %v", err)
+			}
+			if result != starlark.None {
+				t.Errorf("set_xr_status() = %v, want None", result)
+			}
+			if tt.verify != nil {
+				tt.verify(t, dxr)
 			}
 		})
 	}

@@ -233,6 +233,12 @@ func getAnnotationImpl(
 	return metadataLookup(res, key, dflt, "annotations")
 }
 
+// setXRStatus writes a value into dxr["status"] at the given dot-path,
+// auto-creating intermediate *convert.StarlarkDict entries as needed.
+func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // pathToKeys converts a path value to a slice of string keys.
 func pathToKeys(path starlark.Value) ([]string, error) {
 	switch p := path.(type) {
