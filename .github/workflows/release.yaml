@@ -68,6 +68,9 @@ jobs:
       - name: Generate input CRD
         run: make generate
 
+      - name: Pull runtime image
+        run: docker pull ${{ steps.version.outputs.image }}:${{ steps.version.outputs.tag }}
+
       - name: Build and push xpkg
         run: |
           crossplane xpkg build \
