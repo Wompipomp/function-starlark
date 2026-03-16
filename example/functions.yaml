@@ -1,13 +1,13 @@
-apiVersion: pkg.crossplane.io/v1beta1
-kind: Function
-metadata:
-  name: function-patch-and-transform
-spec:
-  package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.7.0
+# apiVersion: pkg.crossplane.io/v1beta1
+# kind: Function
+# metadata:
+#   name: function-patch-and-transform
+# spec:
+#   package: xpkg.upbound.io/crossplane-contrib/function-patch-and-transform:v0.7.0
 ---
 apiVersion: pkg.crossplane.io/v1beta1
 kind: Function
 metadata:
   name: function-starlark
 spec:
-  package: runtime
+  package: ghcr.io/wompipomp/function-starlark:v1.4.1-xpkg
