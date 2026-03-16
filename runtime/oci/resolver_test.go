@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,9 @@ func buildTestImage(t *testing.T, files map[string]string, artifactType, layerTy
 
 	tarData := buildTar(t, files)
 
-	layer, err := tarball.LayerFromReader(bytes.NewReader(tarData), tarball.WithMediaType(types.MediaType(layerType)))
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(tarData)), nil
+	}, tarball.WithMediaType(types.MediaType(layerType)))
 	if err != nil {
 		t.Fatalf("creating layer: %v", err)
 	}
@@ -380,7 +383,10 @@ func TestResolveTarSafety(t *testing.T) {
 	_, _ = tw.Write([]byte("x = 1"))
 	_ = tw.Close()
 
-	layer, err := tarball.LayerFromReader(bytes.NewReader(buf.Bytes()), tarball.WithMediaType(types.MediaType(LayerMediaType)))
+	tarBytes := buf.Bytes()
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(tarBytes)), nil
+	}, tarball.WithMediaType(types.MediaType(LayerMediaType)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +430,10 @@ func TestResolveSkipsNonStarAndNonRegular(t *testing.T) {
 
 	_ = tw.Close()
 
-	layer, err := tarball.LayerFromReader(bytes.NewReader(buf.Bytes()), tarball.WithMediaType(types.MediaType(LayerMediaType)))
+	symTarBytes := buf.Bytes()
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(symTarBytes)), nil
+	}, tarball.WithMediaType(types.MediaType(LayerMediaType)))
 	if err != nil {
 		t.Fatal(err)
 	}

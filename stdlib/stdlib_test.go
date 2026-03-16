@@ -63,7 +63,7 @@ func (r *callRecorder) reset() {
 // loadModule loads a .star file from disk and returns its exports.
 func loadModule(t *testing.T, filename string, predeclared starlark.StringDict) starlark.StringDict {
 	t.Helper()
-	src, err := os.ReadFile(filename)
+	src, err := os.ReadFile(filename) //nolint:gosec // test helper reads test fixtures by name
 	if err != nil {
 		t.Fatalf("reading %s: %v", filename, err)
 	}

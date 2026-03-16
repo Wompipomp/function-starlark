@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -3144,7 +3145,10 @@ func buildTestOCIImage(t *testing.T, files map[string]string, artifactType, laye
 		t.Fatalf("closing tar writer: %v", err)
 	}
 
-	layer, err := tarball.LayerFromReader(bytes.NewReader(buf.Bytes()), tarball.WithMediaType(types.MediaType(layerType)))
+	tarBytes := buf.Bytes()
+	layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(tarBytes)), nil
+	}, tarball.WithMediaType(types.MediaType(layerType)))
 	if err != nil {
 		t.Fatalf("creating layer: %v", err)
 	}
@@ -3233,10 +3237,10 @@ func TestLoadScript_PathTraversal(t *testing.T) {
 	// /tmp/.../my-config/main.star
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, "my-config")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
+	if err := os.MkdirAll(configDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, "main.star"), []byte("x = 1"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "main.star"), []byte("x = 1"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

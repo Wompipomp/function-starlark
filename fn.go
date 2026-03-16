@@ -377,7 +377,7 @@ func (f *Function) loadScript(ref *v1alpha1.ScriptConfigRef) (string, error) {
 	}
 
 	path := filepath.Join(dir, ref.Name, key)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path components validated by filepath.IsLocal above
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf(

@@ -43,7 +43,7 @@ func TestModuleLoadInline(t *testing.T) {
 
 func TestModuleLoadFilesystem(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte(`def greet(name): return "hi " + name`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte(`def greet(name): return "hi " + name`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +75,7 @@ func TestModuleLoadFilesystem(t *testing.T) {
 func TestModuleInlinePriority(t *testing.T) {
 	dir := t.TempDir()
 	// Filesystem version returns "fs".
-	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte(`source = "fs"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte(`source = "fs"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -570,7 +570,7 @@ func TestStarImportNoStarUnchanged(t *testing.T) {
 func TestStarImportFilesystem(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "fs.star"), []byte(`a = 10
-b = 20`), 0o644); err != nil {
+b = 20`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -786,7 +786,7 @@ func TestModuleFilesystemPermissionError(t *testing.T) {
 func TestModuleMultipleSearchPaths(t *testing.T) {
 	dir1 := t.TempDir() // Empty -- module not here.
 	dir2 := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir2, "helpers.star"), []byte(`val = "found"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir2, "helpers.star"), []byte(`val = "found"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

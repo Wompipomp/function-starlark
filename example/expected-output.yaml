@@ -7,8 +7,9 @@ status:
   bucketCount: 8
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
-    reason: Available
-    status: "True"
+    message: 'Unready resources: bucket-0, bucket-1, bucket-2, and 6 more'
+    reason: Creating
+    status: "False"
     type: Ready
   environment: prod
   region: us-east-1
@@ -244,28 +245,6 @@ spec:
     refreshInterval: 30s
     region: us-east-1
 ---
-apiVersion: sns.aws.upbound.io/v1beta1
-kind: Topic
-metadata:
-  annotations:
-    crossplane.io/composition-resource-name: notification-topic
-  labels:
-    app.kubernetes.io/managed-by: function-starlark
-    crossplane.io/composite: example-xr
-    environment: prod
-  name: example-xr-notifications
-  ownerReferences:
-  - apiVersion: example.crossplane.io/v1
-    blockOwnerDeletion: true
-    controller: true
-    kind: XBucket
-    name: example-xr
-    uid: ""
-spec:
-  forProvider:
-    displayName: Bucket notifications for example-xr
-    region: us-east-1
----
 apiVersion: apiextensions.crossplane.io/v1alpha1
 kind: Usage
 metadata:
@@ -292,8 +271,28 @@ spec:
 ---
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
+message: 'depends_on: 1 Usage resource(s) generated; compositeDeletePolicy=Foreground
+  is required on the claim for deletion ordering to take effect'
+severity: SEVERITY_WARNING
+step: run-starlark
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
 message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)
 severity: SEVERITY_NORMAL
+step: run-starlark
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'Creation sequencing: resource "notification-topic" deferred, waiting for
+  "bucket-0" to be observed'
+severity: SEVERITY_WARNING
+step: run-starlark
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'Creation sequencing: 1 resource(s) deferred; requeuing in 10s'
+severity: SEVERITY_WARNING
 step: run-starlark
 ---
 apiVersion: render.crossplane.io/v1beta1
