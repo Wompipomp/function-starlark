@@ -83,6 +83,24 @@ Safe nested dict access with dot-separated path.
 - Dot string: get(xr, "spec.region", "us-east-1")
 - List form for keys with dots: get(xr, ["metadata", "annotations", "app.kubernetes.io/name"], "")
 
+### get_label(res, key, default=None)
+
+Safe label lookup by exact key. Handles dotted keys like "app.kubernetes.io/name" correctly -- unlike get() which splits on dots. Returns default when the key, labels map, or metadata is missing.
+
+```python
+name = get_label(oxr, "app.kubernetes.io/name", "unknown")
+team = get_label(observed["my-bucket"], "team", "default")
+```
+
+### get_annotation(res, key, default=None)
+
+Safe annotation lookup by exact key. Like get_label(), handles dotted annotation keys correctly by going directly to res["metadata"]["annotations"][key]. Returns default when the key, annotations map, or metadata is missing.
+
+```python
+ext_name = get_annotation(oxr, "crossplane.io/external-name", "")
+zone = get_annotation(observed["my-db"], "topology.kubernetes.io/zone", "")
+```
+
 ### set_condition(type, status, reason, message)
 
 Set a condition on the XR.
@@ -115,9 +133,16 @@ set_connection_details({"endpoint": "https://...", "password": pw})
 
 ### set_xr_status(path, value)
 
-Set a status field on the XR using dot-path.
+Set a status field on the XR at a dot-separated path. Writes to dxr["status"][path segments...], auto-creating intermediate dicts as needed. Uses mkdir-p semantics: non-dict values at intermediate segments are silently overwritten. Path validation rejects empty paths, leading/trailing dots, and consecutive dots. Consecutive writes to the same prefix preserve sibling keys.
+
 ```python
+# Individual field writes (siblings are preserved)
 set_xr_status("atProvider.projectId", project_id)
+set_xr_status("atProvider.arn", arn)
+set_xr_status("region", region)
+
+# Bulk write for related fields
+set_xr_status("atProvider", {"bucketCount": len(buckets), "environment": env})
 ```
 
 ### skip_resource(name, reason)
@@ -125,6 +150,15 @@ set_xr_status("atProvider.projectId", project_id)
 Remove a resource from desired state (e.g., conditionally skip a resource from a previous pipeline step).
 ```python
 skip_resource("monitoring", "monitoring only in prod")
+```
+
+### get_observed(name, path, default=None)
+
+One-call observed resource field lookup. Equivalent to get(observed.get(name, {}), path, default) but in a single call. Returns default when the named resource is missing, the path is missing, or the value is None. Safe on first reconciliation when observed is empty.
+
+```python
+bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
+db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
 
 ### require_resource(name, apiVersion, kind, match_name=None, match_labels=None)
@@ -201,13 +235,15 @@ Resource("bucket", bucket_config)
 ## Best practices
 
 - Use get() for all nested access -- never raw bracket chains on XR/observed data.
+- Use get_label()/get_annotation() instead of get() for dotted label/annotation keys -- get() splits on dots, so "app.kubernetes.io/name" won't work as a dot-path.
+- Use get_observed() for one-call observed resource field access instead of manual "if name in observed" existence checks.
 - Use resource_name(suffix) from stdlib for metadata.name to handle 63-char K8s limit.
 - Use external_name= kwarg instead of manual crossplane.io/external-name annotation.
 - Use labels= kwarg for custom labels. Let auto-injection handle crossplane.io/* labels.
 - Use fatal() for validation errors (not fail()).
 - Use emit_event() for observability.
 - Use depends_on= for creation ordering between resources.
-- Use set_xr_status() for writing XR status fields.
+- Use set_xr_status() for writing XR status fields -- supports dot-paths with auto-created intermediates and sibling preservation.
 - Use %s string formatting (Starlark convention, .format() also works).
 - Put helper functions at the top of the script.
 - End scripts with emit_event("Normal", "Reconciled ...") for observability.
