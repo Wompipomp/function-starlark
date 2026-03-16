@@ -67,6 +67,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"context", "environment", "extra_resources",
 		"set_condition", "emit_event", "fatal",
 		"set_connection_details", "require_resource", "require_resources",
+		"get_label", "get_annotation",
 	}
 	if len(globals) != len(expected) {
 		t.Errorf("len(globals) = %d, want %d", len(globals), len(expected))
@@ -749,6 +750,309 @@ func TestPathToKeys_NonStringListElement(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "want string") {
 		t.Errorf("error %q should contain 'want string'", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// get_label builtin tests
+// ---------------------------------------------------------------------------
+
+func TestGetLabel(t *testing.T) {
+	// Helper to build xr with labels and annotations.
+	xrWithLabelsAndAnnotations := func(labels, annotations map[string]*structpb.Value) map[string]*structpb.Value {
+		metadataFields := map[string]*structpb.Value{}
+		if labels != nil {
+			metadataFields["labels"] = structpb.NewStructValue(&structpb.Struct{Fields: labels})
+		}
+		if annotations != nil {
+			metadataFields["annotations"] = structpb.NewStructValue(&structpb.Struct{Fields: annotations})
+		}
+		return map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("test/v1"),
+			"metadata":   structpb.NewStructValue(&structpb.Struct{Fields: metadataFields}),
+		}
+	}
+
+	tests := []struct {
+		name    string
+		obj     starlark.Value // if non-nil, use directly instead of building from oxrFields
+		oxr     map[string]*structpb.Value
+		key     starlark.Value
+		dflt    starlark.Value // nil means no default kwarg
+		want    starlark.Value
+		wantErr string
+	}{
+		{
+			name: "happy path dotted key",
+			oxr: xrWithLabelsAndAnnotations(
+				map[string]*structpb.Value{
+					"app.kubernetes.io/name": structpb.NewStringValue("myapp"),
+				},
+				nil,
+			),
+			key:  starlark.String("app.kubernetes.io/name"),
+			want: starlark.String("myapp"),
+		},
+		{
+			name: "simple key",
+			oxr: xrWithLabelsAndAnnotations(
+				map[string]*structpb.Value{
+					"env": structpb.NewStringValue("production"),
+				},
+				nil,
+			),
+			key:  starlark.String("env"),
+			want: starlark.String("production"),
+		},
+		{
+			name: "missing key returns None",
+			oxr: xrWithLabelsAndAnnotations(
+				map[string]*structpb.Value{
+					"env": structpb.NewStringValue("production"),
+				},
+				nil,
+			),
+			key:  starlark.String("nonexistent"),
+			want: starlark.None,
+		},
+		{
+			name: "missing key returns custom default",
+			oxr: xrWithLabelsAndAnnotations(
+				map[string]*structpb.Value{
+					"env": structpb.NewStringValue("production"),
+				},
+				nil,
+			),
+			key:  starlark.String("nonexistent"),
+			dflt: starlark.String("fallback"),
+			want: starlark.String("fallback"),
+		},
+		{
+			name: "missing labels map returns default",
+			oxr: xrWithLabelsAndAnnotations(nil, nil),
+			key:  starlark.String("key"),
+			want: starlark.None,
+		},
+		{
+			name: "missing metadata returns default",
+			oxr: map[string]*structpb.Value{
+				"apiVersion": structpb.NewStringValue("test/v1"),
+			},
+			key:  starlark.String("key"),
+			want: starlark.None,
+		},
+		{
+			name: "non-Mapping res returns default silently",
+			obj:  starlark.String("not a dict"),
+			key:  starlark.String("key"),
+			want: starlark.None,
+		},
+		{
+			name: "None res returns default silently",
+			obj:  starlark.None,
+			key:  starlark.String("key"),
+			want: starlark.None,
+		},
+		{
+			name:    "empty key string raises error",
+			oxr:     xrWithLabelsAndAnnotations(nil, nil),
+			key:     starlark.String(""),
+			wantErr: "must not be empty",
+		},
+		{
+			name: "empty string label value returned as-is",
+			oxr: xrWithLabelsAndAnnotations(
+				map[string]*structpb.Value{
+					"key": structpb.NewStringValue(""),
+				},
+				nil,
+			),
+			key:  starlark.String("key"),
+			want: starlark.String(""),
+		},
+		{
+			name: "works on observed resource dict (frozen StarlarkDict)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := new(starlark.Thread)
+			getLabelFn := starlark.NewBuiltin("get_label", getLabelImpl)
+
+			var obj starlark.Value
+			if tt.obj != nil {
+				obj = tt.obj
+			} else if tt.name == "works on observed resource dict (frozen StarlarkDict)" {
+				// Build an observed resource with labels.
+				req := makeReq(
+					map[string]*structpb.Value{},
+					map[string]*structpb.Value{},
+					map[string]*fnv1.Resource{
+						"bucket": {
+							Resource: &structpb.Struct{
+								Fields: xrWithLabelsAndAnnotations(
+									map[string]*structpb.Value{
+										"app.kubernetes.io/name": structpb.NewStringValue("myapp"),
+									},
+									nil,
+								),
+							},
+						},
+					},
+				)
+				c := NewCollector(NewConditionCollector(), "test.star", nil)
+				globals, err := testBuildGlobals(req, c)
+				if err != nil {
+					t.Fatal(err)
+				}
+				observed := globals["observed"].(*convert.StarlarkDict)
+				bucketVal, err := observed.Attr("bucket")
+				if err != nil {
+					t.Fatal(err)
+				}
+				obj = bucketVal
+
+				// Call get_label on the observed resource.
+				result, err := starlark.Call(thread, getLabelFn, starlark.Tuple{
+					obj,
+					starlark.String("app.kubernetes.io/name"),
+				}, nil)
+				if err != nil {
+					t.Fatalf("get_label() error: %v", err)
+				}
+				if result != starlark.String("myapp") {
+					t.Errorf("get_label(observed_res, 'app.kubernetes.io/name') = %v, want 'myapp'", result)
+				}
+				return
+			} else {
+				// Build oxr from fields.
+				req := makeReq(tt.oxr, map[string]*structpb.Value{}, nil)
+				c := NewCollector(NewConditionCollector(), "test.star", nil)
+				globals, err := testBuildGlobals(req, c)
+				if err != nil {
+					t.Fatal(err)
+				}
+				obj = globals["oxr"]
+			}
+
+			positionalArgs := starlark.Tuple{obj, tt.key}
+			var kwargs []starlark.Tuple
+			if tt.dflt != nil {
+				kwargs = []starlark.Tuple{
+					{starlark.String("default"), tt.dflt},
+				}
+			}
+
+			result, err := starlark.Call(thread, getLabelFn, positionalArgs, kwargs)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("get_label() error: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("get_label() = %v, want %v", result, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// get_annotation builtin tests
+// ---------------------------------------------------------------------------
+
+func TestGetAnnotation(t *testing.T) {
+	tests := []struct {
+		name    string
+		oxr     map[string]*structpb.Value
+		key     starlark.Value
+		want    starlark.Value
+		wantErr string
+	}{
+		{
+			name: "happy path dotted key",
+			oxr: map[string]*structpb.Value{
+				"metadata": structpb.NewStructValue(&structpb.Struct{
+					Fields: map[string]*structpb.Value{
+						"annotations": structpb.NewStructValue(&structpb.Struct{
+							Fields: map[string]*structpb.Value{
+								"crossplane.io/external-name": structpb.NewStringValue("my-resource"),
+							},
+						}),
+					},
+				}),
+			},
+			key:  starlark.String("crossplane.io/external-name"),
+			want: starlark.String("my-resource"),
+		},
+		{
+			name: "missing annotations map returns default",
+			oxr: map[string]*structpb.Value{
+				"metadata": structpb.NewStructValue(&structpb.Struct{
+					Fields: map[string]*structpb.Value{},
+				}),
+			},
+			key:  starlark.String("key"),
+			want: starlark.None,
+		},
+		{
+			name: "missing metadata returns default",
+			oxr: map[string]*structpb.Value{
+				"apiVersion": structpb.NewStringValue("test/v1"),
+			},
+			key:  starlark.String("key"),
+			want: starlark.None,
+		},
+		{
+			name:    "empty key string raises error",
+			oxr:     map[string]*structpb.Value{},
+			key:     starlark.String(""),
+			wantErr: "must not be empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			thread := new(starlark.Thread)
+			getAnnotationFn := starlark.NewBuiltin("get_annotation", getAnnotationImpl)
+
+			req := makeReq(tt.oxr, map[string]*structpb.Value{}, nil)
+			c := NewCollector(NewConditionCollector(), "test.star", nil)
+			globals, err := testBuildGlobals(req, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			obj := globals["oxr"]
+
+			result, err := starlark.Call(thread, getAnnotationFn, starlark.Tuple{
+				obj,
+				tt.key,
+			}, nil)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("get_annotation() error: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("get_annotation() = %v, want %v", result, tt.want)
+			}
+		})
 	}
 }
 
