@@ -10,3 +10,6 @@ function-starlark.xpkg
 
 # OS
 .DS_Store
+
+# Planning docs (local only)
+.planning/
