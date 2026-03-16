@@ -51,7 +51,7 @@ Register a desired composed resource. This is the primary function.
 - ready: None (auto-detect), True, or False.
 - labels: Omit for auto-injection of crossplane.io/* labels. Dict to merge custom labels. None to opt out.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
-- depends_on: List of ResourceRef (from prior Resource() calls) or strings for creation sequencing. Generates Crossplane Usage resources.
+- depends_on: List of ResourceRef, string, or tuple (ref, field_path) for creation sequencing. Plain refs/strings check existence. Tuples check that the specified field path has a non-empty value in the observed resource. Generates Crossplane Usage resources.
 - external_name: Sugar for crossplane.io/external-name annotation.
 - Returns: ResourceRef with .name attribute for use in depends_on.
 
@@ -64,6 +64,16 @@ bucket = Resource("bucket", {
     "spec": {"forProvider": {"region": region}},
 })
 Resource("topic", {...}, depends_on=[bucket])
+
+# Wait for a specific field to be populated before creating dependent resource
+project = Resource("project", {
+    "apiVersion": "project.gcp.upbound.io/v1beta1",
+    "kind": "Project",
+    "spec": {"forProvider": {"name": project_name}},
+})
+Resource("group", {...}, depends_on=[
+    (project, "status.atProvider.projectId"),  # wait for field readiness
+])
 ```
 
 ### get(obj, path, default=None)
