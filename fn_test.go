@@ -27,6 +27,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -3455,3 +3456,481 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	// Verify a SEVERITY_WARNING result exists advising about compositeDeletePolicy.
 	assertWarningResult(t, rsp, "compositeDeletePolicy=Foreground")
 }
+
+// ---------------------------------------------------------------------------
+// SEQ-01 through SEQ-06: Creation sequencing E2E tests through RunFunction
+// ---------------------------------------------------------------------------
+
+// TestRunFunctionCreationSequencing_DeferWhenDepNotObserved verifies SEQ-01:
+// When a dependency is NOT in observed state, the dependent resource is
+// withheld from desired state.
+func TestRunFunctionCreationSequencing_DeferWhenDepNotObserved(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		// No Observed resources -- "db" is NOT in observed state.
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// "db" should be in desired state (no deps, it's a root).
+	if _, ok := resources["db"]; !ok {
+		t.Error("expected 'db' resource in desired state")
+	}
+
+	// "app" should NOT be in desired state (its dep "db" is not observed).
+	if _, ok := resources["app"]; ok {
+		t.Error("'app' should be deferred (withheld from desired state) because 'db' is not in observed")
+	}
+
+	// Usage resource should still be present (always emitted).
+	foundUsage := false
+	for name := range resources {
+		if strings.HasPrefix(name, "usage-") {
+			foundUsage = true
+			break
+		}
+	}
+	if !foundUsage {
+		t.Error("expected Usage resource to be present even when dependent is deferred")
+	}
+
+	// Warning events with "Creation sequencing:" prefix should be present.
+	assertWarningResult(t, rsp, "Creation sequencing:", "app", "deferred")
+
+	// Summary event should be present.
+	assertWarningResult(t, rsp, "Creation sequencing:", "requeuing in 10s")
+
+	// TTL should be 10s (default sequencing TTL) when resources are deferred.
+	if got := rsp.GetMeta().GetTtl().AsDuration(); got != 10*time.Second {
+		t.Errorf("TTL = %v, want 10s when resources are deferred", got)
+	}
+
+	// Synced=False condition should be set.
+	foundSyncedFalse := false
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "Synced" && c.GetStatus() == fnv1.Status_STATUS_CONDITION_FALSE && c.GetReason() == "CreationSequencing" {
+			foundSyncedFalse = true
+			break
+		}
+	}
+	if !foundSyncedFalse {
+		t.Error("expected Synced=False condition with reason CreationSequencing when resources are deferred")
+	}
+}
+
+// TestRunFunctionCreationSequencing_EmitWhenDepObserved verifies SEQ-01 converged:
+// When the dependency IS in observed state, both resources appear in desired state.
+func TestRunFunctionCreationSequencing_EmitWhenDepObserved(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{
+				Resource: resource.MustStructJSON(`{}`),
+			},
+			Resources: map[string]*fnv1.Resource{
+				"db": {
+					Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`),
+				},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// Both "db" and "app" should be in desired state.
+	if _, ok := resources["db"]; !ok {
+		t.Error("expected 'db' resource in desired state")
+	}
+	if _, ok := resources["app"]; !ok {
+		t.Error("expected 'app' resource in desired state (dep 'db' is observed)")
+	}
+
+	// No "Creation sequencing:" warning should be present.
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING && strings.Contains(r.GetMessage(), "Creation sequencing:") {
+			t.Errorf("unexpected creation sequencing warning when converged: %s", r.GetMessage())
+		}
+	}
+
+	// TTL should be DefaultTTL (60s) when converged.
+	if got := rsp.GetMeta().GetTtl().AsDuration(); got != response.DefaultTTL {
+		t.Errorf("TTL = %v, want %v (DefaultTTL) when converged", got, response.DefaultTTL)
+	}
+
+	// No Synced=False condition from sequencing.
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "Synced" && c.GetReason() == "CreationSequencing" {
+			t.Error("unexpected Synced condition with reason CreationSequencing when converged")
+		}
+	}
+}
+
+// TestRunFunctionCreationSequencing_NeverDeferObservedResource verifies SEQ-03:
+// A resource already in observed state is NEVER deferred, even if its
+// dependency is not in observed state.
+func TestRunFunctionCreationSequencing_NeverDeferObservedResource(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{
+				Resource: resource.MustStructJSON(`{}`),
+			},
+			Resources: map[string]*fnv1.Resource{
+				// "db" is NOT in observed, but "app" IS.
+				// SEQ-03: "app" should NOT be deferred because it is already observed.
+				"app": {
+					Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "App"}`),
+				},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// "app" should still be in desired state because it is already observed (SEQ-03).
+	if _, ok := resources["app"]; !ok {
+		t.Error("expected 'app' in desired state -- SEQ-03: observed resources are never deferred")
+	}
+	if _, ok := resources["db"]; !ok {
+		t.Error("expected 'db' in desired state (it has no deps)")
+	}
+}
+
+// TestRunFunctionCreationSequencing_TransitiveChain verifies SEQ-04:
+// A chain A->B->C results in only A emitted first, B next after A observed,
+// and all three after A+B observed.
+func TestRunFunctionCreationSequencing_TransitiveChain(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `a = Resource("a", {"apiVersion": "v1", "kind": "A"})
+b = Resource("b", {"apiVersion": "v1", "kind": "B"}, depends_on=[a])
+Resource("c", {"apiVersion": "v1", "kind": "C"}, depends_on=[b])`
+
+	// Sub-test 1: Nothing observed -- only "a" should be in desired.
+	t.Run("NothingObserved", func(t *testing.T) {
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(fmt.Sprintf(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {"source": %q}
+			}`, script)),
+		}
+
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		assertNormalResult(t, rsp)
+
+		resources := rsp.GetDesired().GetResources()
+		if _, ok := resources["a"]; !ok {
+			t.Error("expected 'a' in desired state (root, no deps)")
+		}
+		if _, ok := resources["b"]; ok {
+			t.Error("'b' should be deferred ('a' not observed)")
+		}
+		if _, ok := resources["c"]; ok {
+			t.Error("'c' should be deferred ('b' not observed)")
+		}
+	})
+
+	// Sub-test 2: "a" observed -- "a" and "b" in desired, "c" deferred.
+	t.Run("AObserved", func(t *testing.T) {
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(fmt.Sprintf(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {"source": %q}
+			}`, script)),
+			Observed: &fnv1.State{
+				Composite: &fnv1.Resource{
+					Resource: resource.MustStructJSON(`{}`),
+				},
+				Resources: map[string]*fnv1.Resource{
+					"a": {
+						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "A"}`),
+					},
+				},
+			},
+		}
+
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		assertNormalResult(t, rsp)
+
+		resources := rsp.GetDesired().GetResources()
+		if _, ok := resources["a"]; !ok {
+			t.Error("expected 'a' in desired state")
+		}
+		if _, ok := resources["b"]; !ok {
+			t.Error("expected 'b' in desired state ('a' is observed)")
+		}
+		if _, ok := resources["c"]; ok {
+			t.Error("'c' should be deferred ('b' not observed)")
+		}
+	})
+
+	// Sub-test 3: "a" and "b" observed -- all three in desired.
+	t.Run("ABObserved", func(t *testing.T) {
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(fmt.Sprintf(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {"source": %q}
+			}`, script)),
+			Observed: &fnv1.State{
+				Composite: &fnv1.Resource{
+					Resource: resource.MustStructJSON(`{}`),
+				},
+				Resources: map[string]*fnv1.Resource{
+					"a": {
+						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "A"}`),
+					},
+					"b": {
+						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "B"}`),
+					},
+				},
+			},
+		}
+
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		assertNormalResult(t, rsp)
+
+		resources := rsp.GetDesired().GetResources()
+		if _, ok := resources["a"]; !ok {
+			t.Error("expected 'a' in desired state")
+		}
+		if _, ok := resources["b"]; !ok {
+			t.Error("expected 'b' in desired state")
+		}
+		if _, ok := resources["c"]; !ok {
+			t.Error("expected 'c' in desired state (both 'a' and 'b' observed)")
+		}
+
+		// When fully converged, TTL should be DefaultTTL.
+		if got := rsp.GetMeta().GetTtl().AsDuration(); got != response.DefaultTTL {
+			t.Errorf("TTL = %v, want %v when fully converged", got, response.DefaultTTL)
+		}
+	})
+}
+
+// TestRunFunctionCreationSequencing_CustomTTL verifies SEQ-05:
+// Custom sequencingTTL is used when resources are deferred.
+func TestRunFunctionCreationSequencing_CustomTTL(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": %q,
+				"sequencingTTL": "30s"
+			}
+		}`, script)),
+		// No observed resources -- "app" will be deferred.
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	// TTL should be 30s (custom sequencingTTL).
+	if got := rsp.GetMeta().GetTtl().AsDuration(); got != 30*time.Second {
+		t.Errorf("TTL = %v, want 30s (custom sequencingTTL)", got)
+	}
+
+	// Summary event should mention 30s.
+	assertWarningResult(t, rsp, "Creation sequencing:", "requeuing in 30s")
+}
+
+// TestRunFunctionCreationSequencing_InvalidTTL verifies SEQ-05 error:
+// Invalid sequencingTTL returns Fatal response.
+func TestRunFunctionCreationSequencing_InvalidTTL(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": %q,
+				"sequencingTTL": "invalid"
+			}
+		}`, script)),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "invalid spec.sequencingTTL")
+}
+
+// TestRunFunctionCreationSequencing_UsageAlwaysEmitted verifies that Usage
+// resources are always emitted for all depends_on pairs regardless of
+// whether the dependent was deferred.
+func TestRunFunctionCreationSequencing_UsageAlwaysEmitted(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		// No observed -- "app" will be deferred.
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+
+	// "app" should be deferred (not in desired).
+	if _, ok := resources["app"]; ok {
+		t.Error("'app' should be deferred (dep not observed)")
+	}
+
+	// Usage resource should still be present.
+	foundUsage := false
+	for name := range resources {
+		if strings.HasPrefix(name, "usage-") {
+			foundUsage = true
+			break
+		}
+	}
+	if !foundUsage {
+		t.Error("expected Usage resource for app->db dependency even when app is deferred")
+	}
+}
+
+// TestRunFunctionCreationSequencing_MetricIncrement verifies SEQ-06:
+// ResourcesDeferredTotal is incremented when resources are deferred,
+// ResourcesSkippedTotal is NOT incremented.
+func TestRunFunctionCreationSequencing_MetricIncrement(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	// Use a unique script to get a unique filename label for metric isolation.
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	scriptLabel := "composition.star"
+
+	// Capture baseline counter values.
+	baseDeferred := testutil.ToFloat64(metrics.ResourcesDeferredTotal.WithLabelValues(scriptLabel))
+	baseSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel))
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		// No observed -- "app" will be deferred.
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	// ResourcesDeferredTotal should increment by 1 (one resource deferred: "app").
+	deferredDelta := testutil.ToFloat64(metrics.ResourcesDeferredTotal.WithLabelValues(scriptLabel)) - baseDeferred
+	if deferredDelta != 1 {
+		t.Errorf("ResourcesDeferredTotal delta = %v, want 1", deferredDelta)
+	}
+
+	// ResourcesSkippedTotal should NOT increment (sequencing != skip_resource).
+	skippedDelta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel)) - baseSkipped
+	if skippedDelta != 0 {
+		t.Errorf("ResourcesSkippedTotal delta = %v, want 0 (sequencing should not use skip metric)", skippedDelta)
+	}
+}
+
+// assertNoSequencingWarning verifies no "Creation sequencing:" warning in response.
+func assertNoSequencingWarning(t *testing.T, rsp *fnv1.RunFunctionResponse) {
+	t.Helper()
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING && strings.Contains(r.GetMessage(), "Creation sequencing:") {
+			t.Errorf("unexpected creation sequencing warning: %s", r.GetMessage())
+		}
+	}
+}
+
+// Ensure durationpb import is used (compile guard).
+var _ = durationpb.New(0)
