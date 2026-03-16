@@ -51,14 +51,15 @@ function-starlark provides these predeclared globals:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `Resource` | `Resource(name, body, ready=True, connection_details=None)` | Register a desired composed resource |
+| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None)` | Register a desired composed resource; returns ResourceRef |
+| `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason |
 | `get` | `get(obj, path, default=None)` | Safe nested dict access with dot-path or list-of-keys |
 | `set_condition` | `set_condition(type, status, reason, message, target="Composite")` | Set an XR condition |
 | `emit_event` | `emit_event(severity, message, target="Composite")` | Emit a Normal or Warning event |
 | `fatal` | `fatal(message)` | Halt execution with a fatal error |
 | `set_connection_details` | `set_connection_details(dict)` | Set XR-level connection details |
-| `require_resource` | `require_resource(...)` | Request a single extra resource |
-| `require_resources` | `require_resources(...)` | Request multiple extra resources |
+| `require_resource` | `require_resource(name, apiVersion, kind, match_name=None, match_labels=None)` | Request a single extra resource |
+| `require_resources` | `require_resources(name, apiVersion, kind, match_labels)` | Request multiple extra resources by label selector |
 
 ## Common patterns
 
