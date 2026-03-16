@@ -27,6 +27,7 @@ import (
 //   - emit_event: builtin for emitting Normal/Warning events
 //   - fatal: builtin for halting execution with a fatal error
 //   - set_connection_details: builtin for setting XR-level connection details
+//   - set_xr_status: builtin for writing values into dxr.status at dot-paths
 //   - require_resource: builtin for requesting a single extra resource
 //   - require_resources: builtin for requesting multiple extra resources
 func BuildGlobals(
@@ -88,8 +89,11 @@ func BuildGlobals(
 		"emit_event":             condCollector.EmitEventBuiltin(),
 		"fatal":                  condCollector.FatalBuiltin(),
 		"set_connection_details": connCollector.SetConnectionDetailsBuiltin(),
-		"require_resource":       reqCollector.RequireResourceBuiltin(),
-		"require_resources":      reqCollector.RequireResourcesBuiltin(),
+		"set_xr_status": starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return setXRStatus(b.Name(), dxr, args, kwargs)
+		}),
+		"require_resource":  reqCollector.RequireResourceBuiltin(),
+		"require_resources": reqCollector.RequireResourcesBuiltin(),
 	}, nil
 }
 
@@ -235,8 +239,74 @@ func getAnnotationImpl(
 
 // setXRStatus writes a value into dxr["status"] at the given dot-path,
 // auto-creating intermediate *convert.StarlarkDict entries as needed.
+// It uses mkdir -p semantics: non-dict values at intermediate path segments
+// are silently overwritten with new StarlarkDicts.
 func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	return nil, fmt.Errorf("not implemented")
+	var path string
+	var value starlark.Value
+
+	if err := starlark.UnpackArgs(fnName, args, kwargs,
+		"path", &path, "value", &value); err != nil {
+		return nil, err
+	}
+
+	// Validate path.
+	if path == "" {
+		return nil, fmt.Errorf("%s: path must not be empty", fnName)
+	}
+	if strings.HasPrefix(path, ".") || strings.HasSuffix(path, ".") || strings.Contains(path, "..") {
+		return nil, fmt.Errorf("%s: malformed path %q", fnName, path)
+	}
+
+	// Build full segment list: ["status", ...user segments...].
+	segments := strings.Split(path, ".")
+	allSegments := make([]string, 0, len(segments)+1)
+	allSegments = append(allSegments, "status")
+	allSegments = append(allSegments, segments...)
+
+	// Walk from dxr through intermediate segments, creating dicts as needed.
+	var current starlark.Value = dxr
+	for _, seg := range allSegments[:len(allSegments)-1] {
+		parent, ok := current.(starlark.HasSetKey)
+		if !ok {
+			return nil, fmt.Errorf("%s: cannot set key on %s", fnName, current.Type())
+		}
+
+		mapping, isMapping := current.(starlark.Mapping)
+		var next starlark.Value
+		if isMapping {
+			v, found, err := mapping.Get(starlark.String(seg))
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				if _, isM := v.(starlark.Mapping); isM {
+					next = v
+				}
+			}
+		}
+
+		if next == nil {
+			// Auto-create intermediate StarlarkDict.
+			newDict := convert.NewStarlarkDict(0)
+			if err := parent.SetKey(starlark.String(seg), newDict); err != nil {
+				return nil, err
+			}
+			next = newDict
+		}
+		current = next
+	}
+
+	// Write the leaf value.
+	leaf, ok := current.(starlark.HasSetKey)
+	if !ok {
+		return nil, fmt.Errorf("%s: cannot set key on %s", fnName, current.Type())
+	}
+	if err := leaf.SetKey(starlark.String(allSegments[len(allSegments)-1]), value); err != nil {
+		return nil, err
+	}
+
+	return starlark.None, nil
 }
 
 // pathToKeys converts a path value to a slice of string keys.
