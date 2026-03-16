@@ -2184,6 +2184,13 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
+		// "db" must be observed so that creation sequencing does not defer "app".
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`)},
+			},
+		},
 	}
 
 	rsp, err := f.RunFunction(context.Background(), req)
@@ -2263,6 +2270,13 @@ func TestRunFunctionDependsOnStringRef(t *testing.T) {
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
+		// "external-vpc" must be observed so that creation sequencing does not defer "app".
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"external-vpc": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "VPC"}`)},
+			},
+		},
 	}
 
 	rsp, err := f.RunFunction(context.Background(), req)
@@ -2304,6 +2318,13 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
+		// "db" must be observed so that creation sequencing does not defer "app".
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "DB"}`)},
+			},
+		},
 	}
 
 	rsp, err := f.RunFunction(context.Background(), req)
@@ -2353,6 +2374,13 @@ Resource("db", {"apiVersion": "v1", "kind": "Database"})`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
+		// "db" must be observed so that creation sequencing does not defer "app".
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`)},
+			},
+		},
 	}
 
 	rsp, err := f.RunFunction(context.Background(), req)
@@ -2431,6 +2459,14 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
+		// All deps must be observed so that creation sequencing does not defer resources.
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"cache": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Cache"}`)},
+				"db":    {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`)},
+			},
+		},
 	}
 
 	rsp, err := f.RunFunction(context.Background(), req)
@@ -3829,7 +3865,20 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Fatalf("unexpected Go error: %v", err)
 	}
 
-	assertFatalResult(t, rsp, "invalid spec.sequencingTTL")
+	// Fatal may not be at position [0] because Usage warnings are emitted first.
+	foundFatal := false
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_FATAL {
+			if !strings.Contains(r.GetMessage(), "invalid spec.sequencingTTL") {
+				t.Errorf("Fatal message = %q, want to contain 'invalid spec.sequencingTTL'", r.GetMessage())
+			}
+			foundFatal = true
+			break
+		}
+	}
+	if !foundFatal {
+		t.Error("expected a SEVERITY_FATAL result for invalid sequencingTTL")
+	}
 }
 
 // TestRunFunctionCreationSequencing_UsageAlwaysEmitted verifies that Usage

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/crossplane/function-sdk-go/errors"
 	"github.com/crossplane/function-sdk-go/logging"
@@ -13,6 +14,7 @@ import (
 	"github.com/crossplane/function-sdk-go/response"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/prometheus/client_golang/prometheus"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/wompipomp/function-starlark/builtins"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
@@ -243,6 +245,48 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				"depends_on: %d Usage resource(s) generated; compositeDeletePolicy=Foreground is required on the claim for deletion ordering to take effect",
 				len(usageResources),
 			))
+
+			// --- Creation Sequencing ---
+			// Build observed resource name set.
+			observedNames := make(map[string]bool)
+			for name := range req.GetObserved().GetResources() {
+				observedNames[name] = true
+			}
+
+			// Determine sequencing TTL.
+			seqTTLDuration := 10 * time.Second // default 10s
+			if in.Spec.SequencingTTL != "" {
+				parsed, parseErr := time.ParseDuration(in.Spec.SequencingTTL)
+				if parseErr != nil {
+					response.Fatal(rsp, errors.Wrapf(parseErr, "invalid spec.sequencingTTL %q", in.Spec.SequencingTTL))
+					return rsp, nil
+				}
+				seqTTLDuration = parsed
+			}
+			seqTTLSeconds := int(seqTTLDuration.Seconds())
+
+			seq := builtins.NewSequencer(deps, resourceNames, observedNames, seqTTLSeconds)
+			result := seq.Evaluate()
+
+			if result.AnyDeferred {
+				// Remove deferred resources from collector before ApplyResources.
+				collector.RemoveResources(result.Deferred)
+
+				// Record metric.
+				metrics.ResourcesDeferredTotal.WithLabelValues(filename).Add(float64(len(result.Deferred)))
+
+				// Override response TTL for faster requeue (SEQ-05).
+				rsp.Meta.Ttl = durationpb.New(seqTTLDuration)
+
+				// Set Synced=False to prevent premature Ready (per CONTEXT.md decision).
+				response.ConditionFalse(rsp, "Synced", "CreationSequencing").
+					WithMessage(fmt.Sprintf("%d resource(s) waiting for dependencies", len(result.Deferred)))
+			}
+
+			// Append sequencing events to condCollector for response emission.
+			for _, e := range result.Events {
+				condCollector.AddEvent(e)
+			}
 		}
 
 		// Apply collected resources to response (merges with prior desired state).
