@@ -6,8 +6,32 @@ of 63 characters, using hash-based truncation when needed.
 
 _MAX_K8S_NAME = 63
 _HASH_LEN = 5
+_MIN_XR_LEN = 8
 
-def _hash_suffix(name, length = _HASH_LEN):
+def _sanitize(name):
+    """Normalize a string to a valid DNS-1123 label component.
+
+    Lowercases, replaces non-alphanumeric characters with hyphens,
+    collapses consecutive hyphens, and strips leading/trailing hyphens.
+
+    Args:
+      name: String to sanitize
+
+    Returns:
+      DNS-1123 label-safe string
+    """
+    result = ""
+    for c in name.elems():
+        lc = c.lower()
+        if ("a" <= lc and lc <= "z") or ("0" <= lc and lc <= "9"):
+            result += lc
+        else:
+            result += "-"
+    while "--" in result:
+        result = result.replace("--", "-")
+    return result.strip("-")
+
+def hash_suffix(name, length = _HASH_LEN):
     """Generate a short deterministic hash suffix from a string.
 
     Uses base-36 encoding of the built-in hash() value to produce a
@@ -35,8 +59,9 @@ def _hash_suffix(name, length = _HASH_LEN):
 def resource_name(suffix, xr_name = None):
     """Generate a Kubernetes-safe resource name.
 
-    Combines the XR name with a suffix, automatically truncating and
-    appending a hash suffix if the result would exceed 63 characters.
+    Combines the XR name with a suffix, automatically truncating the XR
+    name and appending a hash if the result would exceed 63 characters.
+    The suffix is always preserved so the resource type remains visible.
     When xr_name is not provided, reads from oxr metadata.
 
     Args:
@@ -48,11 +73,16 @@ def resource_name(suffix, xr_name = None):
     """
     if xr_name == None:
         xr_name = get(oxr, "metadata.name", "xr")
+    xr_name = _sanitize(xr_name) or "xr"
+    suffix = _sanitize(suffix) or "resource"
     candidate = "%s-%s" % (xr_name, suffix)
     if len(candidate) <= _MAX_K8S_NAME:
         return candidate
-    # Truncate and add hash for uniqueness.
+    # Truncate XR name, preserve suffix, add hash for uniqueness.
+    # Format: {xr_truncated}-{suffix}-{hash}
     full_name = candidate
-    max_prefix = _MAX_K8S_NAME - _HASH_LEN - 1  # -1 for separator dash
-    truncated = candidate[:max_prefix].rstrip("-")
-    return "%s-%s" % (truncated, _hash_suffix(full_name))
+    max_xr = _MAX_K8S_NAME - len(suffix) - _HASH_LEN - 2  # 2 dashes
+    if max_xr < _MIN_XR_LEN:
+        max_xr = _MIN_XR_LEN
+    truncated_xr = xr_name[:max_xr].rstrip("-")
+    return "%s-%s-%s" % (truncated_xr, suffix, hash_suffix(full_name))
