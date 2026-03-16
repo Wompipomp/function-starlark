@@ -67,7 +67,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"context", "environment", "extra_resources",
 		"set_condition", "emit_event", "fatal",
 		"set_connection_details", "require_resource", "require_resources",
-		"get_label", "get_annotation", "set_xr_status",
+		"get_label", "get_annotation", "set_xr_status", "get_observed",
 	}
 	if len(globals) != len(expected) {
 		t.Errorf("len(globals) = %d, want %d", len(globals), len(expected))
@@ -1467,5 +1467,185 @@ func TestGetBuiltin_NoneIntermediate(t *testing.T) {
 	}
 	if result != starlark.String("fallback") {
 		t.Errorf("get(oxr, 'spec.parameters.region', default='fallback') with None intermediate = %v, want 'fallback'", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// get_observed builtin tests
+// ---------------------------------------------------------------------------
+
+func TestGetObserved(t *testing.T) {
+	// Common observed resources for most test cases.
+	observedResources := map[string]*fnv1.Resource{
+		"my-bucket": {Resource: &structpb.Struct{Fields: map[string]*structpb.Value{
+			"status": structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+				"atProvider": structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+					"arn": structpb.NewStringValue("arn:aws:s3:::my-bucket"),
+				}}),
+			}}),
+			"metadata": structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+				"annotations": structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+					"app.kubernetes.io/name": structpb.NewStringValue("myapp"),
+				}}),
+			}}),
+		}}},
+		"null-leaf": {Resource: &structpb.Struct{Fields: map[string]*structpb.Value{
+			"status": structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+				"field": structpb.NewNullValue(),
+			}}),
+		}}},
+		"scalar-res": {Resource: &structpb.Struct{Fields: map[string]*structpb.Value{
+			"status": structpb.NewStringValue("just-a-string"),
+		}}},
+	}
+
+	tests := []struct {
+		name     string
+		observed map[string]*fnv1.Resource // nil uses observedResources
+		args     starlark.Tuple
+		kwargs   []starlark.Tuple
+		want     starlark.Value
+		wantErr  string
+	}{
+		// OBSV-01: Happy path.
+		{
+			name: "happy path dot-string",
+			args: starlark.Tuple{starlark.String("my-bucket"), starlark.String("status.atProvider.arn")},
+			want: starlark.String("arn:aws:s3:::my-bucket"),
+		},
+		{
+			name:   "happy path with explicit default (unused)",
+			args:   starlark.Tuple{starlark.String("my-bucket"), starlark.String("status.atProvider.arn")},
+			kwargs: []starlark.Tuple{{starlark.String("default"), starlark.String("fallback")}},
+			want:   starlark.String("arn:aws:s3:::my-bucket"),
+		},
+		{
+			name:   "kwargs name and path",
+			args:   starlark.Tuple{},
+			kwargs: []starlark.Tuple{{starlark.String("name"), starlark.String("my-bucket")}, {starlark.String("path"), starlark.String("status.atProvider.arn")}},
+			want:   starlark.String("arn:aws:s3:::my-bucket"),
+		},
+		// OBSV-02: Missing resource.
+		{
+			name: "missing resource returns None",
+			args: starlark.Tuple{starlark.String("nonexistent"), starlark.String("status.atProvider.arn")},
+			want: starlark.None,
+		},
+		{
+			name:   "missing resource returns explicit default",
+			args:   starlark.Tuple{starlark.String("nonexistent"), starlark.String("status.atProvider.arn")},
+			kwargs: []starlark.Tuple{{starlark.String("default"), starlark.String("fallback")}},
+			want:   starlark.String("fallback"),
+		},
+		// OBSV-03: Missing path.
+		{
+			name: "missing path returns None",
+			args: starlark.Tuple{starlark.String("my-bucket"), starlark.String("status.noSuchField")},
+			want: starlark.None,
+		},
+		{
+			name:   "missing path returns explicit default",
+			args:   starlark.Tuple{starlark.String("my-bucket"), starlark.String("status.atProvider.noSuchField")},
+			kwargs: []starlark.Tuple{{starlark.String("default"), starlark.String("fallback")}},
+			want:   starlark.String("fallback"),
+		},
+		{
+			name: "deeply nested missing path returns None",
+			args: starlark.Tuple{starlark.String("my-bucket"), starlark.String("deeply.nested.missing.path")},
+			want: starlark.None,
+		},
+		{
+			name: "None at leaf treated as missing",
+			args: starlark.Tuple{starlark.String("null-leaf"), starlark.String("status.field")},
+			want: starlark.None,
+		},
+		// OBSV-04: pathToKeys reuse.
+		{
+			name: "list path returns same as dot-string",
+			args: starlark.Tuple{starlark.String("my-bucket"), starlark.NewList([]starlark.Value{
+				starlark.String("status"), starlark.String("atProvider"), starlark.String("arn"),
+			})},
+			want: starlark.String("arn:aws:s3:::my-bucket"),
+		},
+		{
+			name: "list path with dotted key",
+			args: starlark.Tuple{starlark.String("my-bucket"), starlark.NewList([]starlark.Value{
+				starlark.String("metadata"), starlark.String("annotations"), starlark.String("app.kubernetes.io/name"),
+			})},
+			want: starlark.String("myapp"),
+		},
+		// Validation cases.
+		{
+			name:    "empty name returns error",
+			args:    starlark.Tuple{starlark.String(""), starlark.String("status.field")},
+			wantErr: "name must not be empty",
+		},
+		{
+			name:    "empty string path returns error",
+			args:    starlark.Tuple{starlark.String("res"), starlark.String("")},
+			wantErr: "path must not be empty",
+		},
+		{
+			name:    "empty list path returns error",
+			args:    starlark.Tuple{starlark.String("res"), starlark.NewList([]starlark.Value{})},
+			wantErr: "path must not be empty",
+		},
+		{
+			name:    "non-string non-list path returns error",
+			args:    starlark.Tuple{starlark.String("res"), starlark.MakeInt(123)},
+			wantErr: "path must be string or list",
+		},
+		// Edge cases.
+		{
+			name: "non-Mapping at intermediate path returns default",
+			args: starlark.Tuple{starlark.String("scalar-res"), starlark.String("status.nested.field")},
+			want: starlark.None,
+		},
+		{
+			name:   "non-Mapping at intermediate path returns explicit default",
+			args:   starlark.Tuple{starlark.String("scalar-res"), starlark.String("status.nested.field")},
+			kwargs: []starlark.Tuple{{starlark.String("default"), starlark.String("fallback")}},
+			want:   starlark.String("fallback"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obs := tt.observed
+			if obs == nil {
+				obs = observedResources
+			}
+
+			req := makeReq(
+				map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+				map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+				obs,
+			)
+			c := NewCollector(NewConditionCollector(), "test.star", nil)
+			globals, err := testBuildGlobals(req, c)
+			if err != nil {
+				t.Fatalf("BuildGlobals error: %v", err)
+			}
+
+			getObservedFn := globals["get_observed"]
+			thread := new(starlark.Thread)
+			result, err := starlark.Call(thread, getObservedFn, tt.args, tt.kwargs)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("get_observed() error: %v", err)
+			}
+			if result != tt.want {
+				t.Errorf("get_observed() = %v, want %v", result, tt.want)
+			}
+		})
 	}
 }

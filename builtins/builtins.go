@@ -92,6 +92,9 @@ func BuildGlobals(
 		"set_xr_status": starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			return setXRStatus(b.Name(), dxr, args, kwargs)
 		}),
+		"get_observed": starlark.NewBuiltin("get_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return getObservedImpl(b.Name(), observed, args, kwargs)
+		}),
 		"require_resource":  reqCollector.RequireResourceBuiltin(),
 		"require_resources": reqCollector.RequireResourcesBuiltin(),
 	}, nil
@@ -307,6 +310,16 @@ func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, 
 	}
 
 	return starlark.None, nil
+}
+
+// getObservedImpl implements get_observed(name, path, default=None).
+func getObservedImpl(
+	fnName string,
+	observed *convert.StarlarkDict,
+	args starlark.Tuple,
+	kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 // pathToKeys converts a path value to a slice of string keys.
