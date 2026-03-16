@@ -92,6 +92,16 @@ emit_event("Normal", "Composition reconciled successfully")
 This provides visibility into composition health via `kubectl describe` and
 XR status conditions.
 
+For writing structured status fields, use `set_xr_status()` instead of direct
+`dxr["status"]` assignment. It auto-creates intermediate dicts and preserves
+sibling fields:
+
+```python
+set_xr_status("atProvider.projectId", project_id)
+set_xr_status("atProvider.arn", arn)
+set_xr_status("region", region)
+```
+
 ## Label strategy
 
 ### Default: Auto-injection
@@ -99,6 +109,23 @@ XR status conditions.
 Let auto-injection handle `crossplane.io/*` labels. Do not manually set them
 -- function-starlark injects `crossplane.io/composite`, `crossplane.io/claim-name`,
 and `crossplane.io/claim-namespace` automatically on every `Resource()` call.
+
+### Reading labels and annotations
+
+To read labels with dotted keys like `app.kubernetes.io/name`, use
+`get_label()` instead of `get()` which splits on dots:
+
+```python
+# Correct -- looks up the literal key in the labels map
+name = get_label(oxr, "app.kubernetes.io/name", "unknown")
+
+# Also works for annotations
+ext_name = get_annotation(oxr, "crossplane.io/external-name", "")
+```
+
+Both return the default when the key, labels/annotations map, or metadata is
+missing. See the [builtins reference](builtins-reference.md#get_label) for
+full details.
 
 ### Custom labels
 
@@ -298,6 +325,13 @@ region = get(oxr, "spec.region", "us-east-1")
 
 # Unsafe -- raises KeyError if spec or region is missing
 region = oxr["spec"]["region"]
+```
+
+For observed resources, use `get_observed()` to avoid manual existence checks:
+
+```python
+# One call instead of checking "bucket" in observed first
+arn = get_observed("bucket", "status.atProvider.arn", "pending")
 ```
 
 ### Check before access

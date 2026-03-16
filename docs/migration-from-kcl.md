@@ -35,6 +35,10 @@ function-starlark offers several advantages for composition authoring:
 | `import module` | Not available | Starlark scripts are self-contained |
 | `lambda x: expr` | `lambda x: expr` | Both support lambdas |
 | `krm.kcl.dev/composition-resource-name` annotation | First arg to `Resource()` | Name is explicit, not an annotation |
+| `oxr.metadata?.labels?["app.kubernetes.io/name"] or ""` | `get_label(oxr, "app.kubernetes.io/name", "")` | Safe dotted-key label access |
+| `oxr.metadata?.annotations?["key"] or ""` | `get_annotation(oxr, "key", "")` | Safe annotation access |
+| `dxr = {**oxr, status.field = val}` | `set_xr_status("field", val)` | Dot-path status writes with auto-created intermediates |
+| `ocds["name"]?.spec?.field or ""` | `get_observed("name", "spec.field", "")` | One-call observed access |
 
 ## Global variables
 
@@ -62,6 +66,10 @@ function-starlark provides these predeclared globals:
 | `set_connection_details` | `set_connection_details(dict)` | Set XR-level connection details |
 | `require_resource` | `require_resource(name, apiVersion, kind, match_name=None, match_labels=None)` | Request a single extra resource |
 | `require_resources` | `require_resources(name, apiVersion, kind, match_labels)` | Request multiple extra resources by label selector |
+| `get_label` | `get_label(res, key, default=None)` | Safe label lookup handling dotted keys |
+| `get_annotation` | `get_annotation(res, key, default=None)` | Safe annotation lookup handling dotted keys |
+| `set_xr_status` | `set_xr_status(path, value)` | Dot-path XR status writes with auto-created intermediates |
+| `get_observed` | `get_observed(name, path, default=None)` | One-call observed resource field lookup |
 
 ## Common patterns
 
@@ -262,14 +270,20 @@ items = [_dxr] + _resources
 
 **Starlark:**
 ```python
+# Direct assignment (replaces entire status):
 dxr["status"] = {
     "ready": "True",
     "endpoint": endpoint,
 }
+
+# Preferred: dot-path writes that preserve sibling fields:
+set_xr_status("ready", "True")
+set_xr_status("endpoint", endpoint)
 ```
 
-The `dxr` global is mutable. Assign directly to update the desired composite
-resource status. No need to include it in a resource list.
+The `dxr` global is mutable. Direct assignment replaces the entire status dict.
+Use `set_xr_status()` for incremental writes that auto-create intermediate
+dicts and preserve existing sibling keys.
 
 ### Pipeline context
 

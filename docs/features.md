@@ -287,6 +287,64 @@ if vpc:
 Use case: Reading existing resources to derive configuration (e.g., reading a
 VPC to get its CIDR, reading a cluster to get its endpoint).
 
+## Metadata and observed access
+
+function-starlark provides convenience builtins that replace common multi-step
+patterns for reading metadata and observed resource state.
+
+### Label and annotation access
+
+The `get_label()` and `get_annotation()` builtins safely read individual label
+and annotation values from any resource dict. Unlike `get()`, they handle
+dotted keys correctly -- `get_label(oxr, "app.kubernetes.io/name")` looks up
+the literal key `app.kubernetes.io/name` in the labels map, instead of
+splitting on dots and traversing nested dicts.
+
+```python
+# Safe dotted-key access -- returns "unknown" if the label is missing
+managed_by = get_label(oxr, "app.kubernetes.io/managed-by", "unknown")
+
+# Annotation access works the same way
+ext_name = get_annotation(oxr, "crossplane.io/external-name", "")
+```
+
+Both builtins return the default value when the key, the labels/annotations
+map, or metadata itself is missing. They work identically on `oxr` and
+`observed` resource dicts.
+
+### XR status writes
+
+The `set_xr_status()` builtin writes values into `dxr["status"]` at arbitrary
+dot-paths without manually creating intermediate dicts:
+
+```python
+# Write related fields at a prefix
+set_xr_status("atProvider", {"bucketCount": 8, "environment": env})
+
+# Write an individual field at a separate path
+set_xr_status("region", region)
+```
+
+Intermediate dicts are auto-created when path segments do not exist. Sibling
+fields are preserved -- writing `set_xr_status("atProvider.arn", arn)` does not
+clobber an existing `atProvider.projectId`.
+
+### Observed resource access
+
+The `get_observed()` builtin reads fields from observed resources in a single
+call, replacing the two-step existence-check-then-get pattern:
+
+```python
+# One-call pattern with default for missing resources
+bucket_arn = get_observed("bucket-0", "status.atProvider.arn", "pending")
+```
+
+Returns the default when the resource does not exist in observed state (common
+on initial reconciliation) or when the path does not exist within the resource.
+
+For full signatures and parameters, see the
+[builtins reference](builtins-reference.md).
+
 ## Observability (metrics)
 
 function-starlark exposes 9 Prometheus metrics on the standard `/metrics`

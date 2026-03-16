@@ -1,5 +1,8 @@
 # function-starlark
 
+> **In Development** -- This project is under active development and not yet
+> published. APIs may change without notice. Do not use in production.
+
 Write Crossplane compositions in Starlark -- a hermetic, Python-like language
 with zero external toolchain.
 
@@ -34,6 +37,7 @@ with zero external toolchain.
 | Readiness control | ready= kwarg (None/True/False) | Annotation-based | Annotation-based |
 | Type system | Untyped dicts | Schema-based with types | Untyped strings |
 | Observability | 9 Prometheus metrics | None built-in | None built-in |
+| Metadata builtins | get_label(), get_annotation(), get_observed(), set_xr_status() | Manual via get()/set | Manual via template |
 | Sandbox | Hermetic (no I/O, no network) | KCL sandbox | Go template sandbox |
 | Standard library | networking, naming, labels, conditions | KCL module ecosystem | Sprig functions |
 
