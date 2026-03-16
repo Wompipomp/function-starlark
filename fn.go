@@ -12,6 +12,8 @@ import (
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/request"
 	"github.com/crossplane/function-sdk-go/response"
+	"github.com/docker/cli/cli/config"
+	"github.com/docker/cli/cli/config/types"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -36,7 +38,7 @@ type Function struct {
 // RunFunction processes a RunFunctionRequest.
 func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
 	log := f.log.WithValues("tag", req.GetMeta().GetTag())
-	log.Info("Running function")
+	log.Debug("Running function")
 
 	// Metrics: track reconciliation duration and count with final filename label.
 	// Guard: skip recording when filename was never resolved (early failures).
@@ -70,7 +72,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		return rsp, nil
 	}
 
-	log.Info("Parsed StarlarkInput", "source-length", len(in.Spec.Source))
+	log.Debug("Parsed StarlarkInput", "source-length", len(in.Spec.Source))
 
 	// Resolve script source and filename.
 	// Inline scripts use "composition.star"; ConfigMap scripts use the real key.
@@ -334,25 +336,63 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	return rsp, nil
 }
 
-// buildKeychain creates an authn.Keychain that includes Docker config secret
-// credentials (if specified) and falls back to the default keychain.
+// buildKeychain returns an authn.Keychain for OCI registry authentication.
+// When dockerConfigSecret is set, it constructs a per-request keychain from the
+// mounted Docker config directory. The secret should be mounted at
+// /var/run/secrets/docker/<secret-name>/ containing a config.json.
 //
-// When dockerConfigSecret is set, it sets DOCKER_CONFIG to the expected mount
-// path so the default keychain picks up the credentials. The secret should be
-// mounted at /var/run/secrets/docker/<secret-name>/ containing a config.json.
+// This avoids the previous os.Setenv("DOCKER_CONFIG") approach which was
+// process-global and raced under concurrent gRPC requests.
 func buildKeychain(dockerConfigSecret string) authn.Keychain {
-	if dockerConfigSecret != "" {
-		// Docker config mounted via DeploymentRuntimeConfig.
-		// Standard mount path: /var/run/secrets/docker/<secret-name>/
-		// The directory should contain a config.json (or .dockerconfigjson
-		// renamed to config.json via the mount spec).
-		configDir := filepath.Join("/var/run/secrets/docker", dockerConfigSecret)
-		if _, statErr := os.Stat(configDir); statErr == nil {
-			// Set DOCKER_CONFIG so authn.DefaultKeychain reads from this path.
-			_ = os.Setenv("DOCKER_CONFIG", configDir) //nolint:errcheck
+	if dockerConfigSecret == "" {
+		return authn.DefaultKeychain
+	}
+	if !filepath.IsLocal(dockerConfigSecret) {
+		return authn.DefaultKeychain
+	}
+	configDir := filepath.Join("/var/run/secrets/docker", dockerConfigSecret)
+	if _, err := os.Stat(configDir); err != nil {
+		return authn.DefaultKeychain
+	}
+	return authn.NewMultiKeychain(
+		&configDirKeychain{dir: configDir},
+		authn.DefaultKeychain,
+	)
+}
+
+// configDirKeychain implements authn.Keychain by loading credentials from a
+// specific Docker config directory. Thread-safe — each request gets its own
+// keychain instance without mutating process-global state.
+type configDirKeychain struct {
+	dir string
+}
+
+func (k *configDirKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
+	cf, err := config.Load(k.dir)
+	if err != nil {
+		return authn.Anonymous, nil
+	}
+	var cfg, empty types.AuthConfig
+	for _, key := range []string{target.String(), target.RegistryStr()} {
+		cfg, err = cf.GetAuthConfig(key)
+		if err != nil {
+			return authn.Anonymous, nil
+		}
+		cfg.ServerAddress = ""
+		if cfg != empty {
+			break
 		}
 	}
-	return authn.DefaultKeychain
+	if cfg == empty {
+		return authn.Anonymous, nil
+	}
+	return authn.FromConfig(authn.AuthConfig{
+		Username:      cfg.Username,
+		Password:      cfg.Password,
+		Auth:          cfg.Auth,
+		IdentityToken: cfg.IdentityToken,
+		RegistryToken: cfg.RegistryToken,
+	}), nil
 }
 
 // loadScript reads a Starlark script from a ConfigMap volume mount.
