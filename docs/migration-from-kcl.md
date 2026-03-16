@@ -12,7 +12,9 @@ function-starlark offers several advantages for composition authoring:
 - **Familiar Python-like syntax** -- Starlark uses Python syntax that most
   engineers already know. No need to learn KCL's type system or schema language.
 - **Lightweight runtime** -- Starlark compiles to bytecode with sub-second
-  execution on cached programs. No external toolchain required.
+  execution on cached programs. No external toolchain required. In benchmarks,
+  function-starlark is 4.8x faster than function-kcl at 10 resources and 7.4x
+  faster at 50 resources (see [benchmarks](benchmarks.md)).
 - **Simple mental model** -- Imperative scripting with explicit `Resource()`
   calls instead of assembling an `items` list. What you write is what you get.
 - **Deterministic execution** -- Starlark is hermetic by design. No file I/O,
