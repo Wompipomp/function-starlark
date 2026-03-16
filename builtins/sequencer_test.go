@@ -151,7 +151,7 @@ func TestSequencer(t *testing.T) {
 			wantEventCount:  2,
 			wantEventMsgs: []string{
 				`Creation sequencing: resource "app" deferred, waiting for "db" to be observed`,
-				`Creation sequencing: 30`, // TTL=30s in summary
+				`requeuing in 30s`, // TTL=30s in summary
 			},
 		},
 		{
