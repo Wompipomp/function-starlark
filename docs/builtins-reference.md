@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 14 predeclared names -- 6 globals and 8 functions --
+function-starlark provides 18 predeclared names -- 6 globals and 12 functions --
 that are automatically available in every Starlark script without import. These
 are the core API for interacting with Crossplane's composite resource model.
 
@@ -17,10 +17,14 @@ are the core API for interacting with Crossplane's composite resource model.
 | `Resource()` | function | Register a desired composed resource |
 | `skip_resource()` | function | Remove a resource from desired state |
 | `get()` | function | Safe nested dict access with dot-path |
+| `get_label()` | function | Safe label lookup by exact key (handles dotted keys) |
+| `get_annotation()` | function | Safe annotation lookup by exact key (handles dotted keys) |
 | `set_condition()` | function | Set a condition on the composite resource |
 | `emit_event()` | function | Emit a Normal or Warning event |
 | `fatal()` | function | Halt execution with a fatal error |
 | `set_connection_details()` | function | Set XR-level connection details |
+| `set_xr_status()` | function | Set XR status field at dot-path with auto-created intermediates |
+| `get_observed()` | function | One-call observed resource field lookup with default |
 | `require_resource()` | function | Request a single extra resource |
 | `require_resources()` | function | Request multiple extra resources |
 
@@ -553,11 +557,170 @@ if "certs" in extra_resources:
 
 ---
 
+### get_label
+
+```python
+get_label(res, key, default=None)
+```
+
+Safe label lookup by exact key. Handles dotted keys like
+`"app.kubernetes.io/name"` correctly -- unlike `get()` which splits on dots,
+causing `get(oxr, "metadata.labels.app.kubernetes.io/name", "")` to traverse
+through `"app"` then `"kubernetes"` then `"io/name"` instead of looking up the
+full key. `get_label()` goes directly to `res["metadata"]["labels"][key]` and
+returns the default if any part of the chain is missing.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `res` | dict or StarlarkDict | required | Resource to read from (e.g., `oxr`, an observed resource). |
+| `key` | string | required | Exact label key (e.g., `"app.kubernetes.io/name"`). Must not be empty. |
+| `default` | any | None | Value to return if the label is not found. |
+
+**Returns:** The label value, or `default` if the key, labels map, or metadata
+is missing.
+
+**Example:**
+
+```python
+# Before: get() splits on dots, so dotted label keys require verbose list form
+name = get(oxr, ["metadata", "labels", "app.kubernetes.io/name"], "")
+
+# After: one-call pattern handles dotted keys correctly
+name = get_label(oxr, "app.kubernetes.io/name", "")
+
+# Works on any resource with metadata.labels
+team = get_label(observed["my-bucket"], "team", "default")
+```
+
+---
+
+### get_annotation
+
+```python
+get_annotation(res, key, default=None)
+```
+
+Safe annotation lookup by exact key. Like `get_label()`, this handles dotted
+keys correctly by going directly to `res["metadata"]["annotations"][key]`.
+Returns the default if any part of the chain is missing.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `res` | dict or StarlarkDict | required | Resource to read from (e.g., `oxr`, an observed resource). |
+| `key` | string | required | Exact annotation key (e.g., `"crossplane.io/external-name"`). Must not be empty. |
+| `default` | any | None | Value to return if the annotation is not found. |
+
+**Returns:** The annotation value, or `default` if the key, annotations map, or
+metadata is missing.
+
+**Example:**
+
+```python
+# Before: verbose list-form access required for dotted annotation keys
+ext_name = get(oxr, ["metadata", "annotations", "crossplane.io/external-name"], "")
+
+# After: one-call pattern
+ext_name = get_annotation(oxr, "crossplane.io/external-name", "")
+
+# Read an annotation from an observed resource
+zone = get_annotation(observed["my-db"], "topology.kubernetes.io/zone", "")
+```
+
+---
+
+### set_xr_status
+
+```python
+set_xr_status(path, value)
+```
+
+Set a status field on the XR at a dot-separated path. Writes to
+`dxr["status"][path segments...]`, auto-creating intermediate StarlarkDicts as
+needed. Uses mkdir-p semantics: if a non-dict value exists at an intermediate
+path segment, it is silently overwritten with a new dict. Consecutive writes to
+the same prefix preserve sibling keys.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | string | required | Dot-separated path (e.g., `"atProvider.region"`). Rejects empty paths, leading/trailing dots, and consecutive dots. |
+| `value` | any | required | Value to write at the path. |
+
+**Returns:** None.
+
+**Errors:** Fails if path is empty, has leading/trailing dots, or contains
+consecutive dots.
+
+**Example:**
+
+```python
+# Before: manual dict construction clobbers sibling keys on each write
+dxr["status"] = {
+    "atProvider": {
+        "projectId": project_id,
+        "arn": arn,
+    },
+    "region": region,
+}
+
+# After: dot-path writes with auto-created intermediates
+set_xr_status("atProvider.projectId", project_id)
+set_xr_status("atProvider.arn", arn)
+set_xr_status("region", region)
+# Sibling preservation: writing atProvider.arn does not clobber atProvider.projectId
+```
+
+---
+
+### get_observed
+
+```python
+get_observed(name, path, default=None)
+```
+
+One-call observed resource field lookup. Equivalent to
+`get(observed.get(name, {}), path, default)` but in a single call. Returns the
+default when the named resource is missing, the path is missing, or the value at
+the path is None.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Composition resource name. Must not be empty. |
+| `path` | string or list | required | Dot-separated path or list of string keys (same format as `get()`). Must not be empty. |
+| `default` | any | None | Value to return if the resource or path is not found. |
+
+**Returns:** Value at the path in the named observed resource, or `default` if
+the resource is missing, the path is missing, or the value is None.
+
+**Example:**
+
+```python
+# Before: two-step lookup with manual existence check
+bucket_arn = ""
+if "my-bucket" in observed:
+    bucket_arn = get(observed["my-bucket"], "status.atProvider.arn", "")
+
+# After: one-call with default
+bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
+
+# Safe on first reconciliation when no observed resources exist
+db_host = get_observed("my-db", "status.atProvider.address", "pending")
+```
+
+---
+
 ## See also
 
 - [Features guide](features.md) -- Detailed behavior for depends_on creation
-  sequencing, labels auto-injection, connection details, skip_resource, and
-  observability metrics
+  sequencing, labels auto-injection, connection details, skip_resource,
+  observability metrics, and metadata & observed access builtins
 - [Standard library reference](stdlib-reference.md) -- Additional utility
   functions for networking, naming, labels, and conditions (loaded via
   `load("oci://...")`)

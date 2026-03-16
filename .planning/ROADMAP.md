@@ -130,10 +130,11 @@ Plans:
   2. `docs/builtins-reference.md` has complete sections for each builtin including description, signature, parameters, return value, and usage examples
   3. `docs/features.md`, `docs/best-practices.md`, and `docs/migration-from-kcl.md` reference the new builtins in appropriate context
   4. The example composition demonstrates at least one new builtin in a realistic usage pattern
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 21-01: TBD
+- [ ] 21-01-PLAN.md — Core reference docs: builtins-reference.md and llms.txt with full entries for all 4 new builtins
+- [ ] 21-02-PLAN.md — Example composition rewrite + cross-doc updates (features, best-practices, migration, README)
 
 ## Progress
 
@@ -161,5 +162,5 @@ Phases execute in numeric order: 18 -> 19 -> 20 -> 21
 | 17. Comprehensive Documentation | v1.4 | 3/3 | Complete | 2026-03-16 |
 | 18. Metadata Access | 1/1 | Complete    | 2026-03-16 | - |
 | 19. Status Mutation | 1/1 | Complete    | 2026-03-16 | - |
-| 20. Observed Access | 1/1 | Complete   | 2026-03-16 | - |
-| 21. Documentation | v1.5 | 0/0 | Not started | - |
+| 20. Observed Access | 1/1 | Complete    | 2026-03-16 | - |
+| 21. Documentation | v1.5 | 0/2 | Not started | - |

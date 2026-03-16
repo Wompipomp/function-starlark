@@ -4,7 +4,7 @@ milestone: v1.5
 milestone_name: Builtins
 status: completed
 stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-03-16T20:37:18.000Z"
+last_updated: "2026-03-16T20:42:07.717Z"
 last_activity: 2026-03-16 — Phase 20 Plan 01 complete (get_observed builtin)
 progress:
   total_phases: 4
