@@ -21,6 +21,8 @@ import (
 //   - extra_resources: frozen plain starlark.Dict of extra/required resources
 //   - Resource: the collector's builtin for producing desired composed resources
 //   - get: utility builtin for safe nested dict access
+//   - get_label: utility builtin for safe label value lookup (no dot-splitting)
+//   - get_annotation: utility builtin for safe annotation value lookup (no dot-splitting)
 //   - set_condition: builtin for setting XR conditions
 //   - emit_event: builtin for emitting Normal/Warning events
 //   - fatal: builtin for halting execution with a fatal error
@@ -80,6 +82,8 @@ func BuildGlobals(
 		"Resource":               collector.Builtin(),
 		"skip_resource":          collector.SkipResourceBuiltin(),
 		"get":                    starlark.NewBuiltin("get", getFnImpl),
+		"get_label":              starlark.NewBuiltin("get_label", getLabelImpl),
+		"get_annotation":         starlark.NewBuiltin("get_annotation", getAnnotationImpl),
 		"set_condition":          condCollector.SetConditionBuiltin(),
 		"emit_event":             condCollector.EmitEventBuiltin(),
 		"fatal":                  condCollector.FatalBuiltin(),
@@ -143,6 +147,90 @@ func getFnImpl(
 		current = v
 	}
 	return current, nil
+}
+
+// metadataLookup safely retrieves a value from res.metadata.<mapName>.<key>
+// using direct key lookup (no dot-splitting). It returns dflt when any
+// intermediate level is missing or not a Mapping.
+func metadataLookup(res starlark.Value, key string, dflt starlark.Value, mapName string) (starlark.Value, error) {
+	// Level 1: res must be a Mapping.
+	resMapping, ok := res.(starlark.Mapping)
+	if !ok {
+		return dflt, nil
+	}
+
+	// Level 2: Get "metadata" from res.
+	metaVal, found, err := resMapping.Get(starlark.String("metadata"))
+	if err != nil || !found || metaVal == starlark.None {
+		return dflt, nil
+	}
+	metaMapping, ok := metaVal.(starlark.Mapping)
+	if !ok {
+		return dflt, nil
+	}
+
+	// Level 3: Get mapName ("labels" or "annotations") from metadata.
+	mapVal, found, err := metaMapping.Get(starlark.String(mapName))
+	if err != nil || !found || mapVal == starlark.None {
+		return dflt, nil
+	}
+	targetMapping, ok := mapVal.(starlark.Mapping)
+	if !ok {
+		return dflt, nil
+	}
+
+	// Level 4: Get key from target map (direct lookup, no dot-splitting).
+	v, found, err := targetMapping.Get(starlark.String(key))
+	if err != nil || !found {
+		return dflt, nil
+	}
+	return v, nil
+}
+
+// getLabelImpl implements get_label(res, key, default=None) for safe label lookup.
+func getLabelImpl(
+	_ *starlark.Thread,
+	b *starlark.Builtin,
+	args starlark.Tuple,
+	kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	var res starlark.Value
+	var key string
+	var dflt starlark.Value = starlark.None
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"res", &res, "key", &key, "default?", &dflt); err != nil {
+		return nil, err
+	}
+
+	if key == "" {
+		return nil, fmt.Errorf("%s: key must not be empty", b.Name())
+	}
+
+	return metadataLookup(res, key, dflt, "labels")
+}
+
+// getAnnotationImpl implements get_annotation(res, key, default=None) for safe annotation lookup.
+func getAnnotationImpl(
+	_ *starlark.Thread,
+	b *starlark.Builtin,
+	args starlark.Tuple,
+	kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	var res starlark.Value
+	var key string
+	var dflt starlark.Value = starlark.None
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"res", &res, "key", &key, "default?", &dflt); err != nil {
+		return nil, err
+	}
+
+	if key == "" {
+		return nil, fmt.Errorf("%s: key must not be empty", b.Name())
+	}
+
+	return metadataLookup(res, key, dflt, "annotations")
 }
 
 // pathToKeys converts a path value to a slice of string keys.
