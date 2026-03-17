@@ -293,7 +293,7 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 			return nil, fmt.Errorf("reading layer %d for %s: %w", i, refStr, err)
 		}
 		data, err := io.ReadAll(io.LimitReader(rc, maxFileSize+1))
-		rc.Close() //nolint:errcheck
+		rc.Close() //nolint:errcheck,gosec
 		if err != nil {
 			return nil, fmt.Errorf("reading %s from %s: %w", baseName, refStr, err)
 		}
