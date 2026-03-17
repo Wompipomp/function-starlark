@@ -3,6 +3,7 @@ package oci
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -221,10 +222,22 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		return nil, fmt.Errorf("reading manifest for %s: %w", refStr, err)
 	}
 
-	if string(manifest.Config.MediaType) != ArtifactMediaType {
+	// Check artifactType at the manifest level (OCI 1.1+), then fall back to
+	// config.mediaType for backwards compatibility with older oras versions.
+	artifactType := string(manifest.Config.MediaType)
+	rawManifest, err := img.RawManifest()
+	if err == nil {
+		var raw struct {
+			ArtifactType string `json:"artifactType"`
+		}
+		if json.Unmarshal(rawManifest, &raw) == nil && raw.ArtifactType != "" {
+			artifactType = raw.ArtifactType
+		}
+	}
+	if artifactType != ArtifactMediaType {
 		return nil, fmt.Errorf(
 			"unexpected artifact type %q for %s; expected %q for Starlark module bundles",
-			manifest.Config.MediaType, refStr, ArtifactMediaType,
+			artifactType, refStr, ArtifactMediaType,
 		)
 	}
 
@@ -237,12 +250,13 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		return nil, fmt.Errorf("OCI artifact %s has no layers", refStr)
 	}
 
-	// Validate layer media type.
+	// Validate layer media type — accept both custom and standard OCI layer types
+	// since oras uses the standard type by default.
 	mt, err := layers[0].MediaType()
 	if err != nil {
 		return nil, fmt.Errorf("getting layer media type for %s: %w", refStr, err)
 	}
-	if string(mt) != LayerMediaType {
+	if string(mt) != LayerMediaType && string(mt) != "application/vnd.oci.image.layer.v1.tar" {
 		return nil, fmt.Errorf(
 			"unexpected layer media type %q for %s; expected %q",
 			mt, refStr, LayerMediaType,
