@@ -285,14 +285,7 @@ step: run-starlark
 ---
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
-message: 'Creation sequencing: resource "notification-topic" deferred, waiting for
-  "bucket-0" to be observed'
-severity: SEVERITY_WARNING
-step: run-starlark
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
-message: 'Creation sequencing: 1 resource(s) deferred; requeuing in 10s'
+message: 'Creation sequencing: 1 resource(s) deferred: notification-topic'
 severity: SEVERITY_WARNING
 step: run-starlark
 ---
