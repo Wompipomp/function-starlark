@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -86,6 +87,87 @@ func buildTestImage(t *testing.T, files map[string]string, artifactType, layerTy
 	}
 
 	return img
+}
+
+// artifactTypeImage wraps a v1.Image to inject artifactType into the raw manifest JSON,
+// since go-containerregistry v0.21.2 doesn't expose ArtifactType on the Manifest struct.
+type artifactTypeImage struct {
+	v1.Image
+	artifactType string
+}
+
+func (a *artifactTypeImage) RawManifest() ([]byte, error) {
+	raw, err := a.Image.RawManifest()
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	m["artifactType"] = a.artifactType
+	return json.Marshal(m)
+}
+
+// buildOrasImage creates an in-memory OCI image mimicking oras push output:
+// each file is a separate raw layer (not tar) with the filename in the
+// org.opencontainers.image.title annotation. Config is application/vnd.oci.empty.v1+json.
+// artifactType is injected at the manifest level via RawManifest override.
+func buildOrasImage(t *testing.T, files map[string]string) v1.Image {
+	t.Helper()
+
+	img := mutate.MediaType(empty.Image, types.OCIManifestSchema1)
+	img = mutate.ConfigMediaType(img, "application/vnd.oci.empty.v1+json")
+
+	for fileName, content := range files {
+		fileContent := content // capture for closure
+		layer, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader([]byte(fileContent))), nil
+		}, tarball.WithMediaType("application/vnd.oci.image.layer.v1.tar"))
+		if err != nil {
+			t.Fatalf("creating layer for %s: %v", fileName, err)
+		}
+
+		img, err = mutate.Append(img, mutate.Addendum{
+			Layer: layer,
+			Annotations: map[string]string{
+				"org.opencontainers.image.title": fileName,
+			},
+		})
+		if err != nil {
+			t.Fatalf("appending layer %s: %v", fileName, err)
+		}
+	}
+
+	return &artifactTypeImage{Image: img, artifactType: ArtifactMediaType}
+}
+
+func TestResolveOrasPerFileLayers(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+	img := buildOrasImage(t, map[string]string{
+		"naming.star":     `def resource_name(key): return key`,
+		"networking.star": `def cidr(prefix, bits): return prefix`,
+		"labels.star":     `def standard_labels(): return {}`,
+		"conditions.star": `def ready(): return True`,
+	})
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/wompipomp/starlark-stdlib:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+
+	target, err := ParseOCILoadTarget("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["naming.star"] != `def resource_name(key): return key` {
+		t.Errorf("got %q, want resource_name function", result["naming.star"])
+	}
 }
 
 func TestResolveFromCache(t *testing.T) {
