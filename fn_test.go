@@ -2344,9 +2344,6 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])`
 		}
 	}
 
-	// Verify the compositeDeletePolicy warning IS present.
-	assertWarningResult(t, rsp, "compositeDeletePolicy=Foreground")
-
 	resources := rsp.GetDesired().GetResources()
 
 	// Should have 3 resources: app, db, and usage.
@@ -3470,31 +3467,6 @@ func TestRunFunction_MetricsNoUnknownLabel(t *testing.T) {
 // ---------------------------------------------------------------------------
 // DOC-01: Warning emitted when Usage resources are generated
 // ---------------------------------------------------------------------------
-
-func TestRunFunctionDependsOnUsageWarning(t *testing.T) {
-	rt := runtime.NewRuntime(logging.NewNopLogger())
-	f := &Function{log: logging.NewNopLogger(), runtime: rt}
-
-	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
-Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
-
-	req := &fnv1.RunFunctionRequest{
-		Input: resource.MustStructJSON(fmt.Sprintf(`{
-			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
-			"kind": "StarlarkInput",
-			"spec": {"source": %q}
-		}`, script)),
-	}
-
-	rsp, err := f.RunFunction(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
-	}
-	assertNormalResult(t, rsp)
-
-	// Verify a SEVERITY_WARNING result exists advising about compositeDeletePolicy.
-	assertWarningResult(t, rsp, "compositeDeletePolicy=Foreground")
-}
 
 // ---------------------------------------------------------------------------
 // SEQ-01 through SEQ-06: Creation sequencing E2E tests through RunFunction

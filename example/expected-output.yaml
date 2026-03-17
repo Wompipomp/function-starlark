@@ -272,13 +272,6 @@ spec:
 ---
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
-message: 'depends_on: 1 Usage resource(s) generated; compositeDeletePolicy=Foreground
-  is required on the claim for deletion ordering to take effect'
-severity: SEVERITY_WARNING
-step: run-starlark
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
 message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)
 severity: SEVERITY_NORMAL
 step: run-starlark
