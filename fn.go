@@ -245,10 +245,19 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				}
 			}
 
-			response.Warning(rsp, errors.Errorf(
-				"depends_on: %d Usage resource(s) generated; compositeDeletePolicy=Foreground is required on the claim for deletion ordering to take effect",
-				len(usageResources),
-			))
+			// Only warn about compositeDeletePolicy if not already set to Foreground.
+			oxrAnnotations := req.GetObserved().GetComposite().GetResource().GetFields()["metadata"].
+				GetStructValue().GetFields()["annotations"].GetStructValue().GetFields()
+			deletePolicy := ""
+			if v, ok := oxrAnnotations["crossplane.io/composite-delete-policy"]; ok {
+				deletePolicy = v.GetStringValue()
+			}
+			if deletePolicy != "Foreground" {
+				response.Warning(rsp, errors.Errorf(
+					"depends_on: %d Usage resource(s) generated; compositeDeletePolicy=Foreground is required on the claim for deletion ordering to take effect",
+					len(usageResources),
+				))
+			}
 
 			// --- Creation Sequencing ---
 			// Build observed resource map for field path evaluation.
