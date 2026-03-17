@@ -2188,7 +2188,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`)},
+				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
 			},
 		},
 	}
@@ -2274,7 +2274,7 @@ func TestRunFunctionDependsOnStringRef(t *testing.T) {
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"external-vpc": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "VPC"}`)},
+				"external-vpc": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "VPC", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
 			},
 		},
 	}
@@ -2322,7 +2322,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])`
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "DB"}`)},
+				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "DB", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
 			},
 		},
 	}
@@ -2378,7 +2378,7 @@ Resource("db", {"apiVersion": "v1", "kind": "Database"})`
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`)},
+				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
 			},
 		},
 	}
@@ -2463,8 +2463,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"cache": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Cache"}`)},
-				"db":    {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`)},
+				"cache": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Cache", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
+				"db":    {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
 			},
 		},
 	}
@@ -3594,7 +3594,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 			},
 			Resources: map[string]*fnv1.Resource{
 				"db": {
-					Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database"}`),
+					Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`),
 				},
 			},
 		},
@@ -3736,7 +3736,7 @@ Resource("c", {"apiVersion": "v1", "kind": "C"}, depends_on=[b])`
 				},
 				Resources: map[string]*fnv1.Resource{
 					"a": {
-						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "A"}`),
+						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "A", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`),
 					},
 				},
 			},
@@ -3774,10 +3774,10 @@ Resource("c", {"apiVersion": "v1", "kind": "C"}, depends_on=[b])`
 				},
 				Resources: map[string]*fnv1.Resource{
 					"a": {
-						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "A"}`),
+						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "A", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`),
 					},
 					"b": {
-						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "B"}`),
+						Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "B", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`),
 					},
 				},
 			},

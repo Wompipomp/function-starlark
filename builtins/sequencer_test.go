@@ -7,10 +7,23 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// emptyStruct returns a *structpb.Struct with no fields, used for
-// existing tests that only need existence checks (no field path).
+// emptyStruct returns a *structpb.Struct with no fields.
 func emptyStruct() *structpb.Struct {
 	return &structpb.Struct{Fields: map[string]*structpb.Value{}}
+}
+
+// readyStruct returns a *structpb.Struct with Ready=True and Synced=True
+// conditions, representing a fully ready Crossplane resource.
+func readyStruct() *structpb.Struct {
+	s, _ := structpb.NewStruct(map[string]interface{}{
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+				map[string]interface{}{"type": "Synced", "status": "True"},
+			},
+		},
+	})
+	return s
 }
 
 func TestSequencer(t *testing.T) {
@@ -37,12 +50,12 @@ func TestSequencer(t *testing.T) {
 			wantEventCount:    0,
 		},
 		{
-			name: "AllDepsObserved",
+			name: "AllDepsObservedAndReady",
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
 			resourceNames:     map[string]bool{"app": true, "db": true},
-			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			observedResources: map[string]*structpb.Struct{"db": readyStruct()},
 			ttlSeconds:        10,
 			wantDeferred:      nil,
 			wantAnyDeferred:   false,
@@ -128,14 +141,14 @@ func TestSequencer(t *testing.T) {
 		},
 		{
 			name: "TransitiveChainPartialObserved",
-			// A->B->C: A is observed. B's dep (A) is met, so B not deferred.
+			// A->B->C: A is observed and ready. B's dep (A) is met, so B not deferred.
 			// C's dep (B) is not observed, so C is deferred.
 			deps: []DependencyPair{
 				{Dependent: "B", Dependency: "A", IsRef: true},
 				{Dependent: "C", Dependency: "B", IsRef: true},
 			},
 			resourceNames:     map[string]bool{"A": true, "B": true, "C": true},
-			observedResources: map[string]*structpb.Struct{"A": emptyStruct()},
+			observedResources: map[string]*structpb.Struct{"A": readyStruct()},
 			ttlSeconds:        10,
 			wantDeferred:      []string{"C"},
 			wantAnyDeferred:   true,
@@ -177,20 +190,20 @@ func TestSequencer(t *testing.T) {
 		},
 		{
 			name: "ANDSemantics",
-			// app depends on both db and cache; db is observed, cache is not.
+			// app depends on both db and cache; db is observed+ready, cache is not.
 			// Because not ALL deps are met, app is deferred.
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 				{Dependent: "app", Dependency: "cache", IsRef: false},
 			},
 			resourceNames:     map[string]bool{"app": true, "db": true, "cache": true},
-			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			observedResources: map[string]*structpb.Struct{"db": readyStruct()},
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
 			wantEventCount:    2,
 			wantEventMsgs: []string{
-				// Only cache is listed as missing (db is observed)
+				// Only cache is listed as missing (db is observed+ready)
 				`Creation sequencing: resource "app" deferred, waiting for "cache" to be observed`,
 			},
 		},
@@ -210,6 +223,72 @@ func TestSequencer(t *testing.T) {
 			wantEventMsgs: []string{
 				`Creation sequencing:`,
 			},
+		},
+		// --- Condition-based readiness tests (plain ref) ---
+		{
+			name: "PlainRefObservedButNotReady",
+			// dep observed but has no conditions → deferred.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+			},
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      []string{"app"},
+			wantAnyDeferred:   true,
+			wantEventCount:    2,
+			wantEventMsgs: []string{
+				`"db" to have Ready=True`,
+			},
+		},
+		{
+			name: "PlainRefReadyButNotSynced",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "db": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"status": map[string]interface{}{
+						"conditions": []interface{}{
+							map[string]interface{}{"type": "Ready", "status": "True"},
+						},
+					},
+				})
+				return map[string]*structpb.Struct{"db": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  2,
+			wantEventMsgs: []string{
+				`"db" to have Synced=True`,
+			},
+		},
+		{
+			name: "PlainRefReadyAndSynced",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+			},
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"db": readyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
+		},
+		{
+			name: "PlainRefAntiFlapping",
+			// dep loses readiness, but dependent is already in observed → NOT deferred (SEQ-03).
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "db", IsRef: true},
+			},
+			resourceNames:     map[string]bool{"app": true, "db": true},
+			observedResources: map[string]*structpb.Struct{"app": emptyStruct(), "db": emptyStruct()},
+			ttlSeconds:        10,
+			wantDeferred:      nil,
+			wantAnyDeferred:   false,
+			wantEventCount:    0,
 		},
 		// --- Field path tests ---
 		{
@@ -371,12 +450,12 @@ func TestSequencer(t *testing.T) {
 		},
 		{
 			name: "FieldPathNoFieldPath",
-			// Existing behavior: no FieldPath, just existence check.
+			// No FieldPath: checks Ready=True and Synced=True conditions.
 			deps: []DependencyPair{
 				{Dependent: "app", Dependency: "db", IsRef: true},
 			},
 			resourceNames:     map[string]bool{"app": true, "db": true},
-			observedResources: map[string]*structpb.Struct{"db": emptyStruct()},
+			observedResources: map[string]*structpb.Struct{"db": readyStruct()},
 			ttlSeconds:        10,
 			wantDeferred:      nil,
 			wantAnyDeferred:   false,
@@ -386,7 +465,7 @@ func TestSequencer(t *testing.T) {
 			name: "FieldPathMixed",
 			// Mix of deps with and without FieldPath.
 			deps: []DependencyPair{
-				{Dependent: "app", Dependency: "db", IsRef: true},                              // existence only
+				{Dependent: "app", Dependency: "db", IsRef: true},                              // conditions check
 				{Dependent: "app", Dependency: "project", IsRef: true, FieldPath: "status.id"}, // field path
 			},
 			resourceNames: map[string]bool{"app": true, "db": true, "project": true},
@@ -395,7 +474,7 @@ func TestSequencer(t *testing.T) {
 					"status": map[string]interface{}{"id": "proj-123"},
 				})
 				return map[string]*structpb.Struct{
-					"db":      emptyStruct(),
+					"db":      readyStruct(),
 					"project": s,
 				}
 			}(),

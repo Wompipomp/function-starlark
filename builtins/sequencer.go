@@ -45,7 +45,7 @@ func NewSequencer(
 // Resources already in observed state are NEVER deferred (SEQ-03).
 // A resource is deferred if ANY of its dependencies are not met (AND semantics).
 // A dependency is met when:
-//   - FieldPath == "": the dependency resource exists in observed state
+//   - FieldPath == "": the dependency resource exists AND has Ready=True + Synced=True conditions
 //   - FieldPath != "": the dependency resource exists AND the field path has a truthy value
 func (s *Sequencer) Evaluate() SequencerResult {
 	// Build map: resource -> list of unmet dependency descriptions.
@@ -58,10 +58,22 @@ func (s *Sequencer) Evaluate() SequencerResult {
 				fmt.Sprintf("%q to be observed", d.Dependency))
 			continue
 		}
-		// Resource exists. Check field path if specified.
-		if d.FieldPath != "" && !isFieldReady(res, d.FieldPath) {
-			unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-				fmt.Sprintf("%q field %q to be ready", d.Dependency, d.FieldPath))
+		if d.FieldPath != "" {
+			// Tuple syntax: check specific field path.
+			if !isFieldReady(res, d.FieldPath) {
+				unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+					fmt.Sprintf("%q field %q to be ready", d.Dependency, d.FieldPath))
+			}
+		} else {
+			// Plain ref: check Ready=True and Synced=True conditions.
+			if !hasCondition(res, "Ready", "True") {
+				unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+					fmt.Sprintf("%q to have Ready=True", d.Dependency))
+			}
+			if !hasCondition(res, "Synced", "True") {
+				unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+					fmt.Sprintf("%q to have Synced=True", d.Dependency))
+			}
 		}
 	}
 
@@ -108,6 +120,45 @@ func (s *Sequencer) Evaluate() SequencerResult {
 		Events:      events,
 		AnyDeferred: anyDeferred,
 	}
+}
+
+// hasCondition checks whether a resource has a condition with the given type
+// and status in its status.conditions[] array. Crossplane conditions follow
+// the standard structure: {type: "Ready", status: "True", ...}.
+func hasCondition(s *structpb.Struct, condType, condStatus string) bool {
+	if s == nil {
+		return false
+	}
+	status := s.GetFields()["status"]
+	if status == nil {
+		return false
+	}
+	statusStruct := status.GetStructValue()
+	if statusStruct == nil {
+		return false
+	}
+	conditions := statusStruct.GetFields()["conditions"]
+	if conditions == nil {
+		return false
+	}
+	condList := conditions.GetListValue()
+	if condList == nil {
+		return false
+	}
+	for _, item := range condList.GetValues() {
+		cond := item.GetStructValue()
+		if cond == nil {
+			continue
+		}
+		t := cond.GetFields()["type"]
+		s := cond.GetFields()["status"]
+		if t != nil && s != nil &&
+			t.GetStringValue() == condType &&
+			s.GetStringValue() == condStatus {
+			return true
+		}
+	}
+	return false
 }
 
 // isFieldReady checks whether a dot-separated field path has a truthy value
