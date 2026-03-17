@@ -3623,9 +3623,9 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		}
 	}
 
-	// TTL should be DefaultTTL (60s) when converged.
-	if got := rsp.GetMeta().GetTtl().AsDuration(); got != response.DefaultTTL {
-		t.Errorf("TTL = %v, want %v (DefaultTTL) when converged", got, response.DefaultTTL)
+	// TTL should be nil when converged (let Crossplane decide).
+	if rsp.GetMeta().GetTtl() != nil {
+		t.Errorf("TTL = %v, want nil when converged", rsp.GetMeta().GetTtl().AsDuration())
 	}
 
 	// No Synced=False condition from sequencing.
@@ -3800,9 +3800,9 @@ Resource("c", {"apiVersion": "v1", "kind": "C"}, depends_on=[b])`
 			t.Error("expected 'c' in desired state (both 'a' and 'b' observed)")
 		}
 
-		// When fully converged, TTL should be DefaultTTL.
-		if got := rsp.GetMeta().GetTtl().AsDuration(); got != response.DefaultTTL {
-			t.Errorf("TTL = %v, want %v when fully converged", got, response.DefaultTTL)
+		// When fully converged, TTL should be nil (let Crossplane decide).
+		if rsp.GetMeta().GetTtl() != nil {
+			t.Errorf("TTL = %v, want nil when fully converged", rsp.GetMeta().GetTtl().AsDuration())
 		}
 	})
 }

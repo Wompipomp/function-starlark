@@ -285,6 +285,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				// Set Synced=False to prevent premature Ready (per CONTEXT.md decision).
 				response.ConditionFalse(rsp, "Synced", "CreationSequencing").
 					WithMessage(fmt.Sprintf("%d resource(s) waiting for dependencies", len(result.Deferred)))
+			} else {
+				// Converged: clear TTL so Crossplane uses its own poll interval.
+				rsp.Meta.Ttl = nil
 			}
 
 			// Append sequencing events to condCollector for response emission.
