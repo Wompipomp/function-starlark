@@ -3549,11 +3549,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Error("expected Usage resource to be present even when dependent is deferred")
 	}
 
-	// Warning events with "Creation sequencing:" prefix should be present.
-	assertWarningResult(t, rsp, "Creation sequencing:", "app", "deferred")
-
-	// Summary event should be present.
-	assertWarningResult(t, rsp, "Creation sequencing:", "requeuing in 10s")
+	// Warning event with deferred resource names should be present.
+	assertWarningResult(t, rsp, "Creation sequencing:", "1 resource(s) deferred: app")
 
 	// TTL should be 10s (default sequencing TTL) when resources are deferred.
 	if got := rsp.GetMeta().GetTtl().AsDuration(); got != 10*time.Second {
@@ -3839,8 +3836,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Errorf("TTL = %v, want 30s (custom sequencingTTL)", got)
 	}
 
-	// Summary event should mention 30s.
-	assertWarningResult(t, rsp, "Creation sequencing:", "requeuing in 30s")
+	// Event should list deferred resource.
+	assertWarningResult(t, rsp, "Creation sequencing:", "1 resource(s) deferred: app")
 }
 
 // TestRunFunctionCreationSequencing_InvalidTTL verifies SEQ-05 error:

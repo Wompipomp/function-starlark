@@ -73,8 +73,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`app (waiting for "db" to be observed)`,
-				`1 resource(s) deferred, requeuing in 10s`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -90,10 +89,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				// Missing deps listed sorted
-				`"cache" to be observed`,
-				`"db" to be observed`,
-				`1 resource(s) deferred, requeuing in 10s`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -134,9 +130,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`B (waiting for "A" to be observed)`,
-				`C (waiting for "B" to be observed)`,
-				`2 resource(s) deferred, requeuing in 10s`,
+				`2 resource(s) deferred: B, C`,
 			},
 		},
 		{
@@ -154,8 +148,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`C (waiting for "B" to be observed)`,
-				`1 resource(s) deferred, requeuing in 10s`,
+				`1 resource(s) deferred: C`,
 			},
 		},
 		{
@@ -170,8 +163,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`app (waiting for "db" to be observed)`,
-				`requeuing in 30s`, // TTL=30s in summary
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -203,8 +195,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				// Only cache is listed as missing (db is observed+ready)
-				`app (waiting for "cache" to be observed)`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -238,7 +229,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`"db" to have Ready=True`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -262,7 +253,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred: true,
 			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
-				`"db" to have Synced=True`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -305,7 +296,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred: true,
 			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
-				`field "status.id" to be ready`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -500,7 +491,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred: true,
 			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
-				`field "status.id" to be ready`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -517,7 +508,7 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred: true,
 			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
-				`app (waiting for "db" field "status.atProvider.objectId" to be ready)`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 	}
@@ -751,7 +742,7 @@ func TestSequencerEdgeCases(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`app (waiting for "app" to be observed)`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -766,7 +757,7 @@ func TestSequencerEdgeCases(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`app (waiting for "external-db" to be observed)`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -781,7 +772,7 @@ func TestSequencerEdgeCases(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`requeuing in 0s`,
+				`1 resource(s) deferred: app`,
 			},
 		},
 		{
@@ -796,7 +787,7 @@ func TestSequencerEdgeCases(t *testing.T) {
 			wantAnyDeferred:   true,
 			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`phantom (waiting for "db" to be observed)`,
+				`1 resource(s) deferred: phantom`,
 			},
 		},
 	}

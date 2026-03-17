@@ -91,18 +91,13 @@ func (s *Sequencer) Evaluate() SequencerResult {
 
 	anyDeferred := len(deferred) > 0
 	if anyDeferred {
-		// Single consolidated event listing all deferred resources and their reasons.
-		var parts []string
-		for _, name := range deferred {
-			missing := unmetDeps[name]
-			sort.Strings(missing)
-			parts = append(parts, fmt.Sprintf("%s (waiting for %s)", name, strings.Join(missing, ", ")))
-		}
+		// Stable message (only resource names, no changing reasons) so Kubernetes
+		// deduplicates repeated events into a single entry with a counter.
 		events = append(events, CollectedEvent{
 			Severity: "Warning",
 			Message: fmt.Sprintf(
-				"Creation sequencing: %d resource(s) deferred, requeuing in %ds: %s",
-				len(deferred), s.ttlSeconds, strings.Join(parts, "; "),
+				"Creation sequencing: %d resource(s) deferred: %s",
+				len(deferred), strings.Join(deferred, ", "),
 			),
 			Target: "Composite",
 		})
