@@ -71,10 +71,10 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2, // per-resource + summary
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "app" deferred, waiting for "db" to be observed`,
-				`Creation sequencing: 1 resource(s) deferred; requeuing in 10s`,
+				`app (waiting for "db" to be observed)`,
+				`1 resource(s) deferred, requeuing in 10s`,
 			},
 		},
 		{
@@ -88,12 +88,12 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
 				// Missing deps listed sorted
 				`"cache" to be observed`,
 				`"db" to be observed`,
-				`Creation sequencing: 1 resource(s) deferred; requeuing in 10s`,
+				`1 resource(s) deferred, requeuing in 10s`,
 			},
 		},
 		{
@@ -132,11 +132,11 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"B", "C"}, // sorted
 			wantAnyDeferred:   true,
-			wantEventCount:    3, // 2 per-resource + 1 summary
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "B" deferred, waiting for "A" to be observed`,
-				`Creation sequencing: resource "C" deferred, waiting for "B" to be observed`,
-				`Creation sequencing: 2 resource(s) deferred; requeuing in 10s`,
+				`B (waiting for "A" to be observed)`,
+				`C (waiting for "B" to be observed)`,
+				`2 resource(s) deferred, requeuing in 10s`,
 			},
 		},
 		{
@@ -152,10 +152,10 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"C"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2, // per-resource + summary
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "C" deferred, waiting for "B" to be observed`,
-				`Creation sequencing: 1 resource(s) deferred; requeuing in 10s`,
+				`C (waiting for "B" to be observed)`,
+				`1 resource(s) deferred, requeuing in 10s`,
 			},
 		},
 		{
@@ -168,9 +168,9 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        30,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "app" deferred, waiting for "db" to be observed`,
+				`app (waiting for "db" to be observed)`,
 				`requeuing in 30s`, // TTL=30s in summary
 			},
 		},
@@ -186,7 +186,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"beta", "gamma", "zeta"}, // sorted
 			wantAnyDeferred:   true,
-			wantEventCount:    4, // 3 per-resource + 1 summary
+			wantEventCount:    1, // single consolidated event
 		},
 		{
 			name: "ANDSemantics",
@@ -201,10 +201,10 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
 				// Only cache is listed as missing (db is observed+ready)
-				`Creation sequencing: resource "app" deferred, waiting for "cache" to be observed`,
+				`app (waiting for "cache" to be observed)`,
 			},
 		},
 		{
@@ -219,7 +219,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"svc"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
 				`Creation sequencing:`,
 			},
@@ -236,7 +236,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
 				`"db" to have Ready=True`,
 			},
@@ -260,7 +260,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
 				`"db" to have Synced=True`,
 			},
@@ -303,7 +303,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
 				`field "status.id" to be ready`,
 			},
@@ -323,7 +323,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 		},
 		{
 			name: "FieldPathNonEmptyString",
@@ -357,7 +357,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 		},
 		{
 			name: "FieldPathNonZeroNumber",
@@ -391,7 +391,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 		},
 		{
 			name: "FieldPathBoolTrue",
@@ -425,7 +425,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 		},
 		{
 			name: "FieldPathNested",
@@ -498,7 +498,7 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
 				`field "status.id" to be ready`,
 			},
@@ -515,9 +515,9 @@ func TestSequencer(t *testing.T) {
 			ttlSeconds:      10,
 			wantDeferred:    []string{"app"},
 			wantAnyDeferred: true,
-			wantEventCount:  2,
+			wantEventCount:  1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "app" deferred, waiting for "db" field "status.atProvider.objectId" to be ready`,
+				`app (waiting for "db" field "status.atProvider.objectId" to be ready)`,
 			},
 		},
 	}
@@ -749,9 +749,9 @@ func TestSequencerEdgeCases(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "app" deferred, waiting for "app" to be observed`,
+				`app (waiting for "app" to be observed)`,
 			},
 		},
 		{
@@ -764,9 +764,9 @@ func TestSequencerEdgeCases(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "app" deferred, waiting for "external-db" to be observed`,
+				`app (waiting for "external-db" to be observed)`,
 			},
 		},
 		{
@@ -779,7 +779,7 @@ func TestSequencerEdgeCases(t *testing.T) {
 			ttlSeconds:        0,
 			wantDeferred:      []string{"app"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
 				`requeuing in 0s`,
 			},
@@ -794,9 +794,9 @@ func TestSequencerEdgeCases(t *testing.T) {
 			ttlSeconds:        10,
 			wantDeferred:      []string{"phantom"},
 			wantAnyDeferred:   true,
-			wantEventCount:    2,
+			wantEventCount:    1, // single consolidated event
 			wantEventMsgs: []string{
-				`Creation sequencing: resource "phantom" deferred, waiting for "db" to be observed`,
+				`phantom (waiting for "db" to be observed)`,
 			},
 		},
 	}

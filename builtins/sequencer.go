@@ -89,27 +89,20 @@ func (s *Sequencer) Evaluate() SequencerResult {
 	}
 	sort.Strings(deferred) // deterministic ordering
 
-	for _, name := range deferred {
-		missing := unmetDeps[name]
-		sort.Strings(missing)
-		msg := fmt.Sprintf(
-			"Creation sequencing: resource %q deferred, waiting for %s",
-			name, strings.Join(missing, ", "),
-		)
-		events = append(events, CollectedEvent{
-			Severity: "Warning",
-			Message:  msg,
-			Target:   "Composite",
-		})
-	}
-
 	anyDeferred := len(deferred) > 0
 	if anyDeferred {
+		// Single consolidated event listing all deferred resources and their reasons.
+		var parts []string
+		for _, name := range deferred {
+			missing := unmetDeps[name]
+			sort.Strings(missing)
+			parts = append(parts, fmt.Sprintf("%s (waiting for %s)", name, strings.Join(missing, ", ")))
+		}
 		events = append(events, CollectedEvent{
 			Severity: "Warning",
 			Message: fmt.Sprintf(
-				"Creation sequencing: %d resource(s) deferred; requeuing in %ds",
-				len(deferred), s.ttlSeconds,
+				"Creation sequencing: %d resource(s) deferred, requeuing in %ds: %s",
+				len(deferred), s.ttlSeconds, strings.Join(parts, "; "),
 			),
 			Target: "Composite",
 		})
