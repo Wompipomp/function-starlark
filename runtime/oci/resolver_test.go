@@ -183,12 +183,13 @@ func TestResolveWrongLayerType(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// With unknown layer type and no annotations, the file won't be found.
 	_, err = r.Resolve(context.Background(), []*OCILoadTarget{target})
 	if err == nil {
 		t.Fatal("expected error for wrong layer type")
 	}
-	if !strings.Contains(err.Error(), "layer media type") {
-		t.Errorf("error %q should mention layer media type", err.Error())
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error %q should mention file not found", err.Error())
 	}
 }
 

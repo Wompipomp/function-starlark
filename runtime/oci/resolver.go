@@ -250,21 +250,88 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		return nil, fmt.Errorf("OCI artifact %s has no layers", refStr)
 	}
 
-	// Validate layer media type — accept both custom and standard OCI layer types
-	// since oras uses the standard type by default.
-	mt, err := layers[0].MediaType()
-	if err != nil {
-		return nil, fmt.Errorf("getting layer media type for %s: %w", refStr, err)
-	}
-	if string(mt) != LayerMediaType && string(mt) != "application/vnd.oci.image.layer.v1.tar" {
-		return nil, fmt.Errorf(
-			"unexpected layer media type %q for %s; expected %q",
-			mt, refStr, LayerMediaType,
-		)
+	// Extract .star files from layers. oras pushes each file as a separate
+	// layer with the filename in the org.opencontainers.image.title annotation.
+	// We also support a single tar layer (custom media type) for backwards compat.
+	files := make(map[string]string)
+
+	if len(layers) == 1 && r.isTarLayer(layers[0]) {
+		// Single tar layer: extract all .star files from the tar archive.
+		extracted, err := r.extractFromTar(layers[0], refStr)
+		if err != nil {
+			return nil, err
+		}
+		return extracted, nil
 	}
 
-	// Extract tar contents.
-	rc, err := layers[0].Uncompressed()
+	// Multiple layers or standard OCI layer type: each layer is a raw file.
+	for i, layer := range layers {
+		if len(files) >= maxFileCount {
+			return nil, fmt.Errorf("OCI artifact %s exceeds maximum file count (%d)", refStr, maxFileCount)
+		}
+
+		// Get filename from annotation.
+		desc, err := r.layerDescriptor(img, i)
+		if err != nil {
+			return nil, fmt.Errorf("getting layer descriptor for %s: %w", refStr, err)
+		}
+		title := desc.Annotations["org.opencontainers.image.title"]
+		if title == "" {
+			continue
+		}
+		baseName := filepath.Base(title)
+		if !strings.HasSuffix(baseName, ".star") {
+			continue
+		}
+		if strings.Contains(title, "..") {
+			return nil, fmt.Errorf("path traversal detected in layer title %q from %s", title, refStr)
+		}
+
+		// Read raw layer content.
+		rc, err := layer.Uncompressed()
+		if err != nil {
+			return nil, fmt.Errorf("reading layer %d for %s: %w", i, refStr, err)
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, maxFileSize+1))
+		rc.Close() //nolint:errcheck
+		if err != nil {
+			return nil, fmt.Errorf("reading %s from %s: %w", baseName, refStr, err)
+		}
+		if len(data) > maxFileSize {
+			return nil, fmt.Errorf("file %s in %s exceeds maximum size (%d bytes)", baseName, refStr, maxFileSize)
+		}
+
+		files[baseName] = string(data)
+	}
+
+	return files, nil
+}
+
+// isTarLayer returns true if the layer has the custom Starlark tar media type.
+func (r *Resolver) isTarLayer(layer v1.Layer) bool {
+	mt, err := layer.MediaType()
+	if err != nil {
+		return false
+	}
+	return string(mt) == LayerMediaType
+}
+
+// layerDescriptor returns the descriptor for the layer at the given index
+// by reading it from the image manifest.
+func (r *Resolver) layerDescriptor(img v1.Image, index int) (v1.Descriptor, error) {
+	manifest, err := img.Manifest()
+	if err != nil {
+		return v1.Descriptor{}, err
+	}
+	if index >= len(manifest.Layers) {
+		return v1.Descriptor{}, fmt.Errorf("layer index %d out of range", index)
+	}
+	return manifest.Layers[index], nil
+}
+
+// extractFromTar extracts .star files from a single tar layer.
+func (r *Resolver) extractFromTar(layer v1.Layer, refStr string) (map[string]string, error) {
+	rc, err := layer.Uncompressed()
 	if err != nil {
 		return nil, fmt.Errorf("reading layer for %s: %w", refStr, err)
 	}
@@ -282,32 +349,20 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		if err != nil {
 			return nil, fmt.Errorf("reading tar from %s: %w", refStr, err)
 		}
-
-		// Skip non-regular files (symlinks, directories, etc.).
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-
-		// Flatten to base name.
 		baseName := filepath.Base(hdr.Name)
-
-		// Skip non-.star files.
 		if !strings.HasSuffix(baseName, ".star") {
 			continue
 		}
-
-		// Validate filename: no path traversal.
 		if strings.Contains(hdr.Name, "..") {
 			return nil, fmt.Errorf("path traversal detected in tar entry %q from %s", hdr.Name, refStr)
 		}
-
-		// Enforce file count limit.
 		fileCount++
 		if fileCount > maxFileCount {
 			return nil, fmt.Errorf("OCI artifact %s exceeds maximum file count (%d)", refStr, maxFileCount)
 		}
-
-		// Read file content with size limit.
 		data, err := io.ReadAll(io.LimitReader(tr, maxFileSize+1))
 		if err != nil {
 			return nil, fmt.Errorf("reading %s from tar in %s: %w", baseName, refStr, err)
@@ -315,7 +370,6 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		if len(data) > maxFileSize {
 			return nil, fmt.Errorf("file %s in %s exceeds maximum size (%d bytes)", baseName, refStr, maxFileSize)
 		}
-
 		files[baseName] = string(data)
 	}
 
