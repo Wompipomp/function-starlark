@@ -723,6 +723,7 @@ db_host = get_observed("my-db", "status.atProvider.address", "pending")
   observability metrics, and metadata & observed access builtins
 - [Standard library reference](stdlib-reference.md) -- Additional utility
   functions for networking, naming, labels, and conditions (loaded via
-  `load("oci://...")`)
+  short-form `load("starlark-stdlib:v1/naming.star", ...)` when a default
+  registry is configured, or explicit `load("oci://...", ...)`)
 - [Migration from KCL](migration-from-kcl.md) -- Concept mapping from KCL to
   function-starlark, including side-by-side examples

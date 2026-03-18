@@ -17,9 +17,10 @@ spec:
         apiVersion: starlark.fn.crossplane.io/v1alpha1
         kind: StarlarkInput
         spec:
+          ociDefaultRegistry: ghcr.io/wompipomp
           source: |
-            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
-            load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
+            load("starlark-stdlib:v1/naming.star", "resource_name")
+            load("starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
             # Read XR spec
             location = get(oxr, "spec.location", "eastus")
             rg_name = get(oxr, "spec.resourceGroupName", "default-rg")

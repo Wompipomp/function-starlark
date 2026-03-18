@@ -25,6 +25,7 @@ spec:
 | scriptConfigRef.name | string | -- | ConfigMap name containing the script |
 | scriptConfigRef.key | string | main.star | Key within the ConfigMap |
 | modules | map[string]string | -- | Inline modules loadable via load() |
+| ociDefaultRegistry | string | -- | Default OCI registry for short-form load syntax (e.g. "ghcr.io/my-org"). Overrides STARLARK_OCI_DEFAULT_REGISTRY env var. |
 | sequencingTTL | duration | 10s | Response TTL when creation sequencing defers resources |
 | dockerConfigSecret | string | -- | Secret name for private OCI registry auth |
 
@@ -179,7 +180,10 @@ require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
 Load shared code via standard Starlark load():
 
 ```python
-# From OCI registry (recommended for shared libraries)
+# Short-form OCI load (recommended, requires default registry configured)
+load("function-starlark-stdlib:v1/naming.star", "resource_name")
+
+# Explicit full OCI URL (always works)
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
 
 # From inline modules defined in StarlarkInput spec.modules
@@ -188,6 +192,27 @@ load("helpers.star", "make_tags")
 # From ConfigMap-mounted filesystem
 load("shared/utils.star", "validate")
 ```
+
+### Short-form OCI load syntax
+
+Pattern: `load("package:tag/file.star", "name")` -- the colon (`:`) or `@sha256:` in the target triggers default registry expansion.
+
+Detection rules (in order):
+1. Starts with `oci://` -- explicit full OCI URL (used as-is)
+2. Contains `:` or `@sha256:` -- short-form, expanded via default registry
+3. Otherwise -- local module (inline or filesystem)
+
+Configuration:
+- `spec.ociDefaultRegistry`: Per-composition override (highest priority)
+- `STARLARK_OCI_DEFAULT_REGISTRY` env var: Operator-level default (set on function pod via DeploymentRuntimeConfig)
+
+Expansion example with registry `ghcr.io/wompipomp`:
+- `function-starlark-stdlib:v1/naming.star` becomes `oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star`
+
+Valid short-form patterns:
+- `package:tag/file.star` (tag reference)
+- `package:tag/subdir/file.star` (nested file path)
+- `package@sha256:hex.../file.star` (digest pinning)
 
 ## Standard library (oci://ghcr.io/wompipomp/starlark-stdlib:v1/)
 
