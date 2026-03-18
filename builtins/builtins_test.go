@@ -66,7 +66,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"oxr", "dxr", "observed", "Resource", "skip_resource", "get",
 		"context", "environment", "extra_resources",
 		"set_condition", "emit_event", "fatal",
-		"set_connection_details", "require_resource", "require_resources",
+		"set_connection_details", "require_extra_resource", "require_extra_resources",
 		"get_label", "get_annotation", "set_xr_status", "get_observed",
 	}
 	if len(globals) != len(expected) {

@@ -10,7 +10,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// RequirementsCollector / require_resource tests
+// RequirementsCollector / require_extra_resource tests
 // ---------------------------------------------------------------------------
 
 func TestRequirementsCollector_NewEmpty(t *testing.T) {
@@ -23,11 +23,11 @@ func TestRequirementsCollector_NewEmpty(t *testing.T) {
 	}
 }
 
-func TestRequireResource_MatchName(t *testing.T) {
+func TestRequireExtraResource_MatchName(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("rds.aws.upbound.io/v1beta1"),
 		starlark.String("Instance"),
@@ -35,7 +35,7 @@ func TestRequireResource_MatchName(t *testing.T) {
 		{starlark.String("match_name"), starlark.String("my-database")},
 	})
 	if err != nil {
-		t.Fatalf("require_resource error: %v", err)
+		t.Fatalf("require_extra_resource error: %v", err)
 	}
 
 	reqs := rc.Requirements()
@@ -60,14 +60,14 @@ func TestRequireResource_MatchName(t *testing.T) {
 	}
 }
 
-func TestRequireResource_MatchLabels(t *testing.T) {
+func TestRequireExtraResource_MatchLabels(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("rds.aws.upbound.io/v1beta1"),
 		starlark.String("Instance"),
@@ -75,7 +75,7 @@ func TestRequireResource_MatchLabels(t *testing.T) {
 		{starlark.String("match_labels"), labels},
 	})
 	if err != nil {
-		t.Fatalf("require_resource error: %v", err)
+		t.Fatalf("require_extra_resource error: %v", err)
 	}
 
 	r := rc.Requirements()[0]
@@ -87,14 +87,14 @@ func TestRequireResource_MatchLabels(t *testing.T) {
 	}
 }
 
-func TestRequireResource_BothMatchNameAndLabels_NameWins(t *testing.T) {
+func TestRequireExtraResource_BothMatchNameAndLabels_NameWins(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("rds.aws.upbound.io/v1beta1"),
 		starlark.String("Instance"),
@@ -103,7 +103,7 @@ func TestRequireResource_BothMatchNameAndLabels_NameWins(t *testing.T) {
 		{starlark.String("match_labels"), labels},
 	})
 	if err != nil {
-		t.Fatalf("require_resource error: %v", err)
+		t.Fatalf("require_extra_resource error: %v", err)
 	}
 
 	r := rc.Requirements()[0]
@@ -115,14 +115,14 @@ func TestRequireResource_BothMatchNameAndLabels_NameWins(t *testing.T) {
 	}
 }
 
-func TestRequireResource_MatchConflictWarning(t *testing.T) {
+func TestRequireExtraResource_MatchConflictWarning(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("env"), starlark.String("prod"))
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-vpc"),
 		starlark.String("ec2.aws.upbound.io/v1beta1"),
 		starlark.String("VPC"),
@@ -131,7 +131,7 @@ func TestRequireResource_MatchConflictWarning(t *testing.T) {
 		{starlark.String("match_labels"), labels},
 	})
 	if err != nil {
-		t.Fatalf("require_resource error: %v", err)
+		t.Fatalf("require_extra_resource error: %v", err)
 	}
 
 	// Should have exactly 1 warning.
@@ -153,11 +153,11 @@ func TestRequireResource_MatchConflictWarning(t *testing.T) {
 	}
 }
 
-func TestRequireResource_MatchNameOnly_NoWarning(t *testing.T) {
+func TestRequireExtraResource_MatchNameOnly_NoWarning(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("v1"),
 		starlark.String("Instance"),
@@ -172,14 +172,14 @@ func TestRequireResource_MatchNameOnly_NoWarning(t *testing.T) {
 	}
 }
 
-func TestRequireResource_MatchLabelsOnly_NoWarning(t *testing.T) {
+func TestRequireExtraResource_MatchLabelsOnly_NoWarning(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("v1"),
 		starlark.String("Instance"),
@@ -194,17 +194,17 @@ func TestRequireResource_MatchLabelsOnly_NoWarning(t *testing.T) {
 	}
 }
 
-func TestRequireResource_NeitherMatchNameNorLabels_Error(t *testing.T) {
+func TestRequireExtraResource_NeitherMatchNameNorLabels_Error(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
-	_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("rds.aws.upbound.io/v1beta1"),
 		starlark.String("Instance"),
 	}, nil)
 	if err == nil {
-		t.Fatal("require_resource without match_name or match_labels should error")
+		t.Fatal("require_extra_resource without match_name or match_labels should error")
 	}
 	if !strings.Contains(err.Error(), "match_name") || !strings.Contains(err.Error(), "match_labels") {
 		t.Errorf("error %q should mention match_name and match_labels", err.Error())
@@ -212,17 +212,17 @@ func TestRequireResource_NeitherMatchNameNorLabels_Error(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// require_resources tests
+// require_extra_resources tests
 // ---------------------------------------------------------------------------
 
-func TestRequireResources_MatchLabels(t *testing.T) {
+func TestRequireExtraResources_MatchLabels(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("team"), starlark.String("platform"))
 
-	_, err := starlark.Call(thread, rc.RequireResourcesBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourcesBuiltin(), starlark.Tuple{
 		starlark.String("all-dbs"),
 		starlark.String("rds.aws.upbound.io/v1beta1"),
 		starlark.String("Instance"),
@@ -245,14 +245,14 @@ func TestRequireResources_MatchLabels(t *testing.T) {
 	}
 }
 
-func TestRequireResources_NonStringLabelValue(t *testing.T) {
+func TestRequireExtraResources_NonStringLabelValue(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("app"), starlark.MakeInt(42))
 
-	_, err := starlark.Call(thread, rc.RequireResourcesBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourcesBuiltin(), starlark.Tuple{
 		starlark.String("dbs"),
 		starlark.String("v1"),
 		starlark.String("Instance"),
@@ -266,14 +266,14 @@ func TestRequireResources_NonStringLabelValue(t *testing.T) {
 	}
 }
 
-func TestRequireResources_NonStringLabelKey(t *testing.T) {
+func TestRequireExtraResources_NonStringLabelKey(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.MakeInt(42), starlark.String("value"))
 
-	_, err := starlark.Call(thread, rc.RequireResourcesBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourcesBuiltin(), starlark.Tuple{
 		starlark.String("dbs"),
 		starlark.String("v1"),
 		starlark.String("Instance"),
@@ -287,12 +287,12 @@ func TestRequireResources_NonStringLabelKey(t *testing.T) {
 	}
 }
 
-func TestRequireResources_MatchLabelsRequired(t *testing.T) {
+func TestRequireExtraResources_MatchLabelsRequired(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
 	// Missing match_labels (required positional)
-	_, err := starlark.Call(thread, rc.RequireResourcesBuiltin(), starlark.Tuple{
+	_, err := starlark.Call(thread, rc.RequireExtraResourcesBuiltin(), starlark.Tuple{
 		starlark.String("all-dbs"),
 		starlark.String("rds.aws.upbound.io/v1beta1"),
 		starlark.String("Instance"),
@@ -313,7 +313,7 @@ func TestRequirements_ReturnsCopy(t *testing.T) {
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
 
-	_, _ = starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, _ = starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("v1"),
 		starlark.String("Instance"),
@@ -617,7 +617,7 @@ func TestWarnings_ReturnsCopy(t *testing.T) {
 	labels := new(starlark.Dict)
 	_ = labels.SetKey(starlark.String("app"), starlark.String("db"))
 
-	_, _ = starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+	_, _ = starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 		starlark.String("my-db"),
 		starlark.String("v1"),
 		starlark.String("Instance"),
@@ -637,7 +637,7 @@ func TestWarnings_ReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestRequireResource_MultipleWarnings(t *testing.T) {
+func TestRequireExtraResource_MultipleWarnings(t *testing.T) {
 	rc := NewRequirementsCollector()
 	thread := new(starlark.Thread)
 
@@ -646,7 +646,7 @@ func TestRequireResource_MultipleWarnings(t *testing.T) {
 		labels := new(starlark.Dict)
 		_ = labels.SetKey(starlark.String("env"), starlark.String("prod"))
 
-		_, err := starlark.Call(thread, rc.RequireResourceBuiltin(), starlark.Tuple{
+		_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
 			starlark.String(name),
 			starlark.String("v1"),
 			starlark.String("VPC"),

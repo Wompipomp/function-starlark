@@ -1426,7 +1426,7 @@ func TestRunFunction(t *testing.T) {
 
 		// STAT-08: Extra Resources Request (first reconciliation -- no resources yet)
 		"ExtraResourcesRequest": {
-			reason: "STAT-08: Script calls require_resource; response has Requirements with ResourceSelector.",
+			reason: "STAT-08: Script calls require_extra_resource; response has Requirements with ResourceSelector.",
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
@@ -1434,7 +1434,7 @@ func TestRunFunction(t *testing.T) {
 						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
 						"kind": "StarlarkInput",
 						"spec": {
-							"source": "require_resource('my-db', 'rds.aws.upbound.io/v1beta1', 'Instance', match_name='my-database')"
+							"source": "require_extra_resource('my-db', 'rds.aws.upbound.io/v1beta1', 'Instance', match_name='my-database')"
 						}
 					}`),
 				},
@@ -1446,7 +1446,7 @@ func TestRunFunction(t *testing.T) {
 							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
 							"kind": "StarlarkInput",
 							"spec": {
-								"source": "require_resource('my-db', 'rds.aws.upbound.io/v1beta1', 'Instance', match_name='my-database')"
+								"source": "require_extra_resource('my-db', 'rds.aws.upbound.io/v1beta1', 'Instance', match_name='my-database')"
 							}
 						}`),
 					}, response.DefaultTTL)
@@ -1473,7 +1473,7 @@ func TestRunFunction(t *testing.T) {
 
 		// STAT-08: Extra Resources Read (second reconciliation -- resources available)
 		"ExtraResourcesRead": {
-			reason: "STAT-08: Script reads extra_resources from a previous require_resource response.",
+			reason: "STAT-08: Script reads extra_resources from a previous require_extra_resource response.",
 			args: args{
 				ctx: context.Background(),
 				req: &fnv1.RunFunctionRequest{
