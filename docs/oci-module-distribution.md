@@ -7,19 +7,45 @@ OCI-compatible container registry (GHCR, ACR, ECR, Docker Hub, Harbor, etc.).
 
 function-starlark resolves OCI modules **before** any Starlark code runs:
 
-1. Scan the main script and inline modules for `oci://` load targets
-2. Deduplicate references (same registry/repo:tag = one pull)
-3. Fetch artifacts from the registry (or serve from in-memory cache)
-4. Scan fetched modules for transitive `oci://` loads, repeat until resolved
-5. Inject all resolved `.star` files into the inline module map
-6. Execute the script — all OCI modules available as if they were inline
+1. Scan the main script and inline modules for OCI load targets (both
+   short-form `package:tag/file.star` and explicit `oci://` URLs)
+2. Expand short-form targets using the configured default registry
+3. Deduplicate references (same registry/repo:tag = one pull)
+4. Fetch artifacts from the registry (or serve from in-memory cache)
+5. Scan fetched modules for transitive OCI loads, repeat until resolved
+6. Inject all resolved `.star` files into the inline module map
+7. Execute the script -- all OCI modules available as if they were inline
 
 This resolve-then-execute architecture preserves Starlark's sandbox hermeticity:
 no network access happens during script execution.
 
 ## Loading OCI modules
 
-Use the `oci://` prefix in `load()` statements:
+### Short-form (recommended)
+
+When a default OCI registry is configured (see
+[Configuring the Default Registry](#configuring-the-default-registry)), use the
+concise short-form syntax:
+
+```python
+# Load by tag
+load("my-org-starlark-lib:v1/helpers.star", "create_bucket", "create_topic")
+
+# Load by digest (deterministic, skips tag resolution)
+load("my-org-starlark-lib@sha256:abc123.../helpers.star", "create_bucket")
+
+# Star import -- all public exports
+load("my-org-starlark-lib:v1/helpers.star", "*")
+```
+
+Short-form references are expanded using the default registry. For example,
+with registry `ghcr.io/my-org`, `my-org-starlark-lib:v1/helpers.star` becomes
+`oci://ghcr.io/my-org/my-org-starlark-lib:v1/helpers.star`.
+
+### Explicit full URL
+
+Use the `oci://` prefix for full control over the registry path, or when no
+default registry is configured:
 
 ```python
 # Load by tag
@@ -28,7 +54,7 @@ load("oci://ghcr.io/my-org/starlark-lib:v1/helpers.star", "create_bucket", "crea
 # Load by digest (deterministic, skips tag resolution)
 load("oci://ghcr.io/my-org/starlark-lib@sha256:abc123.../helpers.star", "create_bucket")
 
-# Star import — all public exports
+# Star import -- all public exports
 load("oci://ghcr.io/my-org/starlark-lib:v1/helpers.star", "*")
 ```
 
@@ -66,6 +92,87 @@ load("oci://ghcr.io/my-org/lib:v1/helpers.star", "create_bucket", "*")
 ```
 
 Names starting with `_` are private and never exported through star import.
+
+## Configuring the Default Registry
+
+The default registry enables short-form load syntax by providing the
+`registry/namespace` prefix for expansion. Configure it at the operator level
+(all compositions) or per-composition.
+
+### Environment variable (operator-level)
+
+Set `STARLARK_OCI_DEFAULT_REGISTRY` on the function pod via a
+DeploymentRuntimeConfig:
+
+```yaml
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: function-starlark
+spec:
+  deploymentTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              env:
+                - name: STARLARK_OCI_DEFAULT_REGISTRY
+                  value: "ghcr.io/my-org"
+              # If you also need private registry auth, add volume mounts here
+              volumeMounts:
+                - name: registry-creds
+                  mountPath: /var/run/secrets/docker/my-registry-creds
+                  readOnly: true
+          volumes:
+            - name: registry-creds
+              secret:
+                secretName: my-registry-creds
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+```
+
+Reference the runtime config in your Function:
+
+```yaml
+apiVersion: pkg.crossplane.io/v1beta1
+kind: Function
+metadata:
+  name: function-starlark
+spec:
+  package: ghcr.io/wompipomp/function-starlark:latest
+  runtimeConfigRef:
+    name: function-starlark
+```
+
+### Spec field (per-composition override)
+
+Set `spec.ociDefaultRegistry` in the StarlarkInput to override or replace the
+environment variable for a specific composition:
+
+```yaml
+apiVersion: starlark.fn.crossplane.io/v1alpha1
+kind: StarlarkInput
+spec:
+  ociDefaultRegistry: "ghcr.io/my-org"
+  source: |
+    load("my-starlark-lib:v1/helpers.star", "create_bucket")
+    Resource("bucket", create_bucket("us-east-1"))
+```
+
+### Precedence
+
+`spec.ociDefaultRegistry` (non-empty) takes precedence over the
+`STARLARK_OCI_DEFAULT_REGISTRY` environment variable. If neither is configured
+and a short-form load target is encountered, the function returns a fatal error
+with a clear message explaining both configuration options.
+
+### Registry value format
+
+The registry value is `host/namespace` (e.g., `ghcr.io/my-org`). Do not
+include the `oci://` prefix -- it is stripped silently if present. Trailing
+slashes are also stripped silently.
 
 ## Publishing modules
 
@@ -421,21 +528,25 @@ most common composition patterns:
 ### Loading stdlib modules
 
 ```python
-# Load specific functions
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr", "cidr_contains")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "degraded")
+# Short-form (recommended, requires default registry ghcr.io/wompipomp)
+load("starlark-stdlib:v1/networking.star", "subnet_cidr", "cidr_contains")
+load("starlark-stdlib:v1/naming.star", "resource_name")
+load("starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
+load("starlark-stdlib:v1/conditions.star", "degraded")
 
 # Or use star import to get everything from a module
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "*")
+load("starlark-stdlib:v1/networking.star", "*")
+
+# Explicit full URL (always works, no default registry needed)
+load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr")
 ```
 
 ### Example composition using stdlib
 
 ```python
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
+# With default registry configured to ghcr.io/wompipomp
+load("starlark-stdlib:v1/naming.star", "resource_name")
+load("starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
 
 name = resource_name("bucket")
 labels = merge_labels(
@@ -460,6 +571,10 @@ The following fields are relevant to OCI module distribution:
 
 ```yaml
 spec:
+  # Default OCI registry for short-form load syntax (overrides env var)
+  # Format: "registry/namespace" (e.g. "ghcr.io/my-org")
+  ociDefaultRegistry: "ghcr.io/my-org"
+
   # OCI cache TTL for tag-to-digest resolution (Go duration format)
   # Default: "5m"
   ociCacheTTL: "5m"

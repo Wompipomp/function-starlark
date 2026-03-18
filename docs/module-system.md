@@ -72,10 +72,26 @@ The ConfigMap must be mounted into the function pod via a
 DeploymentRuntimeConfig. See the [deployment guide](deployment-guide.md) for
 mount configuration.
 
-### OCI modules
+### OCI modules (short-form)
 
 Starlark modules packaged and distributed as OCI artifacts. Best for shared
 libraries across teams and clusters, and versioned module distribution.
+
+When a [default OCI registry](#configuring-the-default-oci-registry) is
+configured, use the concise short-form syntax:
+
+```python
+load("function-starlark-stdlib:v1/naming.star", "resource_name")
+```
+
+The short-form `package:tag/file.star` is expanded using the configured default
+registry. For example, with registry `ghcr.io/wompipomp`, the load above
+becomes `oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star`.
+
+### OCI modules (explicit full URL)
+
+For cases where you need to specify the full registry path, or when no default
+registry is configured, use the explicit `oci://` form:
 
 ```python
 load("oci://ghcr.io/my-org/starlark-lib:v1/helpers.star", "create_bucket")
@@ -84,6 +100,103 @@ load("oci://ghcr.io/my-org/starlark-lib:v1/helpers.star", "create_bucket")
 OCI modules are resolved before any Starlark code runs, preserving sandbox
 hermeticity. For the full guide on registry setup, pushing, versioning, and
 authentication, see the [OCI module distribution guide](oci-module-distribution.md).
+
+## Configuring the Default OCI Registry
+
+The default OCI registry tells function-starlark where to find short-form
+module references. There are two configuration methods, and the spec field
+takes precedence over the environment variable.
+
+### Configuration methods
+
+**1. Environment variable (operator-level)**
+
+Set `STARLARK_OCI_DEFAULT_REGISTRY` on the function pod via a
+DeploymentRuntimeConfig. This applies to all compositions using this function
+instance:
+
+```yaml
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: function-starlark
+spec:
+  deploymentTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              env:
+                - name: STARLARK_OCI_DEFAULT_REGISTRY
+                  value: "ghcr.io/my-org"
+```
+
+**2. Spec field (per-composition override)**
+
+Set `spec.ociDefaultRegistry` in the StarlarkInput to override the
+environment variable for a specific composition:
+
+```yaml
+apiVersion: starlark.fn.crossplane.io/v1alpha1
+kind: StarlarkInput
+spec:
+  ociDefaultRegistry: "ghcr.io/my-org"
+  source: |
+    load("my-starlark-lib:v1/helpers.star", "create_bucket")
+    Resource("bucket", create_bucket("us-east-1"))
+```
+
+### Precedence
+
+| Priority | Source | Scope |
+|----------|--------|-------|
+| 1 (highest) | `spec.ociDefaultRegistry` | Per-composition |
+| 2 | `STARLARK_OCI_DEFAULT_REGISTRY` env var | All compositions on this function pod |
+
+If `spec.ociDefaultRegistry` is set (non-empty), it wins. Otherwise the
+environment variable is used. If neither is configured and a short-form load
+target is encountered, the function returns a fatal error:
+
+```
+load target "function-starlark-stdlib:v1/naming.star" requires a default OCI registry;
+set STARLARK_OCI_DEFAULT_REGISTRY env var on the function pod or spec.ociDefaultRegistry in function input
+```
+
+### Detection rules
+
+function-starlark determines the load type using these rules, applied in order:
+
+1. **Starts with `oci://`** -- explicit full OCI URL (no expansion, used as-is)
+2. **Contains `:` or `@sha256:`** -- short-form OCI reference, expanded via
+   the default registry
+3. **Otherwise** -- local module (inline or filesystem)
+
+### Short-form patterns
+
+```python
+# Tag reference
+load("my-lib:v1/helpers.star", "create_bucket")
+
+# Nested file path
+load("my-lib:v1/subdir/utils.star", "validate")
+
+# Digest pinning (deterministic, skips tag resolution)
+load("my-lib@sha256:abc123.../helpers.star", "create_bucket")
+```
+
+### How expansion works
+
+Given a default registry of `ghcr.io/my-org`:
+
+| Short-form | Expands to |
+|-----------|------------|
+| `my-lib:v1/helpers.star` | `oci://ghcr.io/my-org/my-lib:v1/helpers.star` |
+| `my-lib:v1/sub/utils.star` | `oci://ghcr.io/my-org/my-lib:v1/sub/utils.star` |
+| `my-lib@sha256:abc.../h.star` | `oci://ghcr.io/my-org/my-lib@sha256:abc.../h.star` |
+
+The registry value format is `host/namespace` (e.g., `ghcr.io/my-org`). Do not
+include `oci://` in the registry value -- it is stripped silently if present.
 
 ## The load() statement
 
@@ -105,20 +218,24 @@ order:
 
 1. **Inline modules** (`spec.modules`) -- keyed by filename
 2. **Module paths** (`spec.modulePaths`) -- filesystem directories
-3. **OCI modules** (`oci://` prefix) -- remote OCI registries
+3. **Short-form OCI modules** (`package:tag/file.star`) -- expanded via default registry
+4. **Explicit OCI modules** (`oci://` prefix) -- full OCI URL
 
 ```python
 # 1. Inline module (defined in spec.modules)
 load("helpers.star", "my_func")
 
-# 2. OCI module (explicit oci:// prefix)
+# 2. Short-form OCI module (requires default registry configured)
+load("function-starlark-stdlib:v1/naming.star", "resource_name")
+
+# 3. Explicit OCI module (full URL, no default registry needed)
 load("oci://ghcr.io/myorg/starlark-libs/networking:v1.0.0/helpers.star", "subnet_cidr")
 
-# 3. Standard library (published as OCI artifact)
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/labels.star", "standard_labels")
-load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/conditions.star", "degraded")
+# 4. Standard library (using short-form with default registry)
+load("function-starlark-stdlib:v1/networking.star", "subnet_cidr")
+load("function-starlark-stdlib:v1/naming.star", "resource_name")
+load("function-starlark-stdlib:v1/labels.star", "standard_labels")
+load("function-starlark-stdlib:v1/conditions.star", "degraded")
 ```
 
 ## Inline modules
@@ -163,6 +280,10 @@ composition patterns:
 | `conditions.star` | `degraded` | Operational status signaling |
 
 ```python
+# Short-form (recommended, requires default registry configured)
+load("starlark-stdlib:v1/networking.star", "subnet_cidr")
+
+# Explicit full URL (always works, no default registry needed)
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/networking.star", "subnet_cidr")
 
 subnet = subnet_cidr("10.0.0.0/16", 8, 1)  # "10.0.1.0/24"
