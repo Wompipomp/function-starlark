@@ -93,6 +93,51 @@ func ParseOCILoadTarget(raw string) (*OCILoadTarget, error) {
 	return target, nil
 }
 
+// IsDefaultRegistryTarget returns true if the module string is a short-form
+// load target that requires expansion via a default registry.
+// Detection rules (in order):
+//  1. starts with "oci://" -> false (explicit full OCI)
+//  2. contains ":" or "@sha256:" -> true (default-registry package)
+//  3. otherwise -> false (local module)
+func IsDefaultRegistryTarget(module string) bool {
+	if strings.HasPrefix(module, "oci://") {
+		return false
+	}
+	return strings.Contains(module, ":") || strings.Contains(module, "@sha256:")
+}
+
+// ExpandDefaultRegistry expands a short-form load target to a full oci:// URL.
+// target is like "function-starlark-stdlib:v1/naming.star"
+// registry is like "ghcr.io/wompipomp"
+// Returns "oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star"
+func ExpandDefaultRegistry(target, registry string) (string, error) {
+	if registry == "" {
+		return "", fmt.Errorf(
+			"load target %q requires a default OCI registry; "+
+				"set STARLARK_OCI_DEFAULT_REGISTRY env var on the function pod "+
+				"or spec.ociDefaultRegistry in function input",
+			target,
+		)
+	}
+	return "oci://" + registry + "/" + target, nil
+}
+
+// NormalizeRegistry cleans a registry value by stripping oci:// prefix and trailing slashes.
+func NormalizeRegistry(registry string) string {
+	r := strings.TrimPrefix(registry, "oci://")
+	return strings.TrimRight(r, "/")
+}
+
+// ValidateRegistry checks that a registry string is a valid OCI registry+namespace.
+// Uses go-containerregistry's name.NewRepository with strict validation.
+func ValidateRegistry(registry string) error {
+	_, err := name.NewRepository(registry+"/validate", name.StrictValidation)
+	if err != nil {
+		return fmt.Errorf("invalid default OCI registry %q: %w", registry, err)
+	}
+	return nil
+}
+
 // splitRefAndFile separates the OCI reference portion from the file path.
 //
 // For tag refs like "ghcr.io/org/modules:v1/helpers.star":
