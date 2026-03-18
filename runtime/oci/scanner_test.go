@@ -6,12 +6,13 @@ import (
 
 func TestScanForOCILoads(t *testing.T) {
 	tests := []struct {
-		name          string
-		source        string
-		inlineModules map[string]string
-		wantCount     int
-		wantRefs      []string // expected RefStr values
-		wantErr       string
+		name            string
+		source          string
+		inlineModules   map[string]string
+		defaultRegistry string
+		wantCount       int
+		wantRefs        []string // expected RefStr values
+		wantErr         string
 	}{
 		{
 			name:      "single oci load",
@@ -69,11 +70,53 @@ load("other.star", "fn3")`,
 			wantCount: 1,
 			wantRefs:  []string{"ghcr.io/org/lib:v1"},
 		},
+		// --- New default registry test cases ---
+		{
+			name:            "short-form with default registry",
+			source:          `load("function-starlark-stdlib:v1/naming.star", "x")`,
+			defaultRegistry: "ghcr.io/wompipomp",
+			wantCount:       1,
+			wantRefs:        []string{"ghcr.io/wompipomp/function-starlark-stdlib:v1"},
+		},
+		{
+			name:            "short-form without default registry errors",
+			source:          `load("function-starlark-stdlib:v1/naming.star", "x")`,
+			defaultRegistry: "",
+			wantErr:         "requires a default OCI registry",
+		},
+		{
+			name:            "short-form digest with default registry",
+			source:          `load("pkg@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/file.star", "x")`,
+			defaultRegistry: "ghcr.io/org",
+			wantCount:       1,
+			wantRefs:        []string{"ghcr.io/org/pkg@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+		},
+		{
+			name:            "explicit oci:// unaffected by default registry",
+			source:          `load("oci://ghcr.io/org/lib:v1/h.star", "fn")`,
+			defaultRegistry: "other.registry.io/ns",
+			wantCount:       1,
+			wantRefs:        []string{"ghcr.io/org/lib:v1"},
+		},
+		{
+			name:            "local module unaffected by default registry",
+			source:          `load("local.star", "fn")`,
+			defaultRegistry: "ghcr.io/wompipomp",
+			wantCount:       0,
+		},
+		{
+			name: "mixed short-form and oci://",
+			source: `load("function-starlark-stdlib:v1/naming.star", "x")
+load("oci://ghcr.io/org/lib:v1/h.star", "fn")`,
+			defaultRegistry: "ghcr.io/wompipomp",
+			wantCount:       2,
+			wantRefs:        []string{"ghcr.io/wompipomp/function-starlark-stdlib:v1", "ghcr.io/org/lib:v1"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ScanForOCILoads(tt.source, tt.inlineModules)
+			got, err := ScanForOCILoads(tt.source, tt.inlineModules, tt.defaultRegistry)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErr)

@@ -823,3 +823,65 @@ func TestModuleEmptyName(t *testing.T) {
 		t.Errorf("error = %q, want it to contain '.star'", err.Error())
 	}
 }
+
+// ========================
+// Default Registry Tests
+// ========================
+
+func TestModuleDefaultRegistryExpansion(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Pre-populate inline modules with the base filename that would be
+	// injected by fn.go after OCI resolution.
+	inline := map[string]string{
+		"naming.star": `def resource_name(n): return "prefix-" + n`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "ghcr.io/wompipomp")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	// Load using short-form -- should expand to oci:// and route to inline module by base filename.
+	loaded, err := thread.Load(thread, "function-starlark-stdlib:v1/naming.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	fn, ok := loaded["resource_name"]
+	if !ok {
+		t.Fatal("expected 'resource_name' in loaded globals")
+	}
+
+	result, err := starlark.Call(thread, fn, starlark.Tuple{starlark.String("test")}, nil)
+	if err != nil {
+		t.Fatalf("calling resource_name: %v", err)
+	}
+
+	if result.(starlark.String) != "prefix-test" {
+		t.Errorf("resource_name('test') = %v, want 'prefix-test'", result)
+	}
+}
+
+func TestModuleDefaultRegistryNotConfigured(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "function-starlark-stdlib:v1/naming.star")
+	if err == nil {
+		t.Fatal("expected error for short-form load without default registry, got nil")
+	}
+
+	errStr := err.Error()
+	if !strings.Contains(errStr, "requires a default OCI registry") {
+		t.Errorf("error = %q, want it to contain 'requires a default OCI registry'", errStr)
+	}
+	if !strings.Contains(errStr, "STARLARK_OCI_DEFAULT_REGISTRY") {
+		t.Errorf("error = %q, want it to contain 'STARLARK_OCI_DEFAULT_REGISTRY'", errStr)
+	}
+	if !strings.Contains(errStr, "spec.ociDefaultRegistry") {
+		t.Errorf("error = %q, want it to contain 'spec.ociDefaultRegistry'", errStr)
+	}
+}
