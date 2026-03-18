@@ -21,7 +21,7 @@ spec:
             # Globals available: oxr, dxr, observed, context, environment, extra_resources
             #   get, get_label, get_annotation, get_observed, set_xr_status,
             #   Resource, skip_resource, set_condition, emit_event, fatal,
-            #   set_connection_details, require_resource, require_resources
+            #   set_connection_details, require_extra_resource, require_extra_resources
             #
             # Note: context read/write is verified in unit tests (fn_test.go
             # ContextReadWrite) but omitted here because crossplane render

@@ -249,20 +249,20 @@ emit_event("Normal", "Composition reconciled: %d resources in %s" % (count, regi
 Read existing cluster resources during composition using the extra resources
 API.
 
-### require_resource
+### require_extra_resource
 
 Request a single resource by name or labels:
 
 ```python
-require_resource("vpc", "ec2.aws.upbound.io/v1beta1", "VPC", match_name="my-vpc")
+require_extra_resource("vpc", "ec2.aws.upbound.io/v1beta1", "VPC", match_name="my-vpc")
 ```
 
-### require_resources
+### require_extra_resources
 
 Request multiple resources by label selector:
 
 ```python
-require_resources("subnets", "ec2.aws.upbound.io/v1beta1", "Subnet",
+require_extra_resources("subnets", "ec2.aws.upbound.io/v1beta1", "Subnet",
     match_labels={"network": "main"})
 ```
 
@@ -271,7 +271,7 @@ require_resources("subnets", "ec2.aws.upbound.io/v1beta1", "Subnet",
 Required resources are available via the `extra_resources` global dict:
 
 ```python
-require_resource("vpc", "ec2.aws.upbound.io/v1beta1", "VPC", match_name="my-vpc")
+require_extra_resource("vpc", "ec2.aws.upbound.io/v1beta1", "VPC", match_name="my-vpc")
 
 # Access the result (available after Crossplane fulfills the requirement)
 vpc = extra_resources.get("vpc")

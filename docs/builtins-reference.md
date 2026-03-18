@@ -13,7 +13,7 @@ are the core API for interacting with Crossplane's composite resource model.
 | `observed` | global | Observed composed resources by name (read-only) |
 | `context` | global | Pipeline context (read-write) |
 | `environment` | global | EnvironmentConfig data (read-only) |
-| `extra_resources` | global | Extra resources from require_resource/require_resources (read-only) |
+| `extra_resources` | global | Extra resources from require_extra_resource/require_extra_resources (read-only) |
 | `Resource()` | function | Register a desired composed resource |
 | `skip_resource()` | function | Remove a resource from desired state |
 | `get()` | function | Safe nested dict access with dot-path |
@@ -25,8 +25,8 @@ are the core API for interacting with Crossplane's composite resource model.
 | `set_connection_details()` | function | Set XR-level connection details |
 | `set_xr_status()` | function | Set XR status field at dot-path with auto-created intermediates |
 | `get_observed()` | function | One-call observed resource field lookup with default |
-| `require_resource()` | function | Request a single extra resource |
-| `require_resources()` | function | Request multiple extra resources |
+| `require_extra_resource()` | function | Request a single extra resource |
+| `require_extra_resources()` | function | Request multiple extra resources |
 
 ---
 
@@ -127,12 +127,12 @@ env_region = get(environment, "region", "us-east-1")
 
 **Type:** frozen dict (read-only)
 
-Extra resources requested via `require_resource()` or `require_resources()`.
+Extra resources requested via `require_extra_resource()` or `require_extra_resources()`.
 Keyed by the request name passed to those functions. This is a plain Starlark
 dict (not a StarlarkDict).
 
 ```python
-require_resource("config", "v1", "ConfigMap",
+require_extra_resource("config", "v1", "ConfigMap",
     match_name="my-config")
 
 # After the function re-runs with the extra resource available:
@@ -483,10 +483,10 @@ set_connection_details({
 
 ---
 
-### require_resource
+### require_extra_resource
 
 ```python
-require_resource(name, apiVersion, kind, match_name=None, match_labels=None)
+require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)
 ```
 
 Request a single extra resource from the Crossplane API server. At least one of
@@ -512,7 +512,7 @@ takes precedence and `match_labels` is ignored (a warning is emitted).
 
 ```python
 # Request a ConfigMap by name
-require_resource("config", "v1", "ConfigMap", match_name="my-config")
+require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
 
 # On next reconciliation, access the result
 if "config" in extra_resources:
@@ -521,14 +521,14 @@ if "config" in extra_resources:
 
 ---
 
-### require_resources
+### require_extra_resources
 
 ```python
-require_resources(name, apiVersion, kind, match_labels)
+require_extra_resources(name, apiVersion, kind, match_labels)
 ```
 
 Request multiple extra resources matching a label selector. Unlike
-`require_resource`, `match_labels` is required (not optional). Access results
+`require_extra_resource`, `match_labels` is required (not optional). Access results
 via `extra_resources[name]` on the next reconciliation.
 
 **Parameters:**
@@ -546,7 +546,7 @@ via `extra_resources[name]` on the next reconciliation.
 
 ```python
 # Request all Secrets with a specific label
-require_resources("certs", "v1", "Secret",
+require_extra_resources("certs", "v1", "Secret",
     match_labels={"app": "my-app", "type": "tls"})
 
 # On next reconciliation, iterate the results

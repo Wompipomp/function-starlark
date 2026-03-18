@@ -33,7 +33,7 @@ with zero external toolchain.
 | Dependency ordering | depends_on + creation sequencing | Not built-in | Not built-in |
 | Auto labels | crossplane.io/* auto-injected | Manual via annotations | Manual via template |
 | Conditions/Events | set_condition(), emit_event() | Via KCL annotations | Via custom conditions (1.17+) |
-| Extra resources | require_resource/require_resources | ExtraResources spec | ExtraResources spec |
+| Extra resources | require_extra_resource/require_extra_resources | ExtraResources spec | ExtraResources spec |
 | Readiness control | ready= kwarg (None/True/False) | Annotation-based | Annotation-based |
 | Type system | Untyped dicts | Schema-based with types | Untyped strings |
 | Observability | 9 Prometheus metrics | None built-in | None built-in |

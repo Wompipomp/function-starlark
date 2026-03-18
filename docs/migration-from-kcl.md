@@ -64,8 +64,8 @@ function-starlark provides these predeclared globals:
 | `emit_event` | `emit_event(severity, message, target="Composite")` | Emit a Normal or Warning event |
 | `fatal` | `fatal(message)` | Halt execution with a fatal error |
 | `set_connection_details` | `set_connection_details(dict)` | Set XR-level connection details |
-| `require_resource` | `require_resource(name, apiVersion, kind, match_name=None, match_labels=None)` | Request a single extra resource |
-| `require_resources` | `require_resources(name, apiVersion, kind, match_labels)` | Request multiple extra resources by label selector |
+| `require_extra_resource` | `require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)` | Request a single extra resource |
+| `require_extra_resources` | `require_extra_resources(name, apiVersion, kind, match_labels)` | Request multiple extra resources by label selector |
 | `get_label` | `get_label(res, key, default=None)` | Safe label lookup handling dotted keys |
 | `get_annotation` | `get_annotation(res, key, default=None)` | Safe annotation lookup handling dotted keys |
 | `set_xr_status` | `set_xr_status(path, value)` | Dot-path XR status writes with auto-created intermediates |

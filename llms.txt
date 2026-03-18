@@ -37,7 +37,7 @@ spec:
 | observed | StarlarkDict (read-only) | Observed composed resources keyed by composition resource name. |
 | context | dict (read-write) | Pipeline context shared across steps. |
 | environment | StarlarkDict (read-only) | EnvironmentConfig data. |
-| extra_resources | dict (read-only) | Extra resources from require_resource/require_resources. |
+| extra_resources | dict (read-only) | Extra resources from require_extra_resource/require_extra_resources. |
 
 ## Predeclared functions
 
@@ -160,18 +160,18 @@ bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
 db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
 
-### require_resource(name, apiVersion, kind, match_name=None, match_labels=None)
+### require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)
 
 Request a single extra resource. Access via extra_resources[name] on next reconciliation.
 ```python
-require_resource("config", "v1", "ConfigMap", match_name="my-config")
+require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
 ```
 
-### require_resources(name, apiVersion, kind, match_labels)
+### require_extra_resources(name, apiVersion, kind, match_labels)
 
 Request multiple extra resources by label selector.
 ```python
-require_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
+require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
 ```
 
 ## Module system
