@@ -143,6 +143,189 @@ func TestParseOCILoadTarget(t *testing.T) {
 	}
 }
 
+func TestIsDefaultRegistryTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		module string
+		want   bool
+	}{
+		{
+			name:   "explicit OCI URL returns false",
+			module: "oci://ghcr.io/org/lib:v1/h.star",
+			want:   false,
+		},
+		{
+			name:   "short-form with tag returns true",
+			module: "function-starlark-stdlib:v1/naming.star",
+			want:   true,
+		},
+		{
+			name:   "short-form with digest returns true",
+			module: "function-starlark-stdlib@sha256:abc123/naming.star",
+			want:   true,
+		},
+		{
+			name:   "local module without colon returns false",
+			module: "local.star",
+			want:   false,
+		},
+		{
+			name:   "local helpers module returns false",
+			module: "helpers.star",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsDefaultRegistryTarget(tt.module)
+			if got != tt.want {
+				t.Errorf("IsDefaultRegistryTarget(%q) = %v, want %v", tt.module, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpandDefaultRegistry(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string
+		registry string
+		want     string
+		wantErr  string
+	}{
+		{
+			name:     "tag reference expands correctly",
+			target:   "function-starlark-stdlib:v1/naming.star",
+			registry: "ghcr.io/wompipomp",
+			want:     "oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star",
+		},
+		{
+			name:     "digest reference expands correctly",
+			target:   "pkg@sha256:abc/file.star",
+			registry: "ghcr.io/org",
+			want:     "oci://ghcr.io/org/pkg@sha256:abc/file.star",
+		},
+		{
+			name:     "empty registry returns error",
+			target:   "function-starlark-stdlib:v1/naming.star",
+			registry: "",
+			wantErr:  "requires a default OCI registry",
+		},
+		{
+			name:     "error mentions env var",
+			target:   "function-starlark-stdlib:v1/naming.star",
+			registry: "",
+			wantErr:  "STARLARK_OCI_DEFAULT_REGISTRY",
+		},
+		{
+			name:     "error mentions spec field",
+			target:   "function-starlark-stdlib:v1/naming.star",
+			registry: "",
+			wantErr:  "spec.ociDefaultRegistry",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExpandDefaultRegistry(tt.target, tt.registry)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !containsSubstring(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ExpandDefaultRegistry(%q, %q) = %q, want %q", tt.target, tt.registry, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeRegistry(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry string
+		want     string
+	}{
+		{
+			name:     "strip oci:// prefix",
+			registry: "oci://ghcr.io/wompipomp",
+			want:     "ghcr.io/wompipomp",
+		},
+		{
+			name:     "strip trailing slash",
+			registry: "ghcr.io/wompipomp/",
+			want:     "ghcr.io/wompipomp",
+		},
+		{
+			name:     "strip both prefix and trailing slash",
+			registry: "oci://ghcr.io/wompipomp/",
+			want:     "ghcr.io/wompipomp",
+		},
+		{
+			name:     "no-op for clean registry",
+			registry: "ghcr.io/wompipomp",
+			want:     "ghcr.io/wompipomp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeRegistry(tt.registry)
+			if got != tt.want {
+				t.Errorf("NormalizeRegistry(%q) = %q, want %q", tt.registry, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateRegistry(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry string
+		wantErr  string
+	}{
+		{
+			name:     "valid ghcr.io registry",
+			registry: "ghcr.io/wompipomp",
+		},
+		{
+			name:     "valid localhost with port",
+			registry: "localhost:5000",
+		},
+		{
+			name:     "empty registry is invalid",
+			registry: "",
+			wantErr:  "invalid default OCI registry",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRegistry(tt.registry)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !containsSubstring(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func containsSubstring(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }
