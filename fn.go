@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/crossplane/function-sdk-go/errors"
@@ -127,11 +128,24 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			inlineModules[k] = v
 		}
 
+		// Resolve effective default OCI registry (spec > env var).
+		defaultRegistry := ""
+		if in.Spec.OCIDefaultRegistry != "" {
+			defaultRegistry = oci.NormalizeRegistry(in.Spec.OCIDefaultRegistry)
+		} else if envReg := os.Getenv("STARLARK_OCI_DEFAULT_REGISTRY"); envReg != "" {
+			defaultRegistry = oci.NormalizeRegistry(envReg)
+		}
+
 		// Scan for OCI load targets in main script + inline modules.
 		// Parse errors are non-fatal here: if the script has syntax errors,
 		// it will fail later during compilation with a more appropriate message.
-		ociTargets, scanErr := oci.ScanForOCILoads(source, inlineModules)
+		// However, default-registry config errors are fatal (user must fix config).
+		ociTargets, scanErr := oci.ScanForOCILoads(source, inlineModules, defaultRegistry)
 		if scanErr != nil {
+			if strings.Contains(scanErr.Error(), "requires a default OCI registry") {
+				response.Fatal(rsp, errors.Wrapf(scanErr, "scanning for OCI load targets"))
+				return rsp, nil
+			}
 			log.Debug("OCI scan skipped due to parse error", "error", scanErr)
 			ociTargets = nil
 		}
@@ -145,7 +159,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				fetcher = oci.RemoteFetcher{}
 			}
 
-			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log)
+			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log, defaultRegistry)
 
 			ociTimer := prometheus.NewTimer(metrics.OCIResolveDurationSeconds.WithLabelValues(filename))
 			resolvedModules, resolveErr := resolver.Resolve(ctx, ociTargets)
@@ -179,7 +193,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		searchPaths = append(searchPaths, in.Spec.ModulePaths...)
 
 		// Create module loader with merged inline+OCI modules, search paths, and same builtins.
-		loader := runtime.NewModuleLoader(inlineModules, searchPaths, globals, f.runtime)
+		loader := runtime.NewModuleLoader(inlineModules, searchPaths, globals, f.runtime, defaultRegistry)
 
 		// Expand star imports before execution.
 		source, err = loader.ResolveStarImports(source, filename)

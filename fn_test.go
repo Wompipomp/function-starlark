@@ -3101,6 +3101,129 @@ func TestRunFunctionOCINoTargets(t *testing.T) {
 	}
 }
 
+// ========================
+// Default Registry Integration Tests
+// ========================
+
+// TestRunFunctionDefaultRegistryFromEnv verifies that the STARLARK_OCI_DEFAULT_REGISTRY
+// env var is used to expand short-form load targets.
+func TestRunFunctionDefaultRegistryFromEnv(t *testing.T) {
+	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "ghcr.io/wompipomp")
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Pre-populate cache: the short-form target "function-starlark-stdlib:v1/naming.star"
+	// expands to "oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star"
+	// which maps to RefStr "ghcr.io/wompipomp/function-starlark-stdlib:v1".
+	cache.PutContent("sha256:stdlib001", map[string]string{
+		"naming.star": `def resource_name(n): return "prefix-" + n`,
+	})
+	cache.PutTag("ghcr.io/wompipomp/function-starlark-stdlib:v1", "sha256:stdlib001")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"function-starlark-stdlib:v1/naming.star\", \"resource_name\")\nResource(\"test\", {\"name\": resource_name(\"world\")})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	name := testRes.GetResource().GetFields()["name"].GetStringValue()
+	if name != "prefix-world" {
+		t.Errorf("name = %q, want 'prefix-world'", name)
+	}
+}
+
+// TestRunFunctionDefaultRegistryFromSpec verifies that spec.ociDefaultRegistry
+// overrides the env var.
+func TestRunFunctionDefaultRegistryFromSpec(t *testing.T) {
+	// Set env var to a fallback that should NOT be used.
+	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "ghcr.io/fallback")
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Pre-populate cache with the spec override registry.
+	cache.PutContent("sha256:override001", map[string]string{
+		"naming.star": `val = "from-spec-override"`,
+	})
+	cache.PutTag("ghcr.io/override/function-starlark-stdlib:v1", "sha256:override001")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"function-starlark-stdlib:v1/naming.star\", \"val\")\nResource(\"test\", {\"value\": val})",
+				"ociDefaultRegistry": "ghcr.io/override"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	value := testRes.GetResource().GetFields()["value"].GetStringValue()
+	if value != "from-spec-override" {
+		t.Errorf("value = %q, want 'from-spec-override'", value)
+	}
+}
+
+// TestRunFunctionDefaultRegistryNotConfigured verifies that using a short-form
+// load target without any default registry configured produces a Fatal response
+// with a clear error message naming both config options.
+func TestRunFunctionDefaultRegistryNotConfigured(t *testing.T) {
+	// Ensure no env var is set.
+	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "")
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"function-starlark-stdlib:v1/naming.star\", \"resource_name\")\nResource(\"test\", {})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "requires a default OCI registry", "STARLARK_OCI_DEFAULT_REGISTRY", "spec.ociDefaultRegistry")
+}
+
 // testOCIFetcher is a mock OCI fetcher for E2E tests.
 type testOCIFetcher struct {
 	images map[string]v1.Image

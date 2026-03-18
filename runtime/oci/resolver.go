@@ -49,19 +49,22 @@ func (RemoteFetcher) Fetch(ref name.Reference, keychain authn.Keychain) (v1.Imag
 // Resolver fetches OCI artifacts, validates media types, extracts .star files,
 // and resolves transitive OCI dependencies.
 type Resolver struct {
-	cache    *Cache
-	keychain authn.Keychain
-	fetcher  Fetcher
-	log      logging.Logger
+	cache           *Cache
+	keychain        authn.Keychain
+	fetcher         Fetcher
+	log             logging.Logger
+	defaultRegistry string
 }
 
-// NewResolver creates a Resolver with the given cache, keychain, fetcher, and logger.
-func NewResolver(cache *Cache, keychain authn.Keychain, fetcher Fetcher, log logging.Logger) *Resolver {
+// NewResolver creates a Resolver with the given cache, keychain, fetcher, logger,
+// and default registry for short-form OCI load targets.
+func NewResolver(cache *Cache, keychain authn.Keychain, fetcher Fetcher, log logging.Logger, defaultRegistry string) *Resolver {
 	return &Resolver{
-		cache:    cache,
-		keychain: keychain,
-		fetcher:  fetcher,
-		log:      log,
+		cache:           cache,
+		keychain:        keychain,
+		fetcher:         fetcher,
+		log:             log,
+		defaultRegistry: defaultRegistry,
 	}
 }
 
@@ -128,7 +131,7 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 
 		// Scan extracted files for transitive OCI loads.
 		for _, src := range files {
-			transitive, err := ScanForOCILoads(src, nil)
+			transitive, err := ScanForOCILoads(src, nil, r.defaultRegistry)
 			if err != nil {
 				// Non-fatal: if scanning fails (e.g., invalid Starlark syntax
 				// in a module that won't be loaded), we skip it. The actual

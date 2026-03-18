@@ -69,7 +69,7 @@ func loadModule(t *testing.T, filename string, predeclared starlark.StringDict) 
 	}
 	inline := map[string]string{filename: string(src)}
 	rt := runtime.NewRuntime(&testLogger{})
-	loader := runtime.NewModuleLoader(inline, nil, predeclared, rt)
+	loader := runtime.NewModuleLoader(inline, nil, predeclared, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 	loaded, err := thread.Load(thread, filename)
 	if err != nil {

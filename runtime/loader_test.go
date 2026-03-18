@@ -17,7 +17,7 @@ func TestModuleLoadInline(t *testing.T) {
 		"helpers.star": `def greet(name): return "hello " + name`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "helpers.star")
@@ -49,7 +49,7 @@ func TestModuleLoadFilesystem(t *testing.T) {
 
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt, "")
 
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 	loaded, err := thread.Load(thread, "helpers.star")
@@ -86,7 +86,7 @@ func TestModuleInlinePriority(t *testing.T) {
 
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(inline, []string{dir}, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, []string{dir}, starlark.StringDict{}, rt, "")
 
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 	loaded, err := thread.Load(thread, "helpers.star")
@@ -112,7 +112,7 @@ func TestModuleCache(t *testing.T) {
 		"helpers.star": `x = 42`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	g1, err := thread.Load(thread, "helpers.star")
@@ -147,7 +147,7 @@ func TestModuleFrozen(t *testing.T) {
 		"helpers.star": `data = [1, 2, 3]`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "helpers.star")
@@ -171,7 +171,7 @@ func TestModuleCycle(t *testing.T) {
 		"b.star": `load("a.star", "x"); y = 2`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "a.star")
@@ -194,7 +194,7 @@ func TestModuleTransitiveLoad(t *testing.T) {
 		"c.star": `c_val = 10`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "a.star")
@@ -211,7 +211,7 @@ func TestModuleTransitiveLoad(t *testing.T) {
 func TestModuleNameValidationSlash(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "path/helpers.star")
@@ -226,7 +226,7 @@ func TestModuleNameValidationSlash(t *testing.T) {
 func TestModuleNameValidationBackslash(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "path\\helpers.star")
@@ -241,7 +241,7 @@ func TestModuleNameValidationBackslash(t *testing.T) {
 func TestModuleNameValidationNoStar(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "helpers")
@@ -257,7 +257,7 @@ func TestModuleNameValidationOCI(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 	// OCI module not in inline map -- should get "not resolved" error (not "not yet supported").
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "oci://registry.example.com/repo:v1/module.star")
@@ -273,7 +273,7 @@ func TestModuleNotFound(t *testing.T) {
 	dir := t.TempDir()
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "missing.star")
@@ -310,7 +310,7 @@ func TestModuleReceivesBuiltins(t *testing.T) {
 		"helpers.star": `result = my_builtin()`,
 	}
 
-	loader := NewModuleLoader(inline, nil, predeclared, rt)
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "helpers.star")
@@ -340,7 +340,7 @@ boom()
 `,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "bad.star")
@@ -364,7 +364,7 @@ while True:
 `,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "infinite.star")
@@ -393,7 +393,7 @@ if len(result) == 3:
 `,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "control.star")
@@ -420,7 +420,7 @@ func TestModuleBytecodeCache(t *testing.T) {
 
 	cacheBefore := rt.CacheLen()
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "helpers.star")
@@ -448,7 +448,7 @@ y = 2
 _private = 3`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 
 	// ResolveStarImports should expand "*" to "x", "y" (not _private).
 	source := `load("m.star", "*")
@@ -491,7 +491,7 @@ func TestStarImportEmptyModule(t *testing.T) {
 		"empty.star": `_hidden = 1`, // no public exports
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 
 	source := `load("empty.star", "*")`
 	rewritten, err := loader.ResolveStarImports(source, "test.star")
@@ -518,7 +518,7 @@ b = 2
 c = 3`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 
 	// load("m.star", "a", "*") -- named "a" plus star for remaining exports.
 	source := `load("m.star", "a", "*")
@@ -554,7 +554,7 @@ func TestStarImportNoStarUnchanged(t *testing.T) {
 		"m.star": `x = 1`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 
 	source := `load("m.star", "x")`
 	rewritten, err := loader.ResolveStarImports(source, "test.star")
@@ -576,7 +576,7 @@ b = 20`), 0o600); err != nil {
 
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt, "")
 
 	source := `load("fs.star", "*")
 result = a + b`
@@ -612,7 +612,7 @@ func TestOCIModuleRouting(t *testing.T) {
 		"helpers.star": `def greet(name): return "oci-hello " + name`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	// Load using oci:// URL -- should resolve to inline module by base filename.
@@ -641,7 +641,7 @@ func TestOCIModuleNotResolved(t *testing.T) {
 	rt := NewRuntime(log)
 
 	// No inline modules -- OCI module not pre-resolved.
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "oci://ghcr.io/org/lib:v1/missing.star")
@@ -665,7 +665,7 @@ func TestOCIModuleDigestRouting(t *testing.T) {
 		"utils.star": `val = "pinned"`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "oci://ghcr.io/org/lib@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1/utils.star")
@@ -693,7 +693,7 @@ public = "visible"
 `,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "m.star")
@@ -719,7 +719,7 @@ public = "visible"
 func TestModuleCachedError(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	// First load: module not found.
@@ -747,7 +747,7 @@ func TestModuleCompilationError(t *testing.T) {
 		"bad.star": `def f(`,
 	}
 
-	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "bad.star")
@@ -769,7 +769,7 @@ func TestModuleFilesystemPermissionError(t *testing.T) {
 
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, []string{dir}, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "secret.star")
@@ -792,7 +792,7 @@ func TestModuleMultipleSearchPaths(t *testing.T) {
 
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, []string{dir1, dir2}, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, []string{dir1, dir2}, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	loaded, err := thread.Load(thread, "helpers.star")
@@ -812,7 +812,7 @@ func TestModuleMultipleSearchPaths(t *testing.T) {
 func TestModuleEmptyName(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
-	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
 	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
 
 	_, err := thread.Load(thread, "")

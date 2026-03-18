@@ -154,7 +154,7 @@ func TestResolveOrasPerFileLayers(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/wompipomp/starlark-stdlib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star")
 	if err != nil {
@@ -176,7 +176,7 @@ func TestResolveFromCache(t *testing.T) {
 	c.PutTag("ghcr.io/org/lib:v1", "sha256:abc")
 
 	f := &mockFetcher{images: map[string]v1.Image{}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -205,7 +205,7 @@ func TestResolveFetchAndExtract(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -233,7 +233,7 @@ func TestResolveWrongArtifactType(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -258,7 +258,7 @@ func TestResolveWrongLayerType(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -285,7 +285,7 @@ func TestResolveDeduplicatesSameRef(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	t1, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/a.star")
 	t2, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/b.star")
@@ -315,7 +315,7 @@ func TestResolveEmptyLayers(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -336,7 +336,7 @@ func TestResolveFileNotInArtifact(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -365,7 +365,7 @@ a_fn = lambda: b_fn()`,
 		"ghcr.io/org/lib:v1": imgA,
 		"ghcr.io/org/dep:v1": imgB,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/a.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -398,7 +398,7 @@ func TestResolveCycleDetection(t *testing.T) {
 		"ghcr.io/org/a:v1": imgA,
 		"ghcr.io/org/b:v1": imgB,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/a:v1/a.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -424,7 +424,7 @@ func TestResolveStaleServing(t *testing.T) {
 
 	// Registry is unreachable.
 	f := &mockFetcher{err: fmt.Errorf("connection refused")}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -441,7 +441,7 @@ func TestResolveColdMissFails(t *testing.T) {
 
 	// Registry is unreachable, cache is empty.
 	f := &mockFetcher{err: fmt.Errorf("connection refused")}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -484,7 +484,7 @@ func TestResolveTarSafety(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/passwd.star")
 	_, err = r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -531,7 +531,7 @@ func TestResolveSkipsNonStarAndNonRegular(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger())
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/good.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -553,7 +553,7 @@ func TestResolveUsesKeychain(t *testing.T) {
 		"ghcr.io/org/lib:v1": img,
 	}}
 	customKC := authn.NewMultiKeychain(authn.DefaultKeychain)
-	r := NewResolver(c, customKC, f, logging.NewNopLogger())
+	r := NewResolver(c, customKC, f, logging.NewNopLogger(), "")
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})

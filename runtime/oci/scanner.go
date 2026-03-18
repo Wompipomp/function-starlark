@@ -11,11 +11,13 @@ import (
 // ScanForOCILoads parses Starlark source and inline modules for oci:// load()
 // targets. Returns deduplicated targets (by RefStr). Each unique OCI artifact
 // reference appears at most once, even if multiple files are loaded from it.
-func ScanForOCILoads(source string, inlineModules map[string]string) ([]*OCILoadTarget, error) {
+// When defaultRegistry is non-empty, short-form targets (containing ":" but not
+// starting with "oci://") are expanded to full oci:// URLs.
+func ScanForOCILoads(source string, inlineModules map[string]string, defaultRegistry string) ([]*OCILoadTarget, error) {
 	var targets []*OCILoadTarget
 
 	// Scan main script.
-	found, err := scanSource(source, "composition.star")
+	found, err := scanSource(source, "composition.star", defaultRegistry)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +31,7 @@ func ScanForOCILoads(source string, inlineModules map[string]string) ([]*OCILoad
 	sort.Strings(names)
 
 	for _, name := range names {
-		found, err := scanSource(inlineModules[name], name)
+		found, err := scanSource(inlineModules[name], name, defaultRegistry)
 		if err != nil {
 			return nil, err
 		}
@@ -40,7 +42,7 @@ func ScanForOCILoads(source string, inlineModules map[string]string) ([]*OCILoad
 }
 
 // scanSource parses a single Starlark source string and extracts oci:// load targets.
-func scanSource(source, filename string) ([]*OCILoadTarget, error) {
+func scanSource(source, filename, defaultRegistry string) ([]*OCILoadTarget, error) {
 	opts := &syntax.FileOptions{
 		TopLevelControl: true,
 		Set:             true,
@@ -58,6 +60,13 @@ func scanSource(source, filename string) ([]*OCILoadTarget, error) {
 			continue
 		}
 		mod := load.ModuleName()
+		if IsDefaultRegistryTarget(mod) {
+			expanded, err := ExpandDefaultRegistry(mod, defaultRegistry)
+			if err != nil {
+				return nil, err
+			}
+			mod = expanded
+		}
 		if !strings.HasPrefix(mod, "oci://") {
 			continue
 		}

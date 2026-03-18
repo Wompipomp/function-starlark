@@ -10,6 +10,8 @@ import (
 
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+
+	"github.com/wompipomp/function-starlark/runtime/oci"
 )
 
 // LoadFunc is the signature for Thread.Load callbacks.
@@ -20,11 +22,12 @@ type LoadFunc func(thread *starlark.Thread, module string) (starlark.StringDict,
 // reconciliation gets a fresh module globals cache (while sharing the
 // bytecode compilation cache via Runtime.getOrCompile).
 type ModuleLoader struct {
-	inlineModules map[string]string   // name -> source from StarlarkInput.modules
-	searchPaths   []string            // ordered filesystem directories
-	predeclared   starlark.StringDict // same builtins as main script
-	cache         map[string]*moduleEntry
-	rt            *Runtime // for bytecode caching and logging
+	inlineModules   map[string]string   // name -> source from StarlarkInput.modules
+	searchPaths     []string            // ordered filesystem directories
+	predeclared     starlark.StringDict // same builtins as main script
+	cache           map[string]*moduleEntry
+	rt              *Runtime // for bytecode caching and logging
+	defaultRegistry string   // default OCI registry for short-form load targets
 }
 
 // moduleEntry stores the cached result of loading a module.
@@ -36,17 +39,19 @@ type moduleEntry struct {
 }
 
 // NewModuleLoader creates a ModuleLoader with the given inline modules,
-// filesystem search paths, predeclared builtins, and runtime for caching.
-func NewModuleLoader(inlineModules map[string]string, searchPaths []string, predeclared starlark.StringDict, rt *Runtime) *ModuleLoader {
+// filesystem search paths, predeclared builtins, runtime for caching, and
+// default registry for short-form OCI load targets.
+func NewModuleLoader(inlineModules map[string]string, searchPaths []string, predeclared starlark.StringDict, rt *Runtime, defaultRegistry string) *ModuleLoader {
 	if inlineModules == nil {
 		inlineModules = map[string]string{}
 	}
 	return &ModuleLoader{
-		inlineModules: inlineModules,
-		searchPaths:   searchPaths,
-		predeclared:   predeclared,
-		cache:         make(map[string]*moduleEntry),
-		rt:            rt,
+		inlineModules:   inlineModules,
+		searchPaths:     searchPaths,
+		predeclared:     predeclared,
+		cache:           make(map[string]*moduleEntry),
+		rt:              rt,
+		defaultRegistry: defaultRegistry,
 	}
 }
 
@@ -108,6 +113,15 @@ func (m *ModuleLoader) resolve(module string) (string, error) {
 // load implements the Thread.Load callback. It uses the sequential loader
 // pattern from starlark-go's example_test.go with nil-sentinel cycle detection.
 func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringDict, error) {
+	// Expand short-form OCI targets before existing routing.
+	if oci.IsDefaultRegistryTarget(module) {
+		expanded, err := oci.ExpandDefaultRegistry(module, m.defaultRegistry)
+		if err != nil {
+			return nil, err
+		}
+		module = expanded
+	}
+
 	// Handle OCI module references: route to inline modules by base filename.
 	if strings.HasPrefix(module, "oci://") {
 		baseName := ociBaseFilename(module)
@@ -250,6 +264,15 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 	for i := len(starLoads) - 1; i >= 0; i-- {
 		sl := starLoads[i]
 		mod := sl.stmt.ModuleName()
+
+		// Expand short-form OCI targets before routing.
+		if oci.IsDefaultRegistryTarget(mod) {
+			expanded, err := oci.ExpandDefaultRegistry(mod, m.defaultRegistry)
+			if err != nil {
+				return "", fmt.Errorf("resolving star import from %q: %w", mod, err)
+			}
+			mod = expanded
+		}
 
 		// Resolve the module name (handle OCI routing).
 		resolvedMod := mod

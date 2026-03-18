@@ -67,6 +67,12 @@ spec:
                   OCICacheTTL configures the TTL for OCI tag-to-digest cache entries.
                   Parsed as Go duration (e.g. "5m", "1h"). Default: 5m.
                 type: string
+              ociDefaultRegistry:
+                description: |-
+                  OCIDefaultRegistry overrides the operator-level default OCI registry
+                  (STARLARK_OCI_DEFAULT_REGISTRY env var) for this composition.
+                  Format: "registry/namespace" (e.g. "ghcr.io/my-org").
+                type: string
               scriptConfigRef:
                 description: |-
                   ScriptConfigRef is a reference to a ConfigMap containing the Starlark script.
