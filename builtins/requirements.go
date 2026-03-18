@@ -11,7 +11,7 @@ import (
 )
 
 // CollectedRequirement holds a single resource requirement accumulated by
-// require_resource or require_resources.
+// require_extra_resource or require_extra_resources.
 type CollectedRequirement struct {
 	Name, APIVersion, Kind, MatchName string
 	MatchLabels                       map[string]string
@@ -29,14 +29,14 @@ func NewRequirementsCollector() *RequirementsCollector {
 	return &RequirementsCollector{}
 }
 
-// RequireResourceBuiltin returns a *starlark.Builtin for require_resource.
-func (rc *RequirementsCollector) RequireResourceBuiltin() *starlark.Builtin {
-	return starlark.NewBuiltin("require_resource", rc.requireResourceFn)
+// RequireExtraResourceBuiltin returns a *starlark.Builtin for require_extra_resource.
+func (rc *RequirementsCollector) RequireExtraResourceBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("require_extra_resource", rc.requireResourceFn)
 }
 
-// RequireResourcesBuiltin returns a *starlark.Builtin for require_resources.
-func (rc *RequirementsCollector) RequireResourcesBuiltin() *starlark.Builtin {
-	return starlark.NewBuiltin("require_resources", rc.requireResourcesFn)
+// RequireExtraResourcesBuiltin returns a *starlark.Builtin for require_extra_resources.
+func (rc *RequirementsCollector) RequireExtraResourcesBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("require_extra_resources", rc.requireResourcesFn)
 }
 
 // Requirements returns a copy of all collected requirements.
@@ -57,7 +57,7 @@ func (rc *RequirementsCollector) Warnings() []string {
 	return out
 }
 
-// requireResourceFn implements require_resource(name, apiVersion, kind, match_name=None, match_labels=None).
+// requireResourceFn implements require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None).
 func (rc *RequirementsCollector) requireResourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -76,7 +76,7 @@ func (rc *RequirementsCollector) requireResourceFn(
 
 	// At least one of match_name or match_labels is required.
 	if matchName == "" && matchLabelsDict == nil {
-		return nil, fmt.Errorf("require_resource: must specify at least one of match_name or match_labels")
+		return nil, fmt.Errorf("require_extra_resource: must specify at least one of match_name or match_labels")
 	}
 
 	// If both provided, match_name takes precedence; emit a warning.
@@ -85,7 +85,7 @@ func (rc *RequirementsCollector) requireResourceFn(
 		if matchLabelsDict != nil {
 			rc.mu.Lock()
 			rc.warnings = append(rc.warnings, fmt.Sprintf(
-				"require_resource(%q): match_name %q takes precedence; match_labels ignored", name, matchName))
+				"require_extra_resource(%q): match_name %q takes precedence; match_labels ignored", name, matchName))
 			rc.mu.Unlock()
 		}
 		matchLabels = nil
@@ -93,7 +93,7 @@ func (rc *RequirementsCollector) requireResourceFn(
 		var err error
 		matchLabels, err = dictToStringMap(matchLabelsDict)
 		if err != nil {
-			return nil, fmt.Errorf("require_resource: match_labels: %w", err)
+			return nil, fmt.Errorf("require_extra_resource: match_labels: %w", err)
 		}
 	}
 
@@ -110,7 +110,7 @@ func (rc *RequirementsCollector) requireResourceFn(
 	return starlark.None, nil
 }
 
-// requireResourcesFn implements require_resources(name, apiVersion, kind, match_labels).
+// requireResourcesFn implements require_extra_resources(name, apiVersion, kind, match_labels).
 func (rc *RequirementsCollector) requireResourcesFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -128,7 +128,7 @@ func (rc *RequirementsCollector) requireResourcesFn(
 
 	matchLabels, err := dictToStringMap(matchLabelsDict)
 	if err != nil {
-		return nil, fmt.Errorf("require_resources: match_labels: %w", err)
+		return nil, fmt.Errorf("require_extra_resources: match_labels: %w", err)
 	}
 
 	rc.mu.Lock()

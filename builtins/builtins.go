@@ -29,8 +29,8 @@ import (
 //   - set_connection_details: builtin for setting XR-level connection details
 //   - set_xr_status: builtin for writing values into dxr.status at dot-paths
 //   - get_observed: utility builtin for one-call observed resource field lookup
-//   - require_resource: builtin for requesting a single extra resource
-//   - require_resources: builtin for requesting multiple extra resources
+//   - require_extra_resource: builtin for requesting a single extra resource
+//   - require_extra_resources: builtin for requesting multiple extra resources
 func BuildGlobals(
 	req *fnv1.RunFunctionRequest,
 	collector *Collector,
@@ -96,8 +96,8 @@ func BuildGlobals(
 		"get_observed": starlark.NewBuiltin("get_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			return getObservedImpl(b.Name(), observed, args, kwargs)
 		}),
-		"require_resource":  reqCollector.RequireResourceBuiltin(),
-		"require_resources": reqCollector.RequireResourcesBuiltin(),
+		"require_extra_resource":  reqCollector.RequireExtraResourceBuiltin(),
+		"require_extra_resources": reqCollector.RequireExtraResourcesBuiltin(),
 	}, nil
 }
 
