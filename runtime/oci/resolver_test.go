@@ -564,3 +564,41 @@ func TestResolveUsesKeychain(t *testing.T) {
 		t.Errorf("got %q, want %q", result["h.star"], "x = 1")
 	}
 }
+
+func TestResolveTransitiveShortForm(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+
+	// Module A uses explicit oci:// and contains a short-form load of module B.
+	imgA := buildTestImage(t, map[string]string{
+		"a.star": `load("dep:v1/b.star", "b_fn")
+a_fn = lambda: b_fn()`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	// Module B is the transitive dependency that should be discovered
+	// via short-form expansion with the resolver's default registry.
+	imgB := buildTestImage(t, map[string]string{
+		"b.star": `b_fn = lambda: "hello"`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": imgA,
+		"ghcr.io/org/dep:v1": imgB,
+	}}
+	// Key: defaultRegistry is set so short-form "dep:v1/b.star" expands
+	// to "oci://ghcr.io/org/dep:v1/b.star" during transitive scanning.
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "ghcr.io/org")
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/a.star")
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both a.star (direct) and b.star (transitive via short-form) should be resolved.
+	if _, ok := result["a.star"]; !ok {
+		t.Error("expected a.star in result")
+	}
+	if _, ok := result["b.star"]; !ok {
+		t.Error("expected b.star in result (transitive dep via short-form expansion)")
+	}
+}

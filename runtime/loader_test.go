@@ -885,3 +885,56 @@ func TestModuleDefaultRegistryNotConfigured(t *testing.T) {
 		t.Errorf("error = %q, want it to contain 'spec.ociDefaultRegistry'", errStr)
 	}
 }
+
+func TestResolveStarImportsWithDefaultRegistry(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Inline module keyed by base filename (as fn.go injects after OCI resolution).
+	inline := map[string]string{
+		"naming.star": `resource_name = "rn"
+helper = "h"
+_private = "p"`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "ghcr.io/wompipomp")
+
+	// Short-form OCI target with star import.
+	source := `load("function-starlark-stdlib:v1/naming.star", "*")
+result_rn = resource_name
+result_h = helper`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	// Star should be expanded -- no "*" in rewritten source.
+	if strings.Contains(rewritten, `"*"`) {
+		t.Errorf("rewritten source still contains \"*\": %s", rewritten)
+	}
+
+	// The module name in the load statement should remain the short-form
+	// (not expanded to oci://), because only the resolution path expands.
+	if !strings.Contains(rewritten, "function-starlark-stdlib:v1/naming.star") {
+		t.Errorf("rewritten source lost module name: %s", rewritten)
+	}
+
+	// Execute the rewritten source to verify the exports are bound.
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	if globals["result_rn"].(starlark.String) != "rn" {
+		t.Errorf("resource_name = %v, want 'rn'", globals["result_rn"])
+	}
+	if globals["result_h"].(starlark.String) != "h" {
+		t.Errorf("helper = %v, want 'h'", globals["result_h"])
+	}
+	// _private should NOT be exported.
+	if _, ok := globals["_private"]; ok {
+		t.Error("_private should not be exported via star import")
+	}
+}
