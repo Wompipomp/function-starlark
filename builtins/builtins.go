@@ -9,6 +9,7 @@ import (
 	"go.starlark.net/starlark"
 
 	"github.com/wompipomp/function-starlark/convert"
+	"github.com/wompipomp/function-starlark/schema"
 )
 
 // BuildGlobals constructs the predeclared Starlark globals from a
@@ -31,6 +32,8 @@ import (
 //   - get_observed: utility builtin for one-call observed resource field lookup
 //   - require_extra_resource: builtin for requesting a single extra resource
 //   - require_extra_resources: builtin for requesting multiple extra resources
+//   - schema: builtin for defining typed constructors
+//   - field: builtin for defining field descriptors
 func BuildGlobals(
 	req *fnv1.RunFunctionRequest,
 	collector *Collector,
@@ -98,6 +101,8 @@ func BuildGlobals(
 		}),
 		"require_extra_resource":  reqCollector.RequireExtraResourceBuiltin(),
 		"require_extra_resources": reqCollector.RequireExtraResourcesBuiltin(),
+		"schema":                  schema.SchemaBuiltin(),
+		"field":                   schema.FieldBuiltin(),
 	}, nil
 }
 
