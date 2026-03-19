@@ -136,6 +136,15 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			defaultRegistry = oci.NormalizeRegistry(envReg)
 		}
 
+		// Validate the registry value early so malformed config is caught at the
+		// input boundary rather than deep inside expansion/resolution.
+		if defaultRegistry != "" {
+			if err := oci.ValidateRegistry(defaultRegistry); err != nil {
+				response.Fatal(rsp, errors.Wrap(err, "validating default OCI registry"))
+				return rsp, nil
+			}
+		}
+
 		// Scan for OCI load targets in main script + inline modules.
 		// Parse errors are non-fatal here: if the script has syntax errors,
 		// it will fail later during compilation with a more appropriate message.

@@ -3195,6 +3195,61 @@ func TestRunFunctionDefaultRegistryFromSpec(t *testing.T) {
 	}
 }
 
+// TestRunFunctionDefaultRegistryInvalid verifies that a malformed registry
+// value is rejected at the input boundary with a clear error.
+func TestRunFunctionDefaultRegistryInvalid(t *testing.T) {
+	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "not a valid registry!")
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"function-starlark-stdlib:v1/naming.star\", \"resource_name\")\nResource(\"test\", {})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "validating default OCI registry", "invalid default OCI registry")
+}
+
+// TestRunFunctionDefaultRegistryInvalidFromSpec verifies that an invalid
+// spec.ociDefaultRegistry is also caught at the input boundary.
+func TestRunFunctionDefaultRegistryInvalidFromSpec(t *testing.T) {
+	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "")
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"function-starlark-stdlib:v1/naming.star\", \"resource_name\")\nResource(\"test\", {})",
+				"ociDefaultRegistry": "!!!invalid!!!"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertFatalResult(t, rsp, "validating default OCI registry", "invalid default OCI registry")
+}
+
 // TestRunFunctionDefaultRegistryNotConfigured verifies that using a short-form
 // load target without any default registry configured produces a Fatal response
 // with a clear error message naming both config options.
