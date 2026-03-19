@@ -473,3 +473,224 @@ func TestConstructorFreezeAndCallStillWorks(t *testing.T) {
 		t.Errorf("returned dict should be mutable: %v", err)
 	}
 }
+
+func TestConstructorEmptySchemaCall(t *testing.T) {
+	s := &SchemaCallable{
+		name:   "Empty",
+		fields: map[string]*FieldDescriptor{},
+		order:  nil,
+	}
+
+	result, err := callSchema(s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	d, ok := result.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("result is %T, want *starlark.Dict", result)
+	}
+	if d.Len() != 0 {
+		t.Errorf("empty schema call returned dict with %d entries, want 0", d.Len())
+	}
+}
+
+func TestConstructorEnumHappyPath(t *testing.T) {
+	enum := starlark.NewList([]starlark.Value{starlark.String("Standard_LRS"), starlark.String("Standard_GRS")})
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"sku": testField("string", false, starlark.None, enum),
+		},
+		order: []string{"sku"},
+	}
+
+	result, err := callSchema(s, kv("sku", starlark.String("Standard_LRS")))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	d := result.(*starlark.Dict)
+	v, found, _ := d.Get(starlark.String("sku"))
+	if !found {
+		t.Fatal("sku key not found")
+	}
+	if v.(starlark.String) != "Standard_LRS" {
+		t.Errorf("sku = %v, want Standard_LRS", v)
+	}
+}
+
+func TestConstructorGradualTyping(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Flexible",
+		fields: map[string]*FieldDescriptor{
+			"value": testField("", false, starlark.None, nil), // type="" accepts anything
+		},
+		order: []string{"value"},
+	}
+
+	// Should accept string.
+	result, err := callSchema(s, kv("value", starlark.String("hello")))
+	if err != nil {
+		t.Fatalf("string value rejected: %v", err)
+	}
+	d := result.(*starlark.Dict)
+	v, _, _ := d.Get(starlark.String("value"))
+	if v.(starlark.String) != "hello" {
+		t.Errorf("value = %v, want hello", v)
+	}
+
+	// Should accept int.
+	result, err = callSchema(s, kv("value", starlark.MakeInt(42)))
+	if err != nil {
+		t.Fatalf("int value rejected: %v", err)
+	}
+	d = result.(*starlark.Dict)
+	v, _, _ = d.Get(starlark.String("value"))
+	if v.(starlark.Int) != starlark.MakeInt(42) {
+		t.Errorf("value = %v, want 42", v)
+	}
+
+	// Should accept bool.
+	result, err = callSchema(s, kv("value", starlark.True))
+	if err != nil {
+		t.Fatalf("bool value rejected: %v", err)
+	}
+	d = result.(*starlark.Dict)
+	v, _, _ = d.Get(starlark.String("value"))
+	if v.(starlark.Bool) != starlark.True {
+		t.Errorf("value = %v, want True", v)
+	}
+}
+
+func TestConstructorMixedErrorTypes(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testField("string", true, starlark.None, nil),
+			"sku":      testField("string", false, starlark.None, nil),
+		},
+		order: []string{"location", "sku"},
+	}
+
+	// type mismatch on sku + required missing on location + unknown field xyzzy
+	_, err := callSchema(s,
+		kv("sku", starlark.MakeInt(123)),
+		kv("xyzzy", starlark.String("x")),
+	)
+	if err == nil {
+		t.Fatal("expected error for mixed error types")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "Account: 3 validation errors") {
+		t.Errorf("error = %v, want 3 validation errors", errStr)
+	}
+	if !strings.Contains(errStr, "sku: expected string, got int") {
+		t.Errorf("error should contain type mismatch for sku: %s", errStr)
+	}
+	if !strings.Contains(errStr, "xyzzy: unknown field") {
+		t.Errorf("error should contain unknown field xyzzy: %s", errStr)
+	}
+	if !strings.Contains(errStr, "location: required field missing") {
+		t.Errorf("error should contain required missing for location: %s", errStr)
+	}
+}
+
+func TestSchemaAttrUnknown(t *testing.T) {
+	s := &SchemaCallable{name: "Account"}
+	v, err := s.Attr("nonexistent")
+	if err != nil {
+		t.Fatalf("Attr(nonexistent) returned error: %v", err)
+	}
+	if v != nil {
+		t.Errorf("Attr(nonexistent) = %v, want nil", v)
+	}
+}
+
+func TestSchemaFieldsFreshDict(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testField("string", false, starlark.None, nil),
+		},
+		order: []string{"location"},
+	}
+
+	v1, err := s.Attr("fields")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, err := s.Attr("fields")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d1 := v1.(*starlark.Dict)
+	d2 := v2.(*starlark.Dict)
+
+	// Mutating d1 should not affect d2.
+	_ = d1.SetKey(starlark.String("extra"), starlark.String("injected"))
+	if d1.Len() != 2 {
+		t.Errorf("d1.Len() = %d, want 2", d1.Len())
+	}
+	if d2.Len() != 1 {
+		t.Errorf("d2.Len() = %d, want 1 (should be independent)", d2.Len())
+	}
+}
+
+func TestSchemaBuiltinNonStringName(t *testing.T) {
+	thread := &starlark.Thread{Name: "test"}
+	builtin := SchemaBuiltin()
+
+	_, err := starlark.Call(thread, builtin, starlark.Tuple{starlark.MakeInt(123)}, nil)
+	if err == nil {
+		t.Fatal("expected error for non-string name")
+	}
+	if !strings.Contains(err.Error(), "name must be a string") {
+		t.Errorf("error = %v, want contains 'name must be a string'", err)
+	}
+}
+
+func TestConstructorAllOptionalDefaults(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Config",
+		fields: map[string]*FieldDescriptor{
+			"region":   testField("string", false, starlark.String("us-east-1"), nil),
+			"replicas": testField("int", false, starlark.MakeInt(3), nil),
+			"tags":     testField("dict", false, starlark.None, nil), // optional, no default
+		},
+		order: []string{"region", "replicas", "tags"},
+	}
+
+	// Call with no kwargs — defaults should be applied.
+	result, err := callSchema(s)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	d := result.(*starlark.Dict)
+
+	// region should have default.
+	v, found, _ := d.Get(starlark.String("region"))
+	if !found {
+		t.Fatal("region not found")
+	}
+	if v.(starlark.String) != "us-east-1" {
+		t.Errorf("region = %v, want us-east-1", v)
+	}
+
+	// replicas should have default.
+	v, found, _ = d.Get(starlark.String("replicas"))
+	if !found {
+		t.Fatal("replicas not found")
+	}
+	if v.(starlark.Int) != starlark.MakeInt(3) {
+		t.Errorf("replicas = %v, want 3", v)
+	}
+
+	// tags (optional, no default) should be omitted.
+	_, found, _ = d.Get(starlark.String("tags"))
+	if found {
+		t.Error("tags should not be present (optional with no default)")
+	}
+}

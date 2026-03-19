@@ -75,3 +75,21 @@ func TestUnknownFieldError(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckTypeUnknownTypeName(t *testing.T) {
+	got := CheckType(starlark.String("hello"), "unknown_type")
+	if got {
+		t.Error("CheckType with unknown type name should return false")
+	}
+}
+
+func TestCheckEnumIntValues(t *testing.T) {
+	enum := starlark.NewList([]starlark.Value{starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3)})
+
+	if !checkEnum(starlark.MakeInt(2), enum) {
+		t.Error("checkEnum(2, [1,2,3]) should return true")
+	}
+	if checkEnum(starlark.MakeInt(5), enum) {
+		t.Error("checkEnum(5, [1,2,3]) should return false")
+	}
+}

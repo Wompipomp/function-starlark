@@ -392,3 +392,47 @@ func TestFieldHash(t *testing.T) {
 		t.Errorf("Hash() error = %q, want containing 'unhashable'", hashErr.Error())
 	}
 }
+
+func TestFieldFreezeIdempotent(t *testing.T) {
+	defVal := starlark.NewList([]starlark.Value{starlark.MakeInt(1)})
+	fd, err := callField(t, kwargs("default", defVal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd.Freeze()
+	fd.Freeze() // second freeze should be a no-op
+
+	// Verify default is still frozen and accessible.
+	v, attrErr := fd.Attr("default")
+	if attrErr != nil {
+		t.Fatal(attrErr)
+	}
+	list, ok := v.(*starlark.List)
+	if !ok {
+		t.Fatalf("default is %T, want *starlark.List", v)
+	}
+	if list.Len() != 1 {
+		t.Errorf("default.Len() = %d, want 1", list.Len())
+	}
+}
+
+func TestFieldCreationAllParams(t *testing.T) {
+	enumList := starlark.NewList([]starlark.Value{starlark.String("a"), starlark.String("b")})
+	fd, err := callField(t, kwargs(
+		"type", starlark.String("string"),
+		"enum", enumList,
+		"doc", starlark.String("A combined field"),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fd.typeName != "string" {
+		t.Errorf("typeName = %q, want %q", fd.typeName, "string")
+	}
+	if fd.enum == nil || fd.enum.Len() != 2 {
+		t.Errorf("enum.Len() = %v, want 2", fd.enum)
+	}
+	if fd.doc != "A combined field" {
+		t.Errorf("doc = %q, want %q", fd.doc, "A combined field")
+	}
+}
