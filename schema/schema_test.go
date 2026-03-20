@@ -17,6 +17,33 @@ func testField(typeName string, required bool, defVal starlark.Value, enum *star
 	}
 }
 
+// helper: create a FieldDescriptor with a nested schema reference.
+func testFieldWithSchema(schema *SchemaCallable, required bool) *FieldDescriptor {
+	return &FieldDescriptor{
+		schema:   schema,
+		required: required,
+		defVal:   starlark.None,
+	}
+}
+
+// helper: create a FieldDescriptor with list type and items schema.
+func testFieldWithItems(items *SchemaCallable) *FieldDescriptor {
+	return &FieldDescriptor{
+		typeName: "list",
+		items:    items,
+		defVal:   starlark.None,
+	}
+}
+
+// helper: build a *starlark.Dict from key-value pairs.
+func makeDict(pairs ...starlark.Tuple) *starlark.Dict {
+	d := starlark.NewDict(len(pairs))
+	for _, p := range pairs {
+		_ = d.SetKey(p[0], p[1])
+	}
+	return d
+}
+
 // helper: call SchemaCallable with kwargs.
 func callSchema(s *SchemaCallable, kwargs ...starlark.Tuple) (starlark.Value, error) {
 	return s.CallInternal(nil, nil, kwargs)
@@ -692,5 +719,634 @@ func TestConstructorAllOptionalDefaults(t *testing.T) {
 	_, found, _ = d.Get(starlark.String("tags"))
 	if found {
 		t.Error("tags should not be present (optional with no default)")
+	}
+}
+
+// --- Nested schema validation tests (Plan 02) ---
+
+// CallInternal returns SchemaDict instead of raw *starlark.Dict.
+func TestConstructorReturnsSchemaDict(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testField("string", false, starlark.None, nil),
+		},
+		order: []string{"location"},
+	}
+
+	result, err := callSchema(s, kv("location", starlark.String("westeurope")))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sd, ok := result.(*SchemaDict)
+	if !ok {
+		t.Fatalf("result is %T, want *SchemaDict", result)
+	}
+	if sd.SchemaName() != "Account" {
+		t.Errorf("SchemaName() = %q, want %q", sd.SchemaName(), "Account")
+	}
+
+	v, found, _ := sd.Get(starlark.String("location"))
+	if !found {
+		t.Fatal("location key not found")
+	}
+	if v.(starlark.String) != "westeurope" {
+		t.Errorf("location = %v, want westeurope", v)
+	}
+}
+
+// Nested schema field with plain dict value validates recursively.
+func TestConstructorPlainDictNested(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	// Pass a plain dict for the nested schema field.
+	plainDict := makeDict(kv("region", starlark.String("westeurope")))
+	result, err := callSchema(outer, kv("location", plainDict))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sd := result.(*SchemaDict)
+	locVal, found, _ := sd.Get(starlark.String("location"))
+	if !found {
+		t.Fatal("location key not found")
+	}
+
+	// The nested value should be wrapped in SchemaDict.
+	locSD, ok := locVal.(*SchemaDict)
+	if !ok {
+		t.Fatalf("nested value is %T, want *SchemaDict", locVal)
+	}
+	if locSD.SchemaName() != "Location" {
+		t.Errorf("nested SchemaName() = %q, want %q", locSD.SchemaName(), "Location")
+	}
+
+	v, found, _ := locSD.Get(starlark.String("region"))
+	if !found {
+		t.Fatal("region key not found in nested dict")
+	}
+	if v.(starlark.String) != "westeurope" {
+		t.Errorf("region = %v, want westeurope", v)
+	}
+}
+
+// SchemaDict value skips re-validation.
+func TestConstructorSchemaDictSkipsRevalidation(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	// Pre-validate with inner schema.
+	innerResult, err := callSchema(inner, kv("region", starlark.String("eastus")))
+	if err != nil {
+		t.Fatalf("inner call failed: %v", err)
+	}
+
+	// Pass SchemaDict directly — should be stored without re-validation.
+	result, err := callSchema(outer, kv("location", innerResult))
+	if err != nil {
+		t.Fatalf("outer call failed: %v", err)
+	}
+
+	sd := result.(*SchemaDict)
+	locVal, found, _ := sd.Get(starlark.String("location"))
+	if !found {
+		t.Fatal("location key not found")
+	}
+
+	// Should be the exact same SchemaDict we passed in.
+	if locVal != innerResult {
+		t.Error("expected SchemaDict to be stored directly without re-validation")
+	}
+}
+
+// Nested schema field with wrong type (e.g., string) should error.
+func TestConstructorNestedSchema(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	_, err := callSchema(outer, kv("location", starlark.String("not-a-dict")))
+	if err == nil {
+		t.Fatal("expected error for wrong type on schema field")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "location: expected Location or dict, got string") {
+		t.Errorf("error = %v, want contains 'location: expected Location or dict, got string'", errStr)
+	}
+}
+
+// None on optional schema-typed field applies omission semantics.
+func TestConstructorNestedNoneOptional(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, false),
+		},
+		order: []string{"location"},
+	}
+
+	result, err := callSchema(outer, kv("location", starlark.None))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sd := result.(*SchemaDict)
+	_, found, _ := sd.Get(starlark.String("location"))
+	if found {
+		t.Error("location should be omitted when None on optional schema field")
+	}
+}
+
+// None on required schema-typed field should error.
+func TestConstructorNestedNoneRequired(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	_, err := callSchema(outer, kv("location", starlark.None))
+	if err == nil {
+		t.Fatal("expected error for None on required schema field")
+	}
+	if !strings.Contains(err.Error(), "location: required field missing") {
+		t.Errorf("error = %v, want contains 'location: required field missing'", err)
+	}
+}
+
+// List with items schema validates each element.
+func TestConstructorListItems(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name":  testField("string", true, starlark.None, nil),
+			"image": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name", "image"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	c1 := makeDict(
+		kv("name", starlark.String("web")),
+		kv("image", starlark.String("nginx")),
+	)
+	c2 := makeDict(
+		kv("name", starlark.String("sidecar")),
+		kv("image", starlark.String("envoy")),
+	)
+
+	result, err := callSchema(outer, kv("containers", starlark.NewList([]starlark.Value{c1, c2})))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sd := result.(*SchemaDict)
+	listVal, found, _ := sd.Get(starlark.String("containers"))
+	if !found {
+		t.Fatal("containers not found")
+	}
+
+	list, ok := listVal.(*starlark.List)
+	if !ok {
+		t.Fatalf("containers is %T, want *starlark.List", listVal)
+	}
+	if list.Len() != 2 {
+		t.Fatalf("list len = %d, want 2", list.Len())
+	}
+
+	// Each element should be a SchemaDict.
+	for i := 0; i < list.Len(); i++ {
+		elem, ok := list.Index(i).(*SchemaDict)
+		if !ok {
+			t.Errorf("element %d is %T, want *SchemaDict", i, list.Index(i))
+			continue
+		}
+		if elem.SchemaName() != "Container" {
+			t.Errorf("element %d SchemaName() = %q, want %q", i, elem.SchemaName(), "Container")
+		}
+	}
+}
+
+// Empty list passes validation.
+func TestConstructorEmptyListValid(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	result, err := callSchema(outer, kv("containers", starlark.NewList(nil)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sd := result.(*SchemaDict)
+	listVal, found, _ := sd.Get(starlark.String("containers"))
+	if !found {
+		t.Fatal("containers not found")
+	}
+
+	list := listVal.(*starlark.List)
+	if list.Len() != 0 {
+		t.Errorf("empty list should have 0 elements, got %d", list.Len())
+	}
+}
+
+// List with items schema, SchemaDict elements skip re-validation.
+func TestConstructorListItemsSchemaDictSkipsRevalidation(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	// Pre-validate element.
+	elemResult, err := callSchema(item, kv("name", starlark.String("web")))
+	if err != nil {
+		t.Fatalf("inner call failed: %v", err)
+	}
+
+	result, err := callSchema(outer, kv("containers", starlark.NewList([]starlark.Value{elemResult})))
+	if err != nil {
+		t.Fatalf("outer call failed: %v", err)
+	}
+
+	sd := result.(*SchemaDict)
+	listVal, _, _ := sd.Get(starlark.String("containers"))
+	list := listVal.(*starlark.List)
+
+	// Should be the same SchemaDict we passed.
+	if list.Index(0) != elemResult {
+		t.Error("expected SchemaDict element to be stored directly")
+	}
+}
+
+// Non-list value for list-with-items field should error.
+func TestConstructorListItemsNonList(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	_, err := callSchema(outer, kv("containers", starlark.String("not-a-list")))
+	if err == nil {
+		t.Fatal("expected error for non-list value on list-with-items field")
+	}
+	if !strings.Contains(err.Error(), "containers: expected list, got string") {
+		t.Errorf("error = %v, want contains 'containers: expected list, got string'", err)
+	}
+}
+
+// List element with wrong type should error with bracket-index path.
+func TestListIndexErrorPath(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	// Element is a string, not a dict.
+	_, err := callSchema(outer, kv("containers", starlark.NewList([]starlark.Value{starlark.String("not-a-dict")})))
+	if err == nil {
+		t.Fatal("expected error for wrong type element")
+	}
+	if !strings.Contains(err.Error(), "containers[0]: expected Container or dict, got string") {
+		t.Errorf("error = %v, want contains 'containers[0]: expected Container or dict, got string'", err)
+	}
+}
+
+// Nested error path: "parent.child" (dot-separated).
+func TestNestedErrorPath(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	// Pass a plain dict missing the required field.
+	plainDict := makeDict() // empty dict, missing required "region"
+	_, err := callSchema(outer, kv("location", plainDict))
+	if err == nil {
+		t.Fatal("expected error for missing required nested field")
+	}
+	errStr := err.Error()
+	// Error should have full dot-path.
+	if !strings.Contains(errStr, "location.region: required field missing") {
+		t.Errorf("error = %v, want contains 'location.region: required field missing'", errStr)
+	}
+	// Summary should name the outermost schema.
+	if !strings.Contains(errStr, "Account: 1 validation error") {
+		t.Errorf("error = %v, want contains 'Account: 1 validation error'", errStr)
+	}
+}
+
+// Did-you-mean at nested level.
+func TestNestedDidYouMean(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name":  testField("string", true, starlark.None, nil),
+			"image": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name", "image"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(inner),
+		},
+		order: []string{"containers"},
+	}
+
+	// Typo "nme" instead of "name" in a list element.
+	badDict := makeDict(
+		kv("nme", starlark.String("web")),
+		kv("image", starlark.String("nginx")),
+	)
+	_, err := callSchema(outer, kv("containers", starlark.NewList([]starlark.Value{badDict})))
+	if err == nil {
+		t.Fatal("expected error for typo in nested field")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, `containers[0].nme: unknown field (did you mean "name"?)`) {
+		t.Errorf("error = %v, want contains 'containers[0].nme: unknown field (did you mean \"name\"?)'", errStr)
+	}
+}
+
+// Multiple nested errors roll up to outermost schema.
+func TestNestedErrorRollup(t *testing.T) {
+	container := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name":  testField("string", true, starlark.None, nil),
+			"image": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name", "image"},
+	}
+
+	spec := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(container),
+		},
+		order: []string{"containers"},
+	}
+
+	template := &SchemaCallable{
+		name: "Template",
+		fields: map[string]*FieldDescriptor{
+			"spec": testFieldWithSchema(spec, true),
+		},
+		order: []string{"spec"},
+	}
+
+	deployment := &SchemaCallable{
+		name: "DeploymentSpec",
+		fields: map[string]*FieldDescriptor{
+			"template": testFieldWithSchema(template, true),
+		},
+		order: []string{"template"},
+	}
+
+	// Container 0: typo "nme" instead of "name".
+	// Container 1: missing "image".
+	c0 := makeDict(
+		kv("nme", starlark.String("web")),
+		kv("image", starlark.String("nginx")),
+	)
+	c1 := makeDict(
+		kv("name", starlark.String("sidecar")),
+		// missing "image"
+	)
+
+	specDict := makeDict(
+		kv("containers", starlark.NewList([]starlark.Value{c0, c1})),
+	)
+	templateDict := makeDict(kv("spec", specDict))
+
+	_, err := callSchema(deployment, kv("template", templateDict))
+	if err == nil {
+		t.Fatal("expected error for nested validation failures")
+	}
+	errStr := err.Error()
+
+	// Summary names outermost schema.
+	if !strings.Contains(errStr, "DeploymentSpec:") {
+		t.Errorf("error should name DeploymentSpec: %s", errStr)
+	}
+
+	// Error from container 0's typo with full path.
+	if !strings.Contains(errStr, `template.spec.containers[0].nme: unknown field (did you mean "name"?)`) {
+		t.Errorf("error should contain full path for container[0] typo: %s", errStr)
+	}
+
+	// Error from container 1's missing required field.
+	if !strings.Contains(errStr, "template.spec.containers[1].image: required field missing") {
+		t.Errorf("error should contain full path for container[1] missing image: %s", errStr)
+	}
+
+	// Should have at least 2 errors (could be more if "nme" as unknown causes both unknown + missing "name").
+	if !strings.Contains(errStr, "validation error") {
+		t.Errorf("error should mention validation errors: %s", errStr)
+	}
+}
+
+// Deeply nested path format test.
+func TestDeeplyNestedErrorPath(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Env",
+		fields: map[string]*FieldDescriptor{
+			"value": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"value"},
+	}
+
+	container := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+			"envs": testFieldWithItems(inner),
+		},
+		order: []string{"name", "envs"},
+	}
+
+	spec := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(container),
+		},
+		order: []string{"containers"},
+	}
+
+	// Container with env missing required value.
+	envDict := makeDict() // missing "value"
+	c := makeDict(
+		kv("name", starlark.String("web")),
+		kv("envs", starlark.NewList([]starlark.Value{envDict})),
+	)
+
+	_, err := callSchema(spec, kv("containers", starlark.NewList([]starlark.Value{c})))
+	if err == nil {
+		t.Fatal("expected error for deeply nested validation failure")
+	}
+	errStr := err.Error()
+	// Path should be: containers[0].envs[0].value
+	if !strings.Contains(errStr, "containers[0].envs[0].value: required field missing") {
+		t.Errorf("error = %v, want contains 'containers[0].envs[0].value: required field missing'", errStr)
+	}
+}
+
+// Existing flat behavior unchanged (backward compat).
+func TestConstructorFlatSchemaUnchanged(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testField("string", true, starlark.None, nil),
+			"sku":      testField("string", false, starlark.String("Standard_LRS"), nil),
+		},
+		order: []string{"location", "sku"},
+	}
+
+	result, err := callSchema(s, kv("location", starlark.String("westeurope")))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should return SchemaDict.
+	sd, ok := result.(*SchemaDict)
+	if !ok {
+		t.Fatalf("result is %T, want *SchemaDict", result)
+	}
+
+	// Type() should still be "dict" for backward compat.
+	if sd.Type() != "dict" {
+		t.Errorf("Type() = %q, want %q", sd.Type(), "dict")
+	}
+
+	// Values should be accessible.
+	v, found, _ := sd.Get(starlark.String("location"))
+	if !found || v.(starlark.String) != "westeurope" {
+		t.Errorf("location = %v, want westeurope", v)
+	}
+	v, found, _ = sd.Get(starlark.String("sku"))
+	if !found || v.(starlark.String) != "Standard_LRS" {
+		t.Errorf("sku = %v, want Standard_LRS (default)", v)
 	}
 }

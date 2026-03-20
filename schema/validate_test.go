@@ -94,3 +94,39 @@ func TestCheckEnumIntValues(t *testing.T) {
 		t.Error("checkEnum(5, [1,2,3]) should return false")
 	}
 }
+
+func TestJoinPath(t *testing.T) {
+	tests := []struct {
+		prefix, field, want string
+	}{
+		{"", "location", "location"},
+		{"template", "spec", "template.spec"},
+		{"template.spec", "containers", "template.spec.containers"},
+	}
+	for _, tt := range tests {
+		got := joinPath(tt.prefix, tt.field)
+		if got != tt.want {
+			t.Errorf("joinPath(%q, %q) = %q, want %q", tt.prefix, tt.field, got, tt.want)
+		}
+	}
+}
+
+func TestUnknownFieldErrorPath(t *testing.T) {
+	fields := []string{"name", "image"}
+
+	t.Run("with path prefix and suggestion", func(t *testing.T) {
+		got := unknownFieldErrorPath("containers[0].nme", "nme", fields)
+		want := `containers[0].nme: unknown field (did you mean "name"?)`
+		if got != want {
+			t.Errorf("got:  %s\nwant: %s", got, want)
+		}
+	})
+
+	t.Run("with path prefix no suggestion", func(t *testing.T) {
+		got := unknownFieldErrorPath("spec.xyzzy", "xyzzy", fields)
+		want := `spec.xyzzy: unknown field; valid fields: name, image`
+		if got != want {
+			t.Errorf("got:  %s\nwant: %s", got, want)
+		}
+	})
+}

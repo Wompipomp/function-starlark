@@ -65,8 +65,22 @@ func formatEnumError(fieldName string, val starlark.Value, enum *starlark.List) 
 // unknownFieldError produces a formatted unknown-field message, optionally
 // suggesting the closest match using Levenshtein distance.
 func unknownFieldError(fieldName string, validFields []string) string {
+	return unknownFieldErrorPath(fieldName, fieldName, validFields)
+}
+
+// unknownFieldErrorPath produces a formatted unknown-field message using path
+// for display and fieldName for Levenshtein comparison.
+func unknownFieldErrorPath(path, fieldName string, validFields []string) string {
 	if suggestion := Suggest(fieldName, validFields); suggestion != "" {
-		return fmt.Sprintf("%s: unknown field (did you mean %q?)", fieldName, suggestion)
+		return fmt.Sprintf("%s: unknown field (did you mean %q?)", path, suggestion)
 	}
-	return fmt.Sprintf("%s: unknown field; valid fields: %s", fieldName, strings.Join(validFields, ", "))
+	return fmt.Sprintf("%s: unknown field; valid fields: %s", path, strings.Join(validFields, ", "))
+}
+
+// joinPath joins path segments with dots, skipping empty prefix.
+func joinPath(prefix, field string) string {
+	if prefix == "" {
+		return field
+	}
+	return prefix + "." + field
 }
