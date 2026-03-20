@@ -14,7 +14,7 @@ func newTestSchemaDict(name string, entries ...any) *SchemaDict {
 	d := starlark.NewDict(len(entries) / 2)
 	fields := make(map[string]*FieldDescriptor)
 	var order []string
-	for i := 0; i < len(entries); i += 2 {
+	for i := 0; i+1 < len(entries); i += 2 {
 		key := entries[i].(string)
 		_ = d.SetKey(starlark.String(key), entries[i+1].(starlark.Value))
 		fields[key] = &FieldDescriptor{defVal: starlark.None} // gradual: accepts any type

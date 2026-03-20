@@ -25,7 +25,7 @@ func callField(t *testing.T, kwargs []starlark.Tuple) (*FieldDescriptor, error) 
 
 func kwargs(pairs ...any) []starlark.Tuple {
 	var out []starlark.Tuple
-	for i := 0; i < len(pairs); i += 2 {
+	for i := 0; i+1 < len(pairs); i += 2 {
 		key := starlark.String(pairs[i].(string))
 		out = append(out, starlark.Tuple{key, pairs[i+1].(starlark.Value)})
 	}
