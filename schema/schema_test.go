@@ -242,12 +242,12 @@ func TestConstructorHappyPath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d, ok := result.(*starlark.Dict)
+	sd, ok := result.(*SchemaDict)
 	if !ok {
-		t.Fatalf("result is %T, want *starlark.Dict", result)
+		t.Fatalf("result is %T, want *SchemaDict", result)
 	}
 
-	v, found, _ := d.Get(starlark.String("location"))
+	v, found, _ := sd.Get(starlark.String("location"))
 	if !found {
 		t.Fatal("location key not found")
 	}
@@ -386,8 +386,8 @@ func TestConstructorNoneOptionalWithDefault(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d := result.(*starlark.Dict)
-	v, found, _ := d.Get(starlark.String("region"))
+	sd := result.(*SchemaDict)
+	v, found, _ := sd.Get(starlark.String("region"))
 	if !found {
 		t.Fatal("region key not found")
 	}
@@ -410,8 +410,8 @@ func TestConstructorNoneOptionalNoDefault(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d := result.(*starlark.Dict)
-	_, found, _ := d.Get(starlark.String("region"))
+	sd := result.(*SchemaDict)
+	_, found, _ := sd.Get(starlark.String("region"))
 	if found {
 		t.Error("region key should not be present when None + no default")
 	}
@@ -451,8 +451,8 @@ func TestConstructorDefaultsApplied(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d := result.(*starlark.Dict)
-	v, found, _ := d.Get(starlark.String("region"))
+	sd := result.(*SchemaDict)
+	v, found, _ := sd.Get(starlark.String("region"))
 	if !found {
 		t.Fatal("region default not applied")
 	}
@@ -494,10 +494,10 @@ func TestConstructorFreezeAndCallStillWorks(t *testing.T) {
 		t.Fatalf("call after freeze failed: %v", err)
 	}
 
-	d := result.(*starlark.Dict)
-	// Verify returned dict is mutable.
-	if err := d.SetKey(starlark.String("extra"), starlark.String("val")); err != nil {
-		t.Errorf("returned dict should be mutable: %v", err)
+	sd := result.(*SchemaDict)
+	// Verify returned SchemaDict is mutable.
+	if err := sd.SetKey(starlark.String("extra"), starlark.String("val")); err != nil {
+		t.Errorf("returned SchemaDict should be mutable: %v", err)
 	}
 }
 
@@ -513,12 +513,12 @@ func TestConstructorEmptySchemaCall(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d, ok := result.(*starlark.Dict)
+	sd, ok := result.(*SchemaDict)
 	if !ok {
-		t.Fatalf("result is %T, want *starlark.Dict", result)
+		t.Fatalf("result is %T, want *SchemaDict", result)
 	}
-	if d.Len() != 0 {
-		t.Errorf("empty schema call returned dict with %d entries, want 0", d.Len())
+	if sd.Len() != 0 {
+		t.Errorf("empty schema call returned dict with %d entries, want 0", sd.Len())
 	}
 }
 
@@ -537,8 +537,8 @@ func TestConstructorEnumHappyPath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d := result.(*starlark.Dict)
-	v, found, _ := d.Get(starlark.String("sku"))
+	sd := result.(*SchemaDict)
+	v, found, _ := sd.Get(starlark.String("sku"))
 	if !found {
 		t.Fatal("sku key not found")
 	}
@@ -561,8 +561,8 @@ func TestConstructorGradualTyping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("string value rejected: %v", err)
 	}
-	d := result.(*starlark.Dict)
-	v, _, _ := d.Get(starlark.String("value"))
+	sd := result.(*SchemaDict)
+	v, _, _ := sd.Get(starlark.String("value"))
 	if v.(starlark.String) != "hello" {
 		t.Errorf("value = %v, want hello", v)
 	}
@@ -572,8 +572,8 @@ func TestConstructorGradualTyping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("int value rejected: %v", err)
 	}
-	d = result.(*starlark.Dict)
-	v, _, _ = d.Get(starlark.String("value"))
+	sd = result.(*SchemaDict)
+	v, _, _ = sd.Get(starlark.String("value"))
 	if v.(starlark.Int) != starlark.MakeInt(42) {
 		t.Errorf("value = %v, want 42", v)
 	}
@@ -583,8 +583,8 @@ func TestConstructorGradualTyping(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bool value rejected: %v", err)
 	}
-	d = result.(*starlark.Dict)
-	v, _, _ = d.Get(starlark.String("value"))
+	sd = result.(*SchemaDict)
+	v, _, _ = sd.Get(starlark.String("value"))
 	if v.(starlark.Bool) != starlark.True {
 		t.Errorf("value = %v, want True", v)
 	}
@@ -695,10 +695,10 @@ func TestConstructorAllOptionalDefaults(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	d := result.(*starlark.Dict)
+	sd := result.(*SchemaDict)
 
 	// region should have default.
-	v, found, _ := d.Get(starlark.String("region"))
+	v, found, _ := sd.Get(starlark.String("region"))
 	if !found {
 		t.Fatal("region not found")
 	}
@@ -707,7 +707,7 @@ func TestConstructorAllOptionalDefaults(t *testing.T) {
 	}
 
 	// replicas should have default.
-	v, found, _ = d.Get(starlark.String("replicas"))
+	v, found, _ = sd.Get(starlark.String("replicas"))
 	if !found {
 		t.Fatal("replicas not found")
 	}
@@ -716,7 +716,7 @@ func TestConstructorAllOptionalDefaults(t *testing.T) {
 	}
 
 	// tags (optional, no default) should be omitted.
-	_, found, _ = d.Get(starlark.String("tags"))
+	_, found, _ = sd.Get(starlark.String("tags"))
 	if found {
 		t.Error("tags should not be present (optional with no default)")
 	}

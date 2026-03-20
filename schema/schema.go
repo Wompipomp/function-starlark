@@ -63,12 +63,25 @@ func (s *SchemaCallable) AttrNames() []string {
 }
 
 // CallInternal validates kwargs against the schema fields and returns a
-// *starlark.Dict on success, or an error listing all validation failures.
+// *SchemaDict on success, or an error listing all validation failures.
 func (s *SchemaCallable) CallInternal(_ *starlark.Thread, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) > 0 {
 		return nil, fmt.Errorf("%s: unexpected positional arguments", s.name)
 	}
 
+	result, errs := s.validateFields(kwargs, "")
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%s: %d validation error%s:\n- %s",
+			s.name, len(errs), pluralS(len(errs)), strings.Join(errs, "\n- "))
+	}
+
+	return NewSchemaDict(s.name, result), nil
+}
+
+// validateFields performs recursive validation returning a raw dict and error
+// strings with full path prefixes. prefix is the current field path (empty for
+// top-level).
+func (s *SchemaCallable) validateFields(kwargs []starlark.Tuple, prefix string) (*starlark.Dict, []string) {
 	var errs []string
 	seen := make(map[string]bool, len(kwargs))
 	result := starlark.NewDict(len(s.fields))
@@ -77,10 +90,11 @@ func (s *SchemaCallable) CallInternal(_ *starlark.Thread, args starlark.Tuple, k
 	for _, kv := range kwargs {
 		key := string(kv[0].(starlark.String))
 		val := kv[1]
+		fieldPath := joinPath(prefix, key)
 
 		fd, ok := s.fields[key]
 		if !ok {
-			errs = append(errs, unknownFieldError(key, s.order))
+			errs = append(errs, unknownFieldErrorPath(fieldPath, key, s.order))
 			continue
 		}
 		seen[key] = true
@@ -88,7 +102,7 @@ func (s *SchemaCallable) CallInternal(_ *starlark.Thread, args starlark.Tuple, k
 		// Handle None as omission.
 		if val == starlark.None {
 			if fd.required {
-				errs = append(errs, fmt.Sprintf("%s: required field missing", key))
+				errs = append(errs, fmt.Sprintf("%s: required field missing", fieldPath))
 			} else if fd.defVal != starlark.None {
 				_ = result.SetKey(starlark.String(key), fd.defVal)
 			}
@@ -96,15 +110,70 @@ func (s *SchemaCallable) CallInternal(_ *starlark.Thread, args starlark.Tuple, k
 			continue
 		}
 
-		// Type check.
+		// Nested schema validation.
+		if fd.schema != nil {
+			switch v := val.(type) {
+			case *SchemaDict:
+				// Already validated, skip re-validation.
+				_ = result.SetKey(starlark.String(key), v)
+			case *starlark.Dict:
+				// Validate plain dict against sub-schema.
+				subResult, subErrs := fd.schema.validateFields(v.Items(), fieldPath)
+				errs = append(errs, subErrs...)
+				if len(subErrs) == 0 {
+					_ = result.SetKey(starlark.String(key), NewSchemaDict(fd.schema.name, subResult))
+				}
+			default:
+				errs = append(errs, fmt.Sprintf("%s: expected %s or dict, got %s",
+					fieldPath, fd.schema.name, val.Type()))
+			}
+			continue
+		}
+
+		// List items validation.
+		if fd.items != nil && fd.typeName == "list" {
+			list, ok := val.(*starlark.List)
+			if !ok {
+				errs = append(errs, fmt.Sprintf("%s: expected list, got %s", fieldPath, val.Type()))
+				continue
+			}
+			validatedList := make([]starlark.Value, 0, list.Len())
+			listHasErrors := false
+			for i := 0; i < list.Len(); i++ {
+				elem := list.Index(i)
+				elemPath := fmt.Sprintf("%s[%d]", fieldPath, i)
+				switch v := elem.(type) {
+				case *SchemaDict:
+					validatedList = append(validatedList, v)
+				case *starlark.Dict:
+					subResult, subErrs := fd.items.validateFields(v.Items(), elemPath)
+					errs = append(errs, subErrs...)
+					if len(subErrs) == 0 {
+						validatedList = append(validatedList, NewSchemaDict(fd.items.name, subResult))
+					} else {
+						listHasErrors = true
+					}
+				default:
+					errs = append(errs, fmt.Sprintf("%s: expected %s or dict, got %s",
+						elemPath, fd.items.name, elem.Type()))
+					listHasErrors = true
+				}
+			}
+			if !listHasErrors {
+				_ = result.SetKey(starlark.String(key), starlark.NewList(validatedList))
+			}
+			continue
+		}
+
+		// Primitive type check.
 		if fd.typeName != "" && !CheckType(val, fd.typeName) {
-			errs = append(errs, fmt.Sprintf("%s: expected %s, got %s (%s)", key, fd.typeName, val.Type(), val.String()))
+			errs = append(errs, fmt.Sprintf("%s: expected %s, got %s (%s)", fieldPath, fd.typeName, val.Type(), val.String()))
 			continue
 		}
 
 		// Enum check.
 		if fd.enum != nil && !checkEnum(val, fd.enum) {
-			errs = append(errs, formatEnumError(key, val, fd.enum))
+			errs = append(errs, formatEnumError(fieldPath, val, fd.enum))
 			continue
 		}
 
@@ -117,19 +186,15 @@ func (s *SchemaCallable) CallInternal(_ *starlark.Thread, args starlark.Tuple, k
 			continue
 		}
 		fd := s.fields[name]
+		fieldPath := joinPath(prefix, name)
 		if fd.required {
-			errs = append(errs, fmt.Sprintf("%s: required field missing", name))
+			errs = append(errs, fmt.Sprintf("%s: required field missing", fieldPath))
 		} else if fd.defVal != starlark.None {
 			_ = result.SetKey(starlark.String(name), fd.defVal)
 		}
 	}
 
-	if len(errs) > 0 {
-		return nil, fmt.Errorf("%s: %d validation error%s:\n- %s",
-			s.name, len(errs), pluralS(len(errs)), strings.Join(errs, "\n- "))
-	}
-
-	return result, nil
+	return result, errs
 }
 
 func pluralS(n int) string {
