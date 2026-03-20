@@ -38,6 +38,9 @@ func CheckType(val starlark.Value, typeName string) bool {
 		if _, ok := val.(*convert.StarlarkDict); ok {
 			return true
 		}
+		if _, ok := val.(*SchemaDict); ok {
+			return true
+		}
 		return false
 	default:
 		return false

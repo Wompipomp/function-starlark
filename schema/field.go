@@ -12,12 +12,38 @@ import (
 // It implements starlark.Value and starlark.HasAttrs for read-only
 // introspection from Starlark code.
 type FieldDescriptor struct {
-	typeName string
+	typeName string          // primitive type name ("string", "int", etc.)
+	schema   *SchemaCallable // nested schema reference (mutually exclusive with typeName)
+	items    *SchemaCallable // list element schema (only valid when typeName == "list")
 	required bool
 	defVal   starlark.Value
 	enum     *starlark.List
 	doc      string
 	frozen   bool
+}
+
+// typeParam implements starlark.Unpacker for the dual-purpose type= kwarg.
+// It accepts either a string (primitive type name) or a *SchemaCallable.
+type typeParam struct {
+	typeName string
+	schema   *SchemaCallable
+}
+
+func (tp *typeParam) Unpack(v starlark.Value) error {
+	switch v := v.(type) {
+	case starlark.String:
+		s := string(v)
+		if s != "" && !validTypes[s] {
+			return fmt.Errorf("invalid type %q; valid types: bool, dict, float, int, list, string", s)
+		}
+		tp.typeName = s
+		return nil
+	case *SchemaCallable:
+		tp.schema = v
+		return nil
+	default:
+		return fmt.Errorf("type= must be a string or schema, got %s", v.Type())
+	}
 }
 
 // Compile-time interface checks.
@@ -40,8 +66,13 @@ var validTypes = map[string]bool{
 
 func (f *FieldDescriptor) String() string {
 	var parts []string
-	if f.typeName != "" {
+	if f.schema != nil {
+		parts = append(parts, "type="+f.schema.name)
+	} else if f.typeName != "" {
 		parts = append(parts, "type="+f.typeName)
+	}
+	if f.items != nil {
+		parts = append(parts, "items="+f.items.name)
 	}
 	if f.required {
 		parts = append(parts, "required")
@@ -78,6 +109,9 @@ func (f *FieldDescriptor) Freeze() {
 func (f *FieldDescriptor) Attr(name string) (starlark.Value, error) {
 	switch name {
 	case "type":
+		if f.schema != nil {
+			return starlark.String(f.schema.name), nil
+		}
 		return starlark.String(f.typeName), nil
 	case "required":
 		return starlark.Bool(f.required), nil
@@ -105,22 +139,32 @@ func FieldBuiltin() *starlark.Builtin {
 
 func fieldImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kw []starlark.Tuple) (starlark.Value, error) {
 	var (
-		typeName string
+		tp       typeParam
 		required bool
 		defVal   starlark.Value = starlark.None
 		enumVal  starlark.Value = starlark.None
 		doc      string
+		itemsVal starlark.Value = starlark.None
 	)
 
 	if err := starlark.UnpackArgs(b.Name(), args, kw,
-		"type?", &typeName, "required?", &required,
-		"default?", &defVal, "enum?", &enumVal, "doc?", &doc); err != nil {
+		"type?", &tp, "required?", &required,
+		"default?", &defVal, "enum?", &enumVal,
+		"doc?", &doc, "items?", &itemsVal); err != nil {
 		return nil, err
 	}
 
-	// Validate type name.
-	if !validTypes[typeName] {
-		return nil, fmt.Errorf("field: invalid type %q; valid types: bool, dict, float, int, list, string", typeName)
+	// Validate items= kwarg.
+	var items *SchemaCallable
+	if itemsVal != starlark.None {
+		var ok bool
+		items, ok = itemsVal.(*SchemaCallable)
+		if !ok {
+			return nil, fmt.Errorf("field: items= must be a schema, got %s", itemsVal.Type())
+		}
+		if tp.typeName != "list" || tp.schema != nil {
+			return nil, fmt.Errorf(`field: items= is only valid when type="list"`)
+		}
 	}
 
 	// Validate enum is a list if provided.
@@ -139,7 +183,9 @@ func fieldImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kw 
 	}
 
 	return &FieldDescriptor{
-		typeName: typeName,
+		typeName: tp.typeName,
+		schema:   tp.schema,
+		items:    items,
 		required: required,
 		defVal:   defVal,
 		enum:     enum,

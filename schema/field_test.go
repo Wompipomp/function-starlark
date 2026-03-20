@@ -436,3 +436,154 @@ func TestFieldCreationAllParams(t *testing.T) {
 		t.Errorf("doc = %q, want %q", fd.doc, "A combined field")
 	}
 }
+
+// --- typeParam / nested schema tests ---
+
+func testSchema(name string, fieldNames ...string) *SchemaCallable {
+	fields := make(map[string]*FieldDescriptor)
+	var order []string
+	for _, n := range fieldNames {
+		fields[n] = &FieldDescriptor{typeName: "string"}
+		order = append(order, n)
+	}
+	return &SchemaCallable{name: name, fields: fields, order: order}
+}
+
+func TestFieldTypeSchemaCallable(t *testing.T) {
+	sub := testSchema("Account", "location")
+	fd, err := callField(t, kwargs("type", sub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fd.schema != sub {
+		t.Error("schema should reference the SubSchema")
+	}
+	if fd.typeName != "" {
+		t.Errorf("typeName should be empty for schema-typed field, got %q", fd.typeName)
+	}
+}
+
+func TestFieldTypeStringStillWorks(t *testing.T) {
+	fd, err := callField(t, kwargs("type", starlark.String("string")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fd.typeName != "string" {
+		t.Errorf("typeName = %q, want %q", fd.typeName, "string")
+	}
+	if fd.schema != nil {
+		t.Error("schema should be nil for string-typed field")
+	}
+}
+
+func TestFieldTypeInvalidValue(t *testing.T) {
+	_, err := callField(t, kwargs("type", starlark.MakeInt(123)))
+	if err == nil {
+		t.Fatal("expected error for type=123")
+	}
+	if !strings.Contains(err.Error(), "type= must be a string or schema, got int") {
+		t.Errorf("error = %q, want containing 'type= must be a string or schema, got int'", err.Error())
+	}
+}
+
+func TestFieldTypeListWithItems(t *testing.T) {
+	sub := testSchema("Container", "name", "image")
+	fd, err := callField(t, kwargs("type", starlark.String("list"), "items", sub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fd.typeName != "list" {
+		t.Errorf("typeName = %q, want %q", fd.typeName, "list")
+	}
+	if fd.items != sub {
+		t.Error("items should reference the SubSchema")
+	}
+}
+
+func TestFieldItemsWithoutListType(t *testing.T) {
+	sub := testSchema("Item", "name")
+	_, err := callField(t, kwargs("items", sub))
+	if err == nil {
+		t.Fatal("expected error for items= without type=list")
+	}
+	want := `items= is only valid when type="list"`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want containing %q", err.Error(), want)
+	}
+}
+
+func TestFieldItemsWithStringType(t *testing.T) {
+	sub := testSchema("Item", "name")
+	_, err := callField(t, kwargs("type", starlark.String("string"), "items", sub))
+	if err == nil {
+		t.Fatal("expected error for items= with type=string")
+	}
+	want := `items= is only valid when type="list"`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want containing %q", err.Error(), want)
+	}
+}
+
+func TestFieldItemsWithSchemaType(t *testing.T) {
+	sub := testSchema("SubA", "a")
+	sub2 := testSchema("SubB", "b")
+	_, err := callField(t, kwargs("type", sub, "items", sub2))
+	if err == nil {
+		t.Fatal("expected error for items= with type=SubSchema")
+	}
+	want := `items= is only valid when type="list"`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want containing %q", err.Error(), want)
+	}
+}
+
+func TestFieldItemsNotSchema(t *testing.T) {
+	_, err := callField(t, kwargs("type", starlark.String("list"), "items", starlark.String("not-a-schema")))
+	if err == nil {
+		t.Fatal("expected error for items=non-schema")
+	}
+	if !strings.Contains(err.Error(), "items= must be a schema, got string") {
+		t.Errorf("error = %q, want containing 'items= must be a schema, got string'", err.Error())
+	}
+}
+
+func TestFieldStringSchemaType(t *testing.T) {
+	sub := testSchema("Account", "location")
+	fd, err := callField(t, kwargs("type", sub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fd.String()
+	want := "<field type=Account>"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestFieldStringListWithItems(t *testing.T) {
+	sub := testSchema("Container", "name")
+	fd, err := callField(t, kwargs("type", starlark.String("list"), "items", sub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fd.String()
+	want := "<field type=list items=Container>"
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestFieldAttrTypeReturnsSchemaName(t *testing.T) {
+	sub := testSchema("Account", "location")
+	fd, err := callField(t, kwargs("type", sub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	val, attrErr := fd.Attr("type")
+	if attrErr != nil {
+		t.Fatal(attrErr)
+	}
+	if val != starlark.String("Account") {
+		t.Errorf("Attr(type) = %v, want Account", val)
+	}
+}
