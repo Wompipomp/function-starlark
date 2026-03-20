@@ -573,6 +573,31 @@ func TestFieldStringListWithItems(t *testing.T) {
 	}
 }
 
+func TestFieldFreezeWithSchemaAndItems(t *testing.T) {
+	sub := testSchema("Container", "name")
+	fd := &FieldDescriptor{
+		typeName: "list",
+		schema:   nil,
+		items:    sub,
+		defVal:   starlark.None,
+	}
+	// Should not panic.
+	fd.Freeze()
+	if !fd.frozen {
+		t.Error("field should be frozen")
+	}
+
+	// Field with schema reference.
+	fd2 := &FieldDescriptor{
+		schema: sub,
+		defVal: starlark.None,
+	}
+	fd2.Freeze()
+	if !fd2.frozen {
+		t.Error("field with schema should be frozen")
+	}
+}
+
 func TestFieldAttrTypeReturnsSchemaName(t *testing.T) {
 	sub := testSchema("Account", "location")
 	fd, err := callField(t, kwargs("type", sub))

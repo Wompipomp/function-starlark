@@ -311,3 +311,168 @@ func TestSchemaDictCompareSameType(t *testing.T) {
 		t.Error("CompareSameType(==) should be true for equal dicts")
 	}
 }
+
+func TestSchemaDictBuiltinPop(t *testing.T) {
+	sd := newTestSchemaDict("P", "k", starlark.String("v"))
+	val, err := sd.Attr("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+	result, err := starlark.Call(thread, b, starlark.Tuple{starlark.String("k")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != starlark.String("v") {
+		t.Errorf("pop(k) = %v, want v", result)
+	}
+	// Key should be removed.
+	_, found, _ := sd.Get(starlark.String("k"))
+	if found {
+		t.Error("key should be removed after pop")
+	}
+}
+
+func TestSchemaDictBuiltinPopMissing(t *testing.T) {
+	sd := newTestSchemaDict("P")
+	val, err := sd.Attr("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+	result, err := starlark.Call(thread, b, starlark.Tuple{starlark.String("missing"), starlark.String("fallback")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != starlark.String("fallback") {
+		t.Errorf("pop(missing, fallback) = %v, want fallback", result)
+	}
+}
+
+func TestSchemaDictBuiltinPopMissingNoDefault(t *testing.T) {
+	sd := newTestSchemaDict("P")
+	val, err := sd.Attr("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+	_, err = starlark.Call(thread, b, starlark.Tuple{starlark.String("missing")}, nil)
+	if err == nil {
+		t.Fatal("expected error for pop missing key without default")
+	}
+	if !strings.Contains(err.Error(), "key") {
+		t.Errorf("error = %q, want containing 'key'", err.Error())
+	}
+}
+
+func TestSchemaDictBuiltinUpdate(t *testing.T) {
+	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1))
+	val, err := sd.Attr("update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+
+	other := starlark.NewDict(1)
+	_ = other.SetKey(starlark.String("b"), starlark.MakeInt(2))
+
+	_, err = starlark.Call(thread, b, starlark.Tuple{other}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v, found, _ := sd.Get(starlark.String("b"))
+	if !found || v != starlark.MakeInt(2) {
+		t.Errorf("after update, Get(b) = %v/%v, want 2/true", v, found)
+	}
+	// Original key preserved.
+	v, found, _ = sd.Get(starlark.String("a"))
+	if !found || v != starlark.MakeInt(1) {
+		t.Errorf("after update, Get(a) = %v/%v, want 1/true", v, found)
+	}
+}
+
+func TestSchemaDictBuiltinUpdateSchemaDict(t *testing.T) {
+	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1))
+	val, err := sd.Attr("update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+
+	other := newTestSchemaDict("Source", "c", starlark.MakeInt(3))
+	_, err = starlark.Call(thread, b, starlark.Tuple{other}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v, found, _ := sd.Get(starlark.String("c"))
+	if !found || v != starlark.MakeInt(3) {
+		t.Errorf("after update from SchemaDict, Get(c) = %v/%v, want 3/true", v, found)
+	}
+}
+
+func TestSchemaDictBuiltinClear(t *testing.T) {
+	sd := newTestSchemaDict("C", "a", starlark.MakeInt(1), "b", starlark.MakeInt(2))
+	val, err := sd.Attr("clear")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+	_, err = starlark.Call(thread, b, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sd.Len() != 0 {
+		t.Errorf("Len() after clear = %d, want 0", sd.Len())
+	}
+}
+
+func TestSchemaDictBuiltinSetdefault(t *testing.T) {
+	sd := newTestSchemaDict("SD", "existing", starlark.String("val"))
+	val, err := sd.Attr("setdefault")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+
+	// Existing key returns its value.
+	result, err := starlark.Call(thread, b, starlark.Tuple{starlark.String("existing"), starlark.String("other")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != starlark.String("val") {
+		t.Errorf("setdefault(existing, other) = %v, want val", result)
+	}
+
+	// Missing key sets and returns the default.
+	result, err = starlark.Call(thread, b, starlark.Tuple{starlark.String("new"), starlark.String("default")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != starlark.String("default") {
+		t.Errorf("setdefault(new, default) = %v, want default", result)
+	}
+	v, found, _ := sd.Get(starlark.String("new"))
+	if !found || v != starlark.String("default") {
+		t.Errorf("after setdefault, Get(new) = %v/%v, want default/true", v, found)
+	}
+}
+
+func TestSchemaDictLen(t *testing.T) {
+	sd := newTestSchemaDict("L", "a", starlark.MakeInt(1), "b", starlark.MakeInt(2), "c", starlark.MakeInt(3))
+	if sd.Len() != 3 {
+		t.Errorf("Len() = %d, want 3", sd.Len())
+	}
+	empty := newTestSchemaDict("E")
+	if empty.Len() != 0 {
+		t.Errorf("empty Len() = %d, want 0", empty.Len())
+	}
+}

@@ -1313,6 +1313,80 @@ func TestDeeplyNestedErrorPath(t *testing.T) {
 	}
 }
 
+// List element with validation errors prevents list from being stored in result.
+func TestConstructorListItemsSubErrors(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	outer := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	// First element valid, second missing required "name".
+	c1 := makeDict(kv("name", starlark.String("web")))
+	c2 := makeDict() // missing required "name"
+
+	_, err := callSchema(outer, kv("containers", starlark.NewList([]starlark.Value{c1, c2})))
+	if err == nil {
+		t.Fatal("expected error for list element with validation errors")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "containers[1].name: required field missing") {
+		t.Errorf("error = %v, want contains 'containers[1].name: required field missing'", errStr)
+	}
+}
+
+// Nested schema with errors prevents parent key storage.
+func TestConstructorNestedSubErrorsPreventsStorage(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	outer := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name":     testField("string", false, starlark.None, nil),
+			"location": testFieldWithSchema(inner, false),
+		},
+		order: []string{"name", "location"},
+	}
+
+	// Pass valid name but invalid nested location (missing required region).
+	badLoc := makeDict() // missing "region"
+	_, err := callSchema(outer, kv("name", starlark.String("myaccount")), kv("location", badLoc))
+	if err == nil {
+		t.Fatal("expected error for nested validation failure")
+	}
+	if !strings.Contains(err.Error(), "location.region: required field missing") {
+		t.Errorf("error = %v, want contains 'location.region: required field missing'", err)
+	}
+}
+
+func TestPluralS(t *testing.T) {
+	if got := pluralS(1); got != "" {
+		t.Errorf("pluralS(1) = %q, want empty", got)
+	}
+	if got := pluralS(2); got != "s" {
+		t.Errorf("pluralS(2) = %q, want \"s\"", got)
+	}
+	if got := pluralS(0); got != "s" {
+		t.Errorf("pluralS(0) = %q, want \"s\"", got)
+	}
+}
+
 // Existing flat behavior unchanged (backward compat).
 func TestConstructorFlatSchemaUnchanged(t *testing.T) {
 	s := &SchemaCallable{

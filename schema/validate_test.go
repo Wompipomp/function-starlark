@@ -130,3 +130,21 @@ func TestUnknownFieldErrorPath(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckEnumEmptyList(t *testing.T) {
+	enum := starlark.NewList(nil)
+	if checkEnum(starlark.String("anything"), enum) {
+		t.Error("checkEnum with empty list should always return false")
+	}
+}
+
+func TestUnknownFieldErrorPathEmptyPrefix(t *testing.T) {
+	fields := []string{"name", "image"}
+	// When path and fieldName are the same (empty prefix scenario),
+	// it should behave identically to unknownFieldError.
+	got := unknownFieldErrorPath("nme", "nme", fields)
+	want := unknownFieldError("nme", fields)
+	if got != want {
+		t.Errorf("unknownFieldErrorPath with same path/field:\n got: %s\nwant: %s", got, want)
+	}
+}
