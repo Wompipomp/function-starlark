@@ -20,6 +20,10 @@ with zero external toolchain.
 - **Auto-injected labels** -- `crossplane.io/*` labels are applied to every
   resource automatically, with opt-out and merge controls via the `labels=`
   kwarg.
+- **Opt-in schema validation** -- `schema()` and `field()` create typed constructors
+  that catch typos, wrong types, and missing fields at construction time. Mix
+  schema-validated and plain dict resources freely.
+  [Builtins reference](docs/builtins-reference.md)
 
 ## Comparison
 
@@ -35,7 +39,7 @@ with zero external toolchain.
 | Conditions/Events | set_condition(), emit_event() | Via KCL annotations | Via custom conditions (1.17+) |
 | Extra resources | require_extra_resource/require_extra_resources | ExtraResources spec | ExtraResources spec |
 | Readiness control | ready= kwarg (None/True/False) | Annotation-based | Annotation-based |
-| Type system | Untyped dicts | Schema-based with types | Untyped strings |
+| Type system | Opt-in schema validation (`schema()`, `field()`) | Schema-based with types | Untyped strings |
 | Observability | 9 Prometheus metrics | None built-in | None built-in |
 | Metadata builtins | get_label(), get_annotation(), get_observed(), set_xr_status() | Manual via get()/set | Manual via template |
 | Sandbox | Hermetic (no I/O, no network) | KCL sandbox | Go template sandbox |

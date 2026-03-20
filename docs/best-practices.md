@@ -363,6 +363,73 @@ if count > 100:
     emit_event("Warning", "Creating %d resources -- consider splitting into smaller compositions" % count)
 ```
 
+## Schema validation
+
+### When to use schemas
+
+Use schemas when field accuracy matters:
+
+- **Production resources** -- storage accounts, databases, networking rules where
+  a typo causes silent misconfiguration
+- **Frequently-edited compositions** -- schemas catch regressions when multiple
+  people modify the same composition
+- **Resources with many similar field names** -- `accountTier` vs `accountKind`
+  vs `accountReplicationType` are easy to confuse
+
+Use plain dicts when the overhead is not worth it:
+
+- **Simple resources** with 2-3 obvious fields
+- **Prototyping** -- schemas can be added later without changing resource output
+- **Well-understood structures** that rarely change
+
+### Opt-in adoption strategy
+
+Start with your most error-prone resource. Add schemas incrementally -- you do
+not need to schema-validate every resource in a composition. Schema-validated
+and plain dict resources mix freely:
+
+```python
+# Schema-validated -- catches typos in storage account fields
+sa = StorageAccountSpec(location=location, account_replication_type="LRS")
+Resource("storage-account", {
+    "spec": {"forProvider": sa},
+    # ...
+})
+
+# Plain dict -- simple resource, schema not needed
+Resource("resource-group", {
+    "spec": {"forProvider": {"location": location}},
+    # ...
+})
+```
+
+### Schema composition patterns
+
+Define sub-schemas for nested structures. Keep schema definitions at the top of
+the script, before Extract-Transform-Emit:
+
+```python
+# 1. Schema definitions (top of script)
+NetworkRules = schema("NetworkRules",
+    default_action=field(type="string", enum=["Allow", "Deny"]),
+)
+
+StorageAccountSpec = schema("StorageAccountSpec",
+    location=field(type="string", required=True),
+    network_rules=field(type=NetworkRules),
+)
+
+# 2. Extract: Read input from XR
+location = get(oxr, "spec.location", "eastus")
+
+# 3. Transform + Emit: Build and register resources
+sa = StorageAccountSpec(location=location, network_rules=NetworkRules(default_action="Deny"))
+Resource("storage-account", {"spec": {"forProvider": sa}})
+```
+
+For shared schemas across compositions, schema definitions can be placed in
+modules loaded via `load()`. See [module system](module-system.md) for details.
+
 ## See also
 
 - [Builtins reference](builtins-reference.md) -- complete function signatures

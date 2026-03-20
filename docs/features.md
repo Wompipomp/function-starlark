@@ -345,6 +345,65 @@ on initial reconciliation) or when the path does not exist within the resource.
 For full signatures and parameters, see the
 [builtins reference](builtins-reference.md).
 
+## Schema validation
+
+function-starlark provides opt-in schema validation via `schema()` and `field()`
+builtins. Define typed constructors that validate field types, required fields,
+enum values, and unknown field names at construction time -- catching errors
+before `Resource()` is called.
+
+### Opt-in adoption
+
+Schemas are fully opt-in. You can mix schema-validated resources and plain dict
+resources in the same composition. Adopt gradually by adding schemas to the
+resources where you want type safety -- there is no all-or-nothing requirement.
+
+### Validation features
+
+Schema constructors catch mistakes at construction time:
+
+- **Wrong types** -- passing an int where a string is expected
+- **Missing required fields** -- omitting a field marked `required=True`
+- **Unknown fields** -- typos like `locaton` instead of `location`, with
+  did-you-mean suggestions
+- **Invalid enum values** -- passing `"LRSS"` when only `["LRS", "GRS", "ZRS",
+  "GZRS"]` are allowed
+
+All errors are reported at once (not fail-on-first), so you can fix everything
+in a single iteration.
+
+### Nested schemas
+
+Schemas can reference other schemas for nested validation. Use `field(type=SubSchema)`
+for a nested object and `field(type="list", items=SubSchema)` for a list of
+typed objects. Validation errors include the full field path (e.g.,
+`network_rules.default_action`).
+
+```python
+NetworkRules = schema("NetworkRules",
+    default_action=field(type="string", enum=["Allow", "Deny"]),
+    bypass=field(type="list"),
+)
+
+StorageAccountSpec = schema("StorageAccountSpec",
+    location=field(type="string", required=True),
+    network_rules=field(type=NetworkRules),
+)
+
+sa = StorageAccountSpec(
+    location="eastus",
+    network_rules=NetworkRules(default_action="Deny", bypass=["AzureServices"]),
+)
+Resource("storage-account", {
+    "apiVersion": "storage.azure.upbound.io/v1beta2",
+    "kind": "Account",
+    "spec": {"forProvider": sa},
+})
+```
+
+For full signatures and parameter tables, see the
+[builtins reference](builtins-reference.md).
+
 ## Observability (metrics)
 
 function-starlark exposes 9 Prometheus metrics on the standard `/metrics`
