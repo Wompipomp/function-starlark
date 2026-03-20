@@ -21,6 +21,23 @@ spec:
           source: |
             load("starlark-stdlib:v1/naming.star", "resource_name")
             load("starlark-stdlib:v1/labels.star", "standard_labels", "crossplane_labels", "merge_labels")
+
+            # Schema definitions (opt-in validation)
+            NetworkRules = schema("NetworkRules",
+                default_action=field(type="string", enum=["Allow", "Deny"]),
+                bypass=field(type="list"),
+            )
+
+            StorageAccountSpec = schema("StorageAccountSpec",
+                location=field(type="string", required=True),
+                account_tier=field(type="string", default="Standard"),
+                account_replication_type=field(type="string", enum=["LRS", "GRS", "ZRS", "GZRS"]),
+                account_kind=field(type="string", default="StorageV2"),
+                min_tls_version=field(type="string", default="TLS1_2"),
+                network_rules=field(type=NetworkRules),
+                tags=field(type="dict"),
+            )
+
             # Read XR spec
             location = get(oxr, "spec.location", "eastus")
             rg_name = get(oxr, "spec.resourceGroupName", "default-rg")
@@ -32,7 +49,14 @@ spec:
                 {"azure.io/location": location},
             )
 
-            # Azure Storage Account
+            # Schema-validated resource
+            sa_spec = StorageAccountSpec(
+                location=location,
+                account_replication_type="LRS",
+                network_rules=NetworkRules(default_action="Deny", bypass=["AzureServices"]),
+                tags={"ManagedBy": "crossplane"},
+            )
+
             Resource("storage-account", {
                 "apiVersion": "storage.azure.upbound.io/v1beta2",
                 "kind": "Account",
@@ -40,17 +64,21 @@ spec:
                     "name": resource_name("storage"),
                     "labels": labels,
                 },
+                "spec": {"forProvider": sa_spec},
+            })
+
+            # Plain dict resource (no schema -- demonstrates opt-in)
+            Resource("resource-group", {
+                "apiVersion": "azure.upbound.io/v1beta1",
+                "kind": "ResourceGroup",
+                "metadata": {
+                    "name": resource_name("rg"),
+                    "labels": labels,
+                },
                 "spec": {
                     "forProvider": {
                         "location": location,
-                        "resourceGroupName": rg_name,
-                        "accountTier": "Standard",
-                        "accountReplicationType": "LRS",
-                        "accountKind": "StorageV2",
-                        "minTlsVersion": "TLS1_2",
-                        "tags": {
-                            "ManagedBy": "crossplane",
-                        },
+                        "tags": {"ManagedBy": "crossplane"},
                     },
                 },
             })
