@@ -8,12 +8,20 @@ import (
 	"go.starlark.net/syntax"
 )
 
+// newTestSchemaDict creates a SchemaDict with auto-generated field descriptors
+// (gradual typing, empty type) matching the provided entries.
 func newTestSchemaDict(name string, entries ...any) *SchemaDict {
 	d := starlark.NewDict(len(entries) / 2)
+	fields := make(map[string]*FieldDescriptor)
+	var order []string
 	for i := 0; i < len(entries); i += 2 {
-		_ = d.SetKey(starlark.String(entries[i].(string)), entries[i+1].(starlark.Value))
+		key := entries[i].(string)
+		_ = d.SetKey(starlark.String(key), entries[i+1].(starlark.Value))
+		fields[key] = &FieldDescriptor{defVal: starlark.None} // gradual: accepts any type
+		order = append(order, key)
 	}
-	return NewSchemaDict(name, d)
+	sc := &SchemaCallable{name: name, fields: fields, order: order}
+	return &SchemaDict{dict: d, schema: sc}
 }
 
 func TestSchemaDictString(t *testing.T) {
@@ -78,7 +86,7 @@ func TestSchemaDictHash(t *testing.T) {
 func TestSchemaDictInternalDict(t *testing.T) {
 	d := starlark.NewDict(0)
 	_ = d.SetKey(starlark.String("a"), starlark.MakeInt(1))
-	sd := NewSchemaDict("Test", d)
+	sd := NewSchemaDict(nil, d)
 	if sd.InternalDict() != d {
 		t.Error("InternalDict() should return the same *starlark.Dict")
 	}
@@ -117,7 +125,7 @@ func TestSchemaDictGetMissing(t *testing.T) {
 }
 
 func TestSchemaDictSetKey(t *testing.T) {
-	sd := newTestSchemaDict("S")
+	sd := newTestSchemaDict("S", "a", starlark.MakeInt(0))
 	err := sd.SetKey(starlark.String("a"), starlark.MakeInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -125,6 +133,17 @@ func TestSchemaDictSetKey(t *testing.T) {
 	v, found, _ := sd.Get(starlark.String("a"))
 	if !found || v != starlark.MakeInt(1) {
 		t.Errorf("after SetKey, Get(a) = %v/%v, want 1/true", v, found)
+	}
+}
+
+func TestSchemaDictSetKeyRejectsUnknownField(t *testing.T) {
+	sd := newTestSchemaDict("S", "a", starlark.MakeInt(1))
+	err := sd.SetKey(starlark.String("unknown"), starlark.MakeInt(2))
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("error = %q, want containing 'unknown field'", err.Error())
 	}
 }
 
@@ -143,7 +162,7 @@ func TestSchemaDictIterate(t *testing.T) {
 }
 
 func TestSchemaDictSetField(t *testing.T) {
-	sd := newTestSchemaDict("SF")
+	sd := newTestSchemaDict("SF", "mykey", starlark.String("original"))
 	err := sd.SetField("mykey", starlark.String("myval"))
 	if err != nil {
 		t.Fatal(err)
@@ -151,6 +170,56 @@ func TestSchemaDictSetField(t *testing.T) {
 	v, found, _ := sd.Get(starlark.String("mykey"))
 	if !found || v != starlark.String("myval") {
 		t.Errorf("after SetField, Get = %v/%v", v, found)
+	}
+}
+
+func TestSchemaDictSetFieldRejectsUnknownField(t *testing.T) {
+	sd := newTestSchemaDict("SF", "known", starlark.String("val"))
+	err := sd.SetField("unknown", starlark.String("val"))
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("error = %q, want containing 'unknown field'", err.Error())
+	}
+}
+
+func TestSchemaDictSetFieldRejectsWrongType(t *testing.T) {
+	sc := &SchemaCallable{
+		name:   "Typed",
+		fields: map[string]*FieldDescriptor{"name": {typeName: "string", defVal: starlark.None}},
+		order:  []string{"name"},
+	}
+	d := starlark.NewDict(1)
+	_ = d.SetKey(starlark.String("name"), starlark.String("ok"))
+	sd := NewSchemaDict(sc, d)
+
+	err := sd.SetField("name", starlark.MakeInt(123))
+	if err == nil {
+		t.Fatal("expected error for wrong type")
+	}
+	if !strings.Contains(err.Error(), "expected string") {
+		t.Errorf("error = %q, want containing 'expected string'", err.Error())
+	}
+}
+
+func TestSchemaDictSetFieldRejectsEnumViolation(t *testing.T) {
+	enum := starlark.NewList([]starlark.Value{starlark.String("Allow"), starlark.String("Deny")})
+	sc := &SchemaCallable{
+		name:   "Rules",
+		fields: map[string]*FieldDescriptor{"action": {typeName: "string", enum: enum, defVal: starlark.None}},
+		order:  []string{"action"},
+	}
+	d := starlark.NewDict(1)
+	_ = d.SetKey(starlark.String("action"), starlark.String("Allow"))
+	sd := NewSchemaDict(sc, d)
+
+	err := sd.SetField("action", starlark.String("Invalid"))
+	if err == nil {
+		t.Fatal("expected error for enum violation")
+	}
+	if !strings.Contains(err.Error(), "not in enum") {
+		t.Errorf("error = %q, want containing 'not in enum'", err.Error())
 	}
 }
 
@@ -369,7 +438,7 @@ func TestSchemaDictBuiltinPopMissingNoDefault(t *testing.T) {
 }
 
 func TestSchemaDictBuiltinUpdate(t *testing.T) {
-	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1))
+	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1), "b", starlark.MakeInt(0))
 	val, err := sd.Attr("update")
 	if err != nil {
 		t.Fatal(err)
@@ -396,8 +465,29 @@ func TestSchemaDictBuiltinUpdate(t *testing.T) {
 	}
 }
 
-func TestSchemaDictBuiltinUpdateSchemaDict(t *testing.T) {
+func TestSchemaDictBuiltinUpdateRejectsUnknownField(t *testing.T) {
 	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1))
+	val, err := sd.Attr("update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+
+	other := starlark.NewDict(1)
+	_ = other.SetKey(starlark.String("unknown"), starlark.MakeInt(2))
+
+	_, err = starlark.Call(thread, b, starlark.Tuple{other}, nil)
+	if err == nil {
+		t.Fatal("expected error for unknown field in update")
+	}
+	if !strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("error = %q, want containing 'unknown field'", err.Error())
+	}
+}
+
+func TestSchemaDictBuiltinUpdateSchemaDict(t *testing.T) {
+	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1), "c", starlark.MakeInt(0))
 	val, err := sd.Attr("update")
 	if err != nil {
 		t.Fatal(err)
@@ -435,7 +525,7 @@ func TestSchemaDictBuiltinClear(t *testing.T) {
 }
 
 func TestSchemaDictBuiltinSetdefault(t *testing.T) {
-	sd := newTestSchemaDict("SD", "existing", starlark.String("val"))
+	sd := newTestSchemaDict("SD", "existing", starlark.String("val"), "optional", starlark.None)
 	val, err := sd.Attr("setdefault")
 	if err != nil {
 		t.Fatal(err)
@@ -452,17 +542,19 @@ func TestSchemaDictBuiltinSetdefault(t *testing.T) {
 		t.Errorf("setdefault(existing, other) = %v, want val", result)
 	}
 
-	// Missing key sets and returns the default.
-	result, err = starlark.Call(thread, b, starlark.Tuple{starlark.String("new"), starlark.String("default")}, nil)
+	// Missing (but known) key sets and returns the default.
+	// First remove 'optional' so it's missing from the dict but still a valid field.
+	_, _, _ = sd.dict.Delete(starlark.String("optional"))
+	result, err = starlark.Call(thread, b, starlark.Tuple{starlark.String("optional"), starlark.String("default")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result != starlark.String("default") {
-		t.Errorf("setdefault(new, default) = %v, want default", result)
+		t.Errorf("setdefault(optional, default) = %v, want default", result)
 	}
-	v, found, _ := sd.Get(starlark.String("new"))
+	v, found, _ := sd.Get(starlark.String("optional"))
 	if !found || v != starlark.String("default") {
-		t.Errorf("after setdefault, Get(new) = %v/%v, want default/true", v, found)
+		t.Errorf("after setdefault, Get(optional) = %v/%v, want default/true", v, found)
 	}
 }
 

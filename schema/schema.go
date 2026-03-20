@@ -25,10 +25,10 @@ var (
 )
 
 func (s *SchemaCallable) String() string        { return fmt.Sprintf("<schema %s>", s.name) }
-func (s *SchemaCallable) Type() string           { return "schema" }
-func (s *SchemaCallable) Name() string           { return s.name }
-func (s *SchemaCallable) Truth() starlark.Bool   { return starlark.True }
-func (s *SchemaCallable) Hash() (uint32, error)  { return 0, fmt.Errorf("unhashable type: schema") }
+func (s *SchemaCallable) Type() string          { return "schema" }
+func (s *SchemaCallable) Name() string          { return s.name }
+func (s *SchemaCallable) Truth() starlark.Bool  { return starlark.True }
+func (s *SchemaCallable) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: schema") }
 
 func (s *SchemaCallable) Freeze() {
 	if s.frozen {
@@ -75,7 +75,7 @@ func (s *SchemaCallable) CallInternal(_ *starlark.Thread, args starlark.Tuple, k
 			s.name, len(errs), pluralS(len(errs)), strings.Join(errs, "\n- "))
 	}
 
-	return NewSchemaDict(s.name, result), nil
+	return NewSchemaDict(s, result), nil
 }
 
 // validateFields performs recursive validation returning a raw dict and error
@@ -121,7 +121,7 @@ func (s *SchemaCallable) validateFields(kwargs []starlark.Tuple, prefix string) 
 				subResult, subErrs := fd.schema.validateFields(v.Items(), fieldPath)
 				errs = append(errs, subErrs...)
 				if len(subErrs) == 0 {
-					_ = result.SetKey(starlark.String(key), NewSchemaDict(fd.schema.name, subResult))
+					_ = result.SetKey(starlark.String(key), NewSchemaDict(fd.schema, subResult))
 				}
 			default:
 				errs = append(errs, fmt.Sprintf("%s: expected %s or dict, got %s",
@@ -149,7 +149,7 @@ func (s *SchemaCallable) validateFields(kwargs []starlark.Tuple, prefix string) 
 					subResult, subErrs := fd.items.validateFields(v.Items(), elemPath)
 					errs = append(errs, subErrs...)
 					if len(subErrs) == 0 {
-						validatedList = append(validatedList, NewSchemaDict(fd.items.name, subResult))
+						validatedList = append(validatedList, NewSchemaDict(fd.items, subResult))
 					} else {
 						listHasErrors = true
 					}

@@ -24,7 +24,7 @@ func TestCheckType(t *testing.T) {
 		{"type mismatch", starlark.String("hello"), "int", false},
 		{"empty type accepts any", starlark.MakeInt(42), "", true},
 		{"StarlarkDict as dict", convert.NewStarlarkDict(0), "dict", true},
-		{"SchemaDict as dict", NewSchemaDict("Test", starlark.NewDict(0)), "dict", true},
+		{"SchemaDict as dict", NewSchemaDict(nil, starlark.NewDict(0)), "dict", true},
 	}
 
 	for _, tt := range tests {

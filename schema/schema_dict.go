@@ -31,30 +31,39 @@ var (
 	_ starlark.Comparable  = (*SchemaDict)(nil)
 )
 
-// SchemaDict wraps a *starlark.Dict and carries the schema name for
-// tagged printing and skip-revalidation detection. It implements all
-// the same interfaces as convert.StarlarkDict via delegation.
+// SchemaDict wraps a *starlark.Dict and carries the schema reference for
+// tagged printing, skip-revalidation detection, and post-construction
+// mutation validation. It implements all the same interfaces as
+// convert.StarlarkDict via delegation.
 type SchemaDict struct {
-	dict       *starlark.Dict
-	schemaName string
+	dict   *starlark.Dict
+	schema *SchemaCallable // may be nil for legacy/test usage
 }
 
-// NewSchemaDict creates a new SchemaDict wrapping the given dict with a schema name.
-func NewSchemaDict(name string, dict *starlark.Dict) *SchemaDict {
-	return &SchemaDict{dict: dict, schemaName: name}
+// NewSchemaDict creates a new SchemaDict wrapping the given dict with a schema.
+func NewSchemaDict(s *SchemaCallable, dict *starlark.Dict) *SchemaDict {
+	return &SchemaDict{dict: dict, schema: s}
 }
 
 // SchemaName returns the schema name for introspection and skip-revalidation.
-func (sd *SchemaDict) SchemaName() string { return sd.schemaName }
+func (sd *SchemaDict) SchemaName() string {
+	if sd.schema != nil {
+		return sd.schema.name
+	}
+	return ""
+}
 
-// InternalDict returns the underlying *starlark.Dict for Phase 27 compatibility.
+// InternalDict returns the underlying *starlark.Dict for conversion pipelines.
 func (sd *SchemaDict) InternalDict() *starlark.Dict { return sd.dict }
+
+// Schema returns the SchemaCallable for introspection (may be nil).
+func (sd *SchemaDict) Schema() *SchemaCallable { return sd.schema }
 
 // --- starlark.Value ---
 
 // String returns the tagged format: Name({...}).
 func (sd *SchemaDict) String() string {
-	return fmt.Sprintf("%s(%s)", sd.schemaName, sd.dict.String())
+	return fmt.Sprintf("%s(%s)", sd.SchemaName(), sd.dict.String())
 }
 
 // Type returns "dict" for compatibility with CheckType.
@@ -106,16 +115,102 @@ func (sd *SchemaDict) AttrNames() []string {
 
 // --- starlark.HasSetField ---
 
-// SetField sets a key by name. Returns an error if frozen.
+// SetField sets a key by name, validating the value against the schema's
+// field descriptor (type, enum, nested schema). Returns an error if the
+// field is unknown or the value fails validation.
 func (sd *SchemaDict) SetField(name string, val starlark.Value) error {
+	if sd.schema != nil {
+		if err := sd.validateMutation(name, val); err != nil {
+			return err
+		}
+	}
 	return sd.dict.SetKey(starlark.String(name), val)
 }
 
 // --- starlark.HasSetKey ---
 
-// SetKey sets a key-value pair. Returns an error if frozen.
+// SetKey sets a key-value pair. For string keys, validates against the
+// schema's field descriptor. Returns an error if frozen or invalid.
 func (sd *SchemaDict) SetKey(k, v starlark.Value) error {
+	if sd.schema != nil {
+		if s, ok := k.(starlark.String); ok {
+			if err := sd.validateMutation(string(s), v); err != nil {
+				return err
+			}
+		}
+	}
 	return sd.dict.SetKey(k, v)
+}
+
+// validateMutation checks a single field assignment against the schema.
+// It validates: unknown fields, type mismatches, enum violations, and
+// nested schema compatibility. It does NOT check required (only relevant
+// at construction time).
+func (sd *SchemaDict) validateMutation(name string, val starlark.Value) error {
+	fd, ok := sd.schema.fields[name]
+	if !ok {
+		return fmt.Errorf("%s: %s", sd.schema.name, unknownFieldError(name, sd.schema.order))
+	}
+
+	// None is allowed — it removes/clears the field.
+	if val == starlark.None {
+		return nil
+	}
+
+	// Nested schema validation.
+	if fd.schema != nil {
+		switch v := val.(type) {
+		case *SchemaDict:
+			_ = v // Already validated at construction.
+		case *starlark.Dict:
+			_, subErrs := fd.schema.validateFields(v.Items(), name)
+			if len(subErrs) > 0 {
+				return fmt.Errorf("%s.%s", sd.schema.name, subErrs[0])
+			}
+		default:
+			return fmt.Errorf("%s.%s: expected %s or dict, got %s",
+				sd.schema.name, name, fd.schema.name, val.Type())
+		}
+		return nil
+	}
+
+	// List items validation.
+	if fd.items != nil && fd.typeName == "list" {
+		list, ok := val.(*starlark.List)
+		if !ok {
+			return fmt.Errorf("%s.%s: expected list, got %s", sd.schema.name, name, val.Type())
+		}
+		for i := 0; i < list.Len(); i++ {
+			elem := list.Index(i)
+			elemPath := fmt.Sprintf("%s[%d]", name, i)
+			switch v := elem.(type) {
+			case *SchemaDict:
+				_ = v // Already validated.
+			case *starlark.Dict:
+				_, subErrs := fd.items.validateFields(v.Items(), elemPath)
+				if len(subErrs) > 0 {
+					return fmt.Errorf("%s.%s", sd.schema.name, subErrs[0])
+				}
+			default:
+				return fmt.Errorf("%s.%s: expected %s or dict, got %s",
+					sd.schema.name, elemPath, fd.items.name, elem.Type())
+			}
+		}
+		return nil
+	}
+
+	// Primitive type check.
+	if fd.typeName != "" && !CheckType(val, fd.typeName) {
+		return fmt.Errorf("%s.%s: expected %s, got %s (%s)",
+			sd.schema.name, name, fd.typeName, val.Type(), val.String())
+	}
+
+	// Enum check.
+	if fd.enum != nil && !checkEnum(val, fd.enum) {
+		return fmt.Errorf("%s.%s", sd.schema.name, formatEnumError(name, val, fd.enum))
+	}
+
+	return nil
 }
 
 // --- starlark.Mapping ---
@@ -255,13 +350,13 @@ func (sd *SchemaDict) updateMethod(_ *starlark.Thread, _ *starlark.Builtin, args
 	switch o := other.(type) {
 	case *SchemaDict:
 		for _, item := range o.dict.Items() {
-			if err := sd.dict.SetKey(item[0], item[1]); err != nil {
+			if err := sd.SetKey(item[0], item[1]); err != nil {
 				return nil, err
 			}
 		}
 	case *starlark.Dict:
 		for _, item := range o.Items() {
-			if err := sd.dict.SetKey(item[0], item[1]); err != nil {
+			if err := sd.SetKey(item[0], item[1]); err != nil {
 				return nil, err
 			}
 		}
@@ -294,7 +389,7 @@ func (sd *SchemaDict) setdefaultMethod(_ *starlark.Thread, _ *starlark.Builtin, 
 	if found {
 		return v, nil
 	}
-	if err := sd.dict.SetKey(key, dflt); err != nil {
+	if err := sd.SetKey(key, dflt); err != nil {
 		return nil, err
 	}
 	return dflt, nil

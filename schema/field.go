@@ -89,7 +89,7 @@ func (f *FieldDescriptor) String() string {
 	return "<field " + strings.Join(parts, " ") + ">"
 }
 
-func (f *FieldDescriptor) Type() string         { return "field" }
+func (f *FieldDescriptor) Type() string          { return "field" }
 func (f *FieldDescriptor) Truth() starlark.Bool  { return starlark.True }
 func (f *FieldDescriptor) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: field") }
 

@@ -495,8 +495,8 @@ func TestConstructorFreezeAndCallStillWorks(t *testing.T) {
 	}
 
 	sd := result.(*SchemaDict)
-	// Verify returned SchemaDict is mutable.
-	if err := sd.SetKey(starlark.String("extra"), starlark.String("val")); err != nil {
+	// Verify returned SchemaDict is mutable (overwrite a known field).
+	if err := sd.SetKey(starlark.String("location"), starlark.String("east")); err != nil {
 		t.Errorf("returned SchemaDict should be mutable: %v", err)
 	}
 }
