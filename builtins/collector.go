@@ -12,6 +12,7 @@ import (
 
 	"github.com/wompipomp/function-starlark/convert"
 	"github.com/wompipomp/function-starlark/metrics"
+	"github.com/wompipomp/function-starlark/schema"
 )
 
 const externalNameAnnotation = "crossplane.io/external-name"
@@ -206,7 +207,7 @@ func (c *Collector) resourceFn(
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
 	var name string
-	var body *starlark.Dict
+	var bodyVal starlark.Value
 	var connDetails *starlark.Dict
 	var dependsOn *starlark.List
 	var readyVal starlark.Value = starlark.None
@@ -214,12 +215,22 @@ func (c *Collector) resourceFn(
 	var externalNameVal starlark.Value
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"name", &name, "body", &body, "ready?", &readyVal,
+		"name", &name, "body", &bodyVal, "ready?", &readyVal,
 		"labels?", &labelsVal,
 		"connection_details??", &connDetails,
 		"depends_on??", &dependsOn,
 		"external_name??", &externalNameVal); err != nil {
 		return nil, err
+	}
+
+	var body *starlark.Dict
+	switch v := bodyVal.(type) {
+	case *schema.SchemaDict:
+		body = v.InternalDict()
+	case *starlark.Dict:
+		body = v
+	default:
+		return nil, fmt.Errorf("Resource(%q): body must be dict, got %s", name, bodyVal.Type())
 	}
 
 	s, err := convert.PlainDictToStruct(body)

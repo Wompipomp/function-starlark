@@ -259,6 +259,16 @@ func starlarkToProtoValue(v starlark.Value) (*structpb.Value, error) {
 		}
 		return structpb.NewListValue(lv), nil
 	default:
+		type dictWrapper interface {
+			InternalDict() *starlark.Dict
+		}
+		if w, ok := v.(dictWrapper); ok {
+			s, err := PlainDictToStruct(w.InternalDict())
+			if err != nil {
+				return nil, err
+			}
+			return structpb.NewStructValue(s), nil
+		}
 		return nil, fmt.Errorf("unsupported starlark type for protobuf conversion: %s", v.Type())
 	}
 }
