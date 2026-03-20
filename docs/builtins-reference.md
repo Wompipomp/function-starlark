@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 19 predeclared names -- 6 globals and 13 functions --
+function-starlark provides 21 predeclared names -- 6 globals and 15 functions --
 that are automatically available in every Starlark script without import. These
 are the core API for interacting with Crossplane's composite resource model.
 
@@ -27,6 +27,8 @@ are the core API for interacting with Crossplane's composite resource model.
 | `get_observed()` | function | One-call observed resource field lookup with default |
 | `require_extra_resource()` | function | Request a single extra resource |
 | `require_extra_resources()` | function | Request multiple extra resources |
+| `schema()` | function | Define a typed constructor with field validation |
+| `field()` | function | Define a field descriptor for schema constructors |
 
 ---
 
@@ -716,11 +718,188 @@ db_host = get_observed("my-db", "status.atProvider.address", "pending")
 
 ---
 
+### schema
+
+```python
+schema(name, doc=None, **fields)
+```
+
+Define a typed constructor that validates keyword arguments at construction
+time. Each kwarg (except `doc`) must be a `field()` descriptor. Calling the
+returned constructor with kwargs validates types, required fields, enum values,
+and unknown fields, reporting **all** errors at once rather than failing on the
+first one.
+
+The constructor returns a **SchemaDict** -- a dict-compatible wrapper that
+prints with the schema name tag (e.g., `StorageAccount({"location": "eastus"})`)
+but has `Type() == "dict"` and works transparently with `Resource()`. You can
+read and write keys on a SchemaDict just like a regular dict. The tagged print
+format makes debugging easier because you can see which schema produced a value.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Schema name, used in error messages and SchemaDict print output. |
+| `doc` | string | None | Documentation string for the schema (available via `.doc` attribute). |
+| `**fields` | field() descriptors | required | Each kwarg defines a field. The kwarg name is the field name and the value must be a `field()` call. |
+
+**Returns:** SchemaCallable -- a callable constructor. Calling it with kwargs
+validates inputs and returns a SchemaDict (dict-compatible).
+
+**Attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `.name` | string | The schema name. |
+| `.doc` | string | The documentation string (empty string if not set). |
+| `.fields` | dict | Dict mapping field name to FieldDescriptor. |
+
+**Example -- flat schema:**
+
+```python
+Account = schema("Account",
+    location=field(type="string", required=True),
+    sku=field(type="string", default="Standard_LRS",
+              enum=["Standard_LRS", "Standard_GRS", "Premium_LRS"]),
+    tags=field(type="dict", required=True),
+    enable_https=field(type="bool", default=True),
+)
+
+acct = Account(location="eastus", tags={"env": "prod"})
+# acct is a dict: {"location": "eastus", "sku": "Standard_LRS", "tags": {"env": "prod"}, "enable_https": True}
+# prints as: Account({"location": "eastus", "sku": "Standard_LRS", ...})
+
+Resource("storage", {
+    "apiVersion": "storage.azure.upbound.io/v1beta1",
+    "kind": "Account",
+    "spec": {"forProvider": acct},  # works transparently with Resource()
+})
+```
+
+**Example -- nested schema:**
+
+```python
+IpRule = schema("IpRule",
+    action=field(type="string", default="Allow"),
+    ip_address=field(type="string", required=True),
+)
+
+NetworkRules = schema("NetworkRules",
+    default_action=field(type="string", enum=["Allow", "Deny"]),
+    ip_rules=field(type="list", items=IpRule),
+)
+
+rules = NetworkRules(
+    default_action="Deny",
+    ip_rules=[{"action": "Allow", "ip_address": "10.0.0.1"}],
+)
+# Nested dicts are validated against IpRule automatically
+```
+
+**Error output:**
+
+When validation fails, all errors are reported at once with the schema name:
+
+```
+Account: 3 validation errors:
+- location: expected string, got int (123)
+- sku: value "SuperFast" not in enum ["Standard_LRS", "Standard_GRS", "Premium_LRS"]
+- tags: required field missing
+```
+
+For nested schemas, error paths include the full field path:
+
+```
+NetworkRules: 1 validation error:
+- ip_rules[0].ip_address: required field missing
+```
+
+---
+
+### field
+
+```python
+field(type="", required=False, default=None, enum=None, doc="", items=None)
+```
+
+Define a field descriptor for use in `schema()` constructors. A FieldDescriptor
+specifies the constraints for a single schema field: its type, whether it is
+required, a default value, allowed enum values, documentation, and (for list
+fields) the schema for list elements.
+
+The `type` parameter accepts either a string for primitive types or a schema
+reference for nested validation. An empty type string (`""`) means the field
+accepts any value -- this supports gradual typing where you can add type
+constraints incrementally.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `type` | string or schema | `""` | Primitive type name (`"string"`, `"int"`, `"float"`, `"bool"`, `"list"`, `"dict"`) or a schema reference for nested validation. Empty string accepts any value. |
+| `required` | bool | `False` | Whether the field must be provided. Mutually exclusive with `default`. |
+| `default` | any | `None` | Default value applied when the field is omitted. Mutually exclusive with `required`. |
+| `enum` | list or None | `None` | List of allowed values. Validated after type checking. |
+| `doc` | string | `""` | Documentation string for the field. |
+| `items` | schema or None | `None` | Schema for list elements. Only valid when `type="list"`. Must be a schema reference (not a string). |
+
+**Constraints:**
+
+- `required` and `default` are mutually exclusive -- a field cannot be both
+  required and have a default value.
+- `items` is only valid when `type="list"`. Using `items` with any other type
+  raises an error.
+- `items` must be a schema reference (a value returned by `schema()`), not a
+  string.
+
+**Returns:** FieldDescriptor (used as a kwarg value in `schema()` calls).
+
+**Attributes:**
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `.type` | string | The type name (primitive name or schema name). |
+| `.required` | bool | Whether the field is required. |
+| `.default` | value | The default value (`None` if not set). |
+| `.enum` | list or None | The enum constraint list, or `None`. |
+| `.doc` | string | The documentation string. |
+
+**Example:**
+
+```python
+# Primitive types
+field(type="string", required=True)
+field(type="int", default=3)
+field(type="bool", default=False)
+field(type="dict")
+
+# Enum constraint
+field(type="string", default="Standard", enum=["Standard", "Premium"])
+
+# Nested schema reference
+SubSchema = schema("SubSchema", name=field(type="string", required=True))
+field(type=SubSchema)  # validates nested dict against SubSchema
+
+# List of schema
+field(type="list", items=SubSchema)  # each list element validated against SubSchema
+
+# Gradual typing (empty type accepts any value)
+field()  # any type, optional, no default
+field(required=True)  # any type, required
+
+# Documentation
+field(type="string", doc="The Azure region for this resource")
+```
+
+---
+
 ## See also
 
 - [Features guide](features.md) -- Detailed behavior for depends_on creation
   sequencing, labels auto-injection, connection details, skip_resource,
-  observability metrics, and metadata & observed access builtins
+  observability metrics, metadata & observed access builtins, and schema
+  validation
 - [Standard library reference](stdlib-reference.md) -- Additional utility
   functions for networking, naming, labels, and conditions (loaded via
   short-form `load("starlark-stdlib:v1/naming.star", ...)` when a default
