@@ -1952,6 +1952,222 @@ func TestRunFunction(t *testing.T) {
 				}(),
 			},
 		},
+		"SchemaFlatResource": {
+			reason: "INT-01 flat: Schema-constructed dict passed to Resource(body=...) produces identical protobuf to hand-written dict.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "MyResource = schema(\"MyResource\", apiVersion=field(type=\"string\"), kind=field(type=\"string\"), metadata=field(type=\"dict\"), spec=field(type=\"dict\"))\nb = MyResource(apiVersion=\"s3.aws.upbound.io/v1beta1\", kind=\"Bucket\", metadata={\"name\": \"my-bucket\"}, spec={\"forProvider\": {\"region\": \"us-east-1\"}})\nResource(\"bucket\", b)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "MyResource = schema(\"MyResource\", apiVersion=field(type=\"string\"), kind=field(type=\"string\"), metadata=field(type=\"dict\"), spec=field(type=\"dict\"))\nb = MyResource(apiVersion=\"s3.aws.upbound.io/v1beta1\", kind=\"Bucket\", metadata={\"name\": \"my-bucket\"}, spec={\"forProvider\": {\"region\": \"us-east-1\"}})\nResource(\"bucket\", b)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","metadata":{"name":"my-bucket"},"spec":{"forProvider":{"region":"us-east-1"}}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"PlainDictFlatResource": {
+			reason: "INT-01 flat equivalence: Plain dict with same 4 fields produces identical protobuf to SchemaFlatResource.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource(\"bucket\", {\"apiVersion\": \"s3.aws.upbound.io/v1beta1\", \"kind\": \"Bucket\", \"metadata\": {\"name\": \"my-bucket\"}, \"spec\": {\"forProvider\": {\"region\": \"us-east-1\"}}})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource(\"bucket\", {\"apiVersion\": \"s3.aws.upbound.io/v1beta1\", \"kind\": \"Bucket\", \"metadata\": {\"name\": \"my-bucket\"}, \"spec\": {\"forProvider\": {\"region\": \"us-east-1\"}}})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"bucket": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"s3.aws.upbound.io/v1beta1","kind":"Bucket","metadata":{"name":"my-bucket"},"spec":{"forProvider":{"region":"us-east-1"}}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"SchemaNestedResource": {
+			reason: "INT-01 nested: Nested schema with field(type=InnerSchema) and field(type=\"list\", items=ItemSchema) produces identical protobuf to plain nested dict.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Inner = schema(\"Inner\", region=field(type=\"string\"))\nItem = schema(\"Item\", name=field(type=\"string\"))\nOuter = schema(\"Outer\", apiVersion=field(type=\"string\"), kind=field(type=\"string\"), spec=field(type=Inner), items=field(type=\"list\", items=Item))\nb = Outer(apiVersion=\"v1\", kind=\"Test\", spec=Inner(region=\"us-west-2\"), items=[Item(name=\"a\"), Item(name=\"b\")])\nResource(\"nested\", b)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Inner = schema(\"Inner\", region=field(type=\"string\"))\nItem = schema(\"Item\", name=field(type=\"string\"))\nOuter = schema(\"Outer\", apiVersion=field(type=\"string\"), kind=field(type=\"string\"), spec=field(type=Inner), items=field(type=\"list\", items=Item))\nb = Outer(apiVersion=\"v1\", kind=\"Test\", spec=Inner(region=\"us-west-2\"), items=[Item(name=\"a\"), Item(name=\"b\")])\nResource(\"nested\", b)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"nested": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Test","spec":{"region":"us-west-2"},"items":[{"name":"a"},{"name":"b"}]}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"PlainDictNestedResource": {
+			reason: "INT-01 nested equivalence: Plain nested dict produces identical protobuf to SchemaNestedResource.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Resource(\"nested\", {\"apiVersion\": \"v1\", \"kind\": \"Test\", \"spec\": {\"region\": \"us-west-2\"}, \"items\": [{\"name\": \"a\"}, {\"name\": \"b\"}]})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Resource(\"nested\", {\"apiVersion\": \"v1\", \"kind\": \"Test\", \"spec\": {\"region\": \"us-west-2\"}, \"items\": [{\"name\": \"a\"}, {\"name\": \"b\"}]})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"nested": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Test","spec":{"region":"us-west-2"},"items":[{"name":"a"},{"name":"b"}]}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"SchemaLoadedModule": {
+			reason: "INT-02/INT-04: Schema defined in loaded module survives freeze and produces valid resource -- proves load() compatibility.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "load(\"schemas.star\", \"MySchema\")\nb = MySchema(name=\"test-resource\", value=42)\nResource(\"from-module\", b)",
+							"modules": {
+								"schemas.star": "MySchema = schema(\"MySchema\", name=field(type=\"string\"), value=field(type=\"int\"))"
+							}
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "load(\"schemas.star\", \"MySchema\")\nb = MySchema(name=\"test-resource\", value=42)\nResource(\"from-module\", b)",
+								"modules": {
+									"schemas.star": "MySchema = schema(\"MySchema\", name=field(type=\"string\"), value=field(type=\"int\"))"
+								}
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"from-module": {
+								Resource: resource.MustStructJSON(`{"name":"test-resource","value":42}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
 	}
 
 	for name, tc := range cases {
