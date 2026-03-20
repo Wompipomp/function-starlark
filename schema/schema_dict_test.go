@@ -466,6 +466,36 @@ func TestSchemaDictBuiltinSetdefault(t *testing.T) {
 	}
 }
 
+func TestSchemaDictBuiltinUpdateUnsupportedType(t *testing.T) {
+	sd := newTestSchemaDict("U", "a", starlark.MakeInt(1))
+	val, err := sd.Attr("update")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := val.(*starlark.Builtin)
+	thread := &starlark.Thread{Name: "test"}
+	_, err = starlark.Call(thread, b, starlark.Tuple{starlark.String("not-a-dict")}, nil)
+	if err == nil {
+		t.Fatal("expected error for unsupported argument type")
+	}
+	if !strings.Contains(err.Error(), "unsupported argument type") {
+		t.Errorf("error = %q, want containing 'unsupported argument type'", err.Error())
+	}
+}
+
+func TestSchemaDictCompareSameTypeNonSchemaDict(t *testing.T) {
+	sd := newTestSchemaDict("C", "a", starlark.MakeInt(1))
+	plainDict := starlark.NewDict(1)
+	_ = plainDict.SetKey(starlark.String("a"), starlark.MakeInt(1))
+	_, err := sd.CompareSameType(syntax.EQL, plainDict, 10)
+	if err == nil {
+		t.Fatal("expected error comparing SchemaDict with non-SchemaDict")
+	}
+	if !strings.Contains(err.Error(), "cannot compare") {
+		t.Errorf("error = %q, want containing 'cannot compare'", err.Error())
+	}
+}
+
 func TestSchemaDictLen(t *testing.T) {
 	sd := newTestSchemaDict("L", "a", starlark.MakeInt(1), "b", starlark.MakeInt(2), "c", starlark.MakeInt(3))
 	if sd.Len() != 3 {

@@ -665,6 +665,22 @@ func TestSchemaFieldsFreshDict(t *testing.T) {
 	}
 }
 
+func TestSchemaBuiltinDocNonString(t *testing.T) {
+	thread := &starlark.Thread{Name: "test"}
+	builtin := SchemaBuiltin()
+
+	_, err := starlark.Call(thread, builtin, starlark.Tuple{starlark.String("Account")}, []starlark.Tuple{
+		kv("doc", starlark.MakeInt(123)),
+		kv("location", testField("string", false, starlark.None, nil)),
+	})
+	if err == nil {
+		t.Fatal("expected error for non-string doc")
+	}
+	if !strings.Contains(err.Error(), "doc must be a string") {
+		t.Errorf("error = %v, want contains 'doc must be a string'", err)
+	}
+}
+
 func TestSchemaBuiltinNonStringName(t *testing.T) {
 	thread := &starlark.Thread{Name: "test"}
 	builtin := SchemaBuiltin()
