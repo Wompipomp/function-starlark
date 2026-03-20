@@ -175,6 +175,29 @@ Request multiple extra resources by label selector.
 require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
 ```
 
+### schema(name, doc=None, **fields)
+
+Define a typed constructor that validates kwargs at construction time. Each kwarg (except doc) must be a field() descriptor. Returns a callable -- calling it validates types, required fields, enum values, and unknown fields, reporting all errors at once. Returns a dict-compatible SchemaDict.
+
+```python
+NetworkRules = schema("NetworkRules",
+    default_action=field(type="string", enum=["Allow", "Deny"]),
+    ip_rules=field(type="list", items=IpRule),
+)
+rules = NetworkRules(default_action="Deny")
+```
+
+### field(type="", required=False, default=None, enum=None, doc="", items=None)
+
+Define a field descriptor for schema constructors. type= accepts primitive strings ("string", "int", "float", "bool", "list", "dict") or a schema reference for nested validation. Empty type accepts any value (gradual typing). items= is only valid with type="list" and must be a schema.
+
+```python
+field(type="string", required=True)
+field(type="string", default="Standard", enum=["Standard", "Premium"])
+field(type=SubSchema)  # nested schema reference
+field(type="list", items=SubSchema)  # list of schema
+```
+
 ## Module system
 
 Load shared code via standard Starlark load():
@@ -264,6 +287,30 @@ Resource("bucket", bucket_config)
 - Use %s string formatting (Starlark convention, .format() also works).
 - Put helper functions at the top of the script.
 - End scripts with emit_event("Normal", "Reconciled ...") for observability.
+
+## Schema validation
+
+Opt-in typed constructors that catch typos, wrong types, and missing fields at construction time. Schemas are defined inline alongside your composition logic -- no separate schema files or imports needed.
+
+```python
+# Define schemas (flat, nested, and list-of-schema)
+IpRule = schema("IpRule",
+    action=field(type="string", default="Allow"),
+    ip_address=field(type="string", required=True),
+)
+Account = schema("Account",
+    location=field(type="string", required=True),
+    sku=field(type="string", default="Standard_LRS", enum=["Standard_LRS", "Standard_GRS"]),
+    network_rules=field(type=IpRule),  # nested schema
+    ip_rules=field(type="list", items=IpRule),  # list of schema
+)
+
+# Use -- returns a dict-compatible SchemaDict that works with Resource()
+acct = Account(location="eastus", ip_rules=[{"ip_address": "10.0.0.1"}])
+Resource("storage", {"apiVersion": "...", "kind": "Account", "spec": {"forProvider": acct}})
+```
+
+Schema constructors return dict-compatible values that work transparently with Resource(). You can mix schema-validated and plain dict resources in the same composition for incremental adoption.
 
 ## KCL to Starlark migration cheat sheet
 
