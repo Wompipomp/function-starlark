@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/crossplane/function-sdk-go/logging"
@@ -27,7 +27,7 @@ const (
 	maxFileSize = 1 << 20
 
 	// maxFileCount is the maximum number of .star files in a single artifact.
-	maxFileCount = 100
+	maxFileCount = 1000
 
 	// maxTransitiveDepth is the maximum depth for transitive OCI dependency resolution.
 	maxTransitiveDepth = 10
@@ -282,12 +282,12 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		if title == "" {
 			continue
 		}
-		baseName := filepath.Base(title)
-		if !strings.HasSuffix(baseName, ".star") {
-			continue
-		}
 		if strings.Contains(title, "..") {
 			return nil, fmt.Errorf("path traversal detected in layer title %q from %s", title, refStr)
+		}
+		cleaned := path.Clean(title)
+		if !strings.HasSuffix(path.Base(cleaned), ".star") {
+			continue
 		}
 
 		// Read raw layer content.
@@ -298,13 +298,13 @@ func (r *Resolver) extractStarFiles(img v1.Image, refStr string) (map[string]str
 		data, err := io.ReadAll(io.LimitReader(rc, maxFileSize+1))
 		rc.Close() //nolint:errcheck,gosec
 		if err != nil {
-			return nil, fmt.Errorf("reading %s from %s: %w", baseName, refStr, err)
+			return nil, fmt.Errorf("reading %s from %s: %w", cleaned, refStr, err)
 		}
 		if len(data) > maxFileSize {
-			return nil, fmt.Errorf("file %s in %s exceeds maximum size (%d bytes)", baseName, refStr, maxFileSize)
+			return nil, fmt.Errorf("file %s in %s exceeds maximum size (%d bytes)", cleaned, refStr, maxFileSize)
 		}
 
-		files[baseName] = string(data)
+		files[cleaned] = string(data)
 	}
 
 	return files, nil
@@ -355,12 +355,12 @@ func (r *Resolver) extractFromTar(layer v1.Layer, refStr string) (map[string]str
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		baseName := filepath.Base(hdr.Name)
-		if !strings.HasSuffix(baseName, ".star") {
-			continue
-		}
 		if strings.Contains(hdr.Name, "..") {
 			return nil, fmt.Errorf("path traversal detected in tar entry %q from %s", hdr.Name, refStr)
+		}
+		cleaned := strings.TrimPrefix(path.Clean(hdr.Name), "/")
+		if !strings.HasSuffix(path.Base(cleaned), ".star") {
+			continue
 		}
 		fileCount++
 		if fileCount > maxFileCount {
@@ -368,12 +368,12 @@ func (r *Resolver) extractFromTar(layer v1.Layer, refStr string) (map[string]str
 		}
 		data, err := io.ReadAll(io.LimitReader(tr, maxFileSize+1))
 		if err != nil {
-			return nil, fmt.Errorf("reading %s from tar in %s: %w", baseName, refStr, err)
+			return nil, fmt.Errorf("reading %s from tar in %s: %w", cleaned, refStr, err)
 		}
 		if len(data) > maxFileSize {
-			return nil, fmt.Errorf("file %s in %s exceeds maximum size (%d bytes)", baseName, refStr, maxFileSize)
+			return nil, fmt.Errorf("file %s in %s exceeds maximum size (%d bytes)", cleaned, refStr, maxFileSize)
 		}
-		files[baseName] = string(data)
+		files[cleaned] = string(data)
 	}
 
 	return files, nil
