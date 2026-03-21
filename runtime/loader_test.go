@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 )
 
 func TestModuleLoadInline(t *testing.T) {
@@ -936,5 +937,315 @@ result_h = helper`
 	// _private should NOT be exported.
 	if _, ok := globals["_private"]; ok {
 		t.Error("_private should not be exported via star import")
+	}
+}
+
+// ========================
+// Namespace Star Import Tests
+// ========================
+
+func TestNamespaceStarImportBasic(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `x = 1
+y = 2
+_private = 3`,
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	source := `load("m.star", ns="*")
+result_x = ns.x
+result_y = ns.y`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	// The rewritten source should not contain "*".
+	if strings.Contains(rewritten, `"*"`) {
+		t.Errorf("rewritten source still contains \"*\": %s", rewritten)
+	}
+
+	// Execute the rewritten source.
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	xVal, _ := starlark.AsInt32(globals["result_x"].(starlark.Int))
+	if xVal != 1 {
+		t.Errorf("ns.x = %d, want 1", xVal)
+	}
+	yVal, _ := starlark.AsInt32(globals["result_y"].(starlark.Int))
+	if yVal != 2 {
+		t.Errorf("ns.y = %d, want 2", yVal)
+	}
+}
+
+func TestNamespaceStarImportNoCollision(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m1.star": `Account = "m1_account"`,
+		"m2.star": `Account = "m2_account"`,
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	source := `load("m1.star", s1="*")
+load("m2.star", s2="*")
+result1 = s1.Account
+result2 = s2.Account`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	r1 := string(globals["result1"].(starlark.String))
+	r2 := string(globals["result2"].(starlark.String))
+	if r1 != "m1_account" {
+		t.Errorf("s1.Account = %q, want 'm1_account'", r1)
+	}
+	if r2 != "m2_account" {
+		t.Errorf("s2.Account = %q, want 'm2_account'", r2)
+	}
+	if r1 == r2 {
+		t.Error("s1.Account and s2.Account should differ but they are the same")
+	}
+}
+
+func TestNamespaceStarImportMixedExplicit(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `a = 1
+b = 2
+extra = 3`,
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	// Mixed: namespace star + explicit import.
+	source := `load("m.star", ns="*", "extra")
+result_a = ns.a
+result_b = ns.b
+result_extra = extra`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	aVal, _ := starlark.AsInt32(globals["result_a"].(starlark.Int))
+	if aVal != 1 {
+		t.Errorf("ns.a = %d, want 1", aVal)
+	}
+	bVal, _ := starlark.AsInt32(globals["result_b"].(starlark.Int))
+	if bVal != 2 {
+		t.Errorf("ns.b = %d, want 2", bVal)
+	}
+	extraVal, _ := starlark.AsInt32(globals["result_extra"].(starlark.Int))
+	if extraVal != 3 {
+		t.Errorf("extra = %d, want 3", extraVal)
+	}
+}
+
+func TestNamespaceStarImportEmpty(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"empty.star": `_private = 1`, // no public exports
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	source := `load("empty.star", ns="*")
+result = ns`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source for empty module: %v", err)
+	}
+
+	// The namespace should be an empty struct.
+	ns := globals["result"]
+	if ns == nil {
+		t.Fatal("expected 'result' (ns) in globals, got nil")
+	}
+	if ns.Type() != "struct" {
+		t.Errorf("ns.Type() = %q, want 'struct'", ns.Type())
+	}
+}
+
+func TestNamespaceStarImportOCI(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"helpers.star": `greet = "hello"
+farewell = "bye"`,
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	source := `load("oci://ghcr.io/org/lib:v1/helpers.star", ns="*")
+result = ns.greet`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	// The OCI URL should be preserved in the rewritten load.
+	if !strings.Contains(rewritten, "oci://ghcr.io/org/lib:v1/helpers.star") {
+		t.Errorf("rewritten source lost OCI URL: %s", rewritten)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	result := string(globals["result"].(starlark.String))
+	if result != "hello" {
+		t.Errorf("ns.greet = %q, want 'hello'", result)
+	}
+}
+
+func TestNamespaceAndPlainStarSameLoad(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `x = 1
+y = 2`,
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	// Both plain star and namespace star in same load.
+	source := `load("m.star", ns="*", "*")
+result_direct_x = x
+result_direct_y = y
+result_ns_x = ns.x
+result_ns_y = ns.y`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	dxVal, _ := starlark.AsInt32(globals["result_direct_x"].(starlark.Int))
+	if dxVal != 1 {
+		t.Errorf("x (direct) = %d, want 1", dxVal)
+	}
+	dyVal, _ := starlark.AsInt32(globals["result_direct_y"].(starlark.Int))
+	if dyVal != 2 {
+		t.Errorf("y (direct) = %d, want 2", dyVal)
+	}
+	nxVal, _ := starlark.AsInt32(globals["result_ns_x"].(starlark.Int))
+	if nxVal != 1 {
+		t.Errorf("ns.x = %d, want 1", nxVal)
+	}
+	nyVal, _ := starlark.AsInt32(globals["result_ns_y"].(starlark.Int))
+	if nyVal != 2 {
+		t.Errorf("ns.y = %d, want 2", nyVal)
+	}
+}
+
+func TestNamespaceStarImportMultiline(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"m.star": `a = 10
+b = 20`,
+	}
+
+	predeclared := starlark.StringDict{
+		"struct": starlark.NewBuiltin("struct", starlarkstruct.Make),
+	}
+
+	loader := NewModuleLoader(inline, nil, predeclared, rt, "")
+
+	// Multiline load statement with namespace star.
+	source := `load(
+    "m.star",
+    ns="*",
+)
+result = ns.a + ns.b`
+	rewritten, err := loader.ResolveStarImports(source, "test.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, "test.star", rewritten, predeclared)
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	result, _ := starlark.AsInt32(globals["result"].(starlark.Int))
+	if result != 30 {
+		t.Errorf("result = %d, want 30 (a+b)", result)
 	}
 }
