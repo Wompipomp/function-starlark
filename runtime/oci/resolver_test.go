@@ -565,6 +565,109 @@ func TestResolveUsesKeychain(t *testing.T) {
 	}
 }
 
+func TestExtractTarNestedPaths(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+	img := buildTestImage(t, map[string]string{
+		"apps/v1.star": `apps_v1 = "apps"`,
+		"core/v1.star": `core_v1 = "core"`,
+		"meta/v1.star": `meta_v1 = "meta"`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/provider:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+
+	target, err := ParseOCILoadTarget("oci://ghcr.io/org/provider:v1/apps/v1.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["apps/v1.star"] != `apps_v1 = "apps"` {
+		t.Errorf("apps/v1.star = %q, want %q", result["apps/v1.star"], `apps_v1 = "apps"`)
+	}
+}
+
+func TestExtractOrasNestedPaths(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+	img := buildOrasImage(t, map[string]string{
+		"apps/v1.star": `apps_v1 = "apps"`,
+		"core/v1.star": `core_v1 = "core"`,
+	})
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/provider:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+
+	target, err := ParseOCILoadTarget("oci://ghcr.io/org/provider:v1/apps/v1.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["apps/v1.star"] != `apps_v1 = "apps"` {
+		t.Errorf("apps/v1.star = %q, want %q", result["apps/v1.star"], `apps_v1 = "apps"`)
+	}
+}
+
+func TestExtractHighFileCount(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+
+	// Build a tar with 150 .star files — was blocked by maxFileCount=100.
+	files := make(map[string]string, 150)
+	for i := 0; i < 150; i++ {
+		files[fmt.Sprintf("pkg%d/mod.star", i)] = fmt.Sprintf("val = %d", i)
+	}
+	img := buildTestImage(t, files, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/provider-aws:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+
+	target, err := ParseOCILoadTarget("oci://ghcr.io/org/provider-aws:v1/pkg0/mod.star")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error (should not hit maxFileCount): %v", err)
+	}
+	if result["pkg0/mod.star"] != "val = 0" {
+		t.Errorf("pkg0/mod.star = %q, want %q", result["pkg0/mod.star"], "val = 0")
+	}
+}
+
+func TestExtractNestedPathTraversal(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+	img := buildTestImage(t, map[string]string{
+		"apps/../../etc/passwd.star": `x = 1`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/etc/passwd.star")
+	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err == nil {
+		t.Fatal("expected error for path traversal in nested tar path")
+	}
+	if !strings.Contains(err.Error(), "path traversal") {
+		t.Errorf("error %q should mention path traversal", err.Error())
+	}
+}
+
 func TestResolveTransitiveShortForm(t *testing.T) {
 	c := NewCache(5 * time.Minute)
 
