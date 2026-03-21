@@ -7,6 +7,7 @@ import (
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/resource"
 	"go.starlark.net/starlark"
+	"go.starlark.net/starlarkstruct"
 
 	"github.com/wompipomp/function-starlark/convert"
 	"github.com/wompipomp/function-starlark/schema"
@@ -103,6 +104,7 @@ func BuildGlobals(
 		"require_extra_resources": reqCollector.RequireExtraResourcesBuiltin(),
 		"schema":                  schema.SchemaBuiltin(),
 		"field":                   schema.FieldBuiltin(),
+		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),
 	}, nil
 }
 

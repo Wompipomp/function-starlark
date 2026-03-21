@@ -224,6 +224,12 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 // where x, y are the module's non-underscore exports. If no star imports are
 // found, the source is returned unchanged.
 //
+// Namespace star imports like load("m.star", ns="*") are rewritten to import
+// all exports with prefixed temporary names and then assign a struct:
+//
+//	load("m.star", _ns_ns__x="x", _ns_ns__y="y")
+//	ns = struct(x=_ns_ns__x, y=_ns_ns__y)
+//
 // This is needed because starlark-go does not natively support "*" in load()
 // statements -- it would look for a literal key named "*" in the loaded dict.
 func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, error) {
@@ -235,7 +241,7 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 		return source, nil //nolint:nilerr
 	}
 
-	// Collect star import load statements.
+	// Collect load statements that contain any star import (plain or namespace).
 	type starLoad struct {
 		stmt *syntax.LoadStmt
 	}
@@ -246,11 +252,16 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 		if !ok {
 			continue
 		}
-		for _, ident := range load.To {
-			if ident.Name == "*" {
-				starLoads = append(starLoads, starLoad{stmt: load})
+		hasStar := false
+		for i, from := range load.From {
+			if from.Name == "*" {
+				_ = load.To[i] // ensure index valid
+				hasStar = true
 				break
 			}
+		}
+		if hasStar {
+			starLoads = append(starLoads, starLoad{stmt: load})
 		}
 	}
 
@@ -285,47 +296,70 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 			return "", fmt.Errorf("resolving star import from %q: %w", mod, err)
 		}
 
-		// Build the new load argument list.
-		var names []string
-		// Collect non-star names that are already explicitly listed.
-		existingNames := make(map[string]bool)
-		for _, ident := range sl.stmt.To {
-			if ident.Name != "*" {
-				existingNames[ident.Name] = true
-			}
-		}
+		// Classify each From/To pair in this load statement.
+		// Collect explicit (non-star) names to exclude from star expansion.
+		explicitNames := make(map[string]bool)
+		var namespaces []string // namespace alias names (from ns="*" entries)
+		hasPlainStar := false
 
-		// Add all export names not already listed.
-		for _, name := range exports {
-			if !existingNames[name] {
-				names = append(names, name)
-			}
-		}
-
-		// Build the replacement load statement text.
-		var allArgs []string
-		// Preserve explicitly named imports (using From for aliased names).
-		for j, ident := range sl.stmt.To {
-			if ident.Name == "*" {
-				continue
-			}
-			from := sl.stmt.From[j]
-			if from.Name == ident.Name {
-				allArgs = append(allArgs, fmt.Sprintf("%q", ident.Name))
+		for j, from := range sl.stmt.From {
+			to := sl.stmt.To[j]
+			if from.Name == "*" && to.Name == "*" {
+				hasPlainStar = true
+			} else if from.Name == "*" && to.Name != "*" {
+				namespaces = append(namespaces, to.Name)
 			} else {
-				allArgs = append(allArgs, fmt.Sprintf("%s=%q", ident.Name, from.Name))
+				explicitNames[to.Name] = true
 			}
 		}
-		// Add the star-expanded names.
-		for _, name := range names {
-			allArgs = append(allArgs, fmt.Sprintf("%q", name))
+
+		// Compute star-expanded names (exports minus explicitly imported ones).
+		var starNames []string
+		for _, name := range exports {
+			if !explicitNames[name] {
+				starNames = append(starNames, name)
+			}
 		}
 
-		// If no exports and no explicit names, remove the load statement entirely.
-		if len(allArgs) == 0 {
-			// Remove the entire line(s) for this load statement.
-			startLine := int(sl.stmt.Load.Line) - 1 // 1-indexed to 0-indexed
-			// Find end by looking at Rparen position.
+		// Build the replacement load arguments and struct lines.
+		var allArgs []string
+		var structLines []string
+
+		// Preserve explicitly named imports (using From for aliased names).
+		for j, from := range sl.stmt.From {
+			to := sl.stmt.To[j]
+			if from.Name == "*" {
+				continue // skip star entries, handled below
+			}
+			if from.Name == to.Name {
+				allArgs = append(allArgs, fmt.Sprintf("%q", to.Name))
+			} else {
+				allArgs = append(allArgs, fmt.Sprintf("%s=%q", to.Name, from.Name))
+			}
+		}
+
+		// Add plain star expanded names (direct imports).
+		if hasPlainStar {
+			for _, name := range starNames {
+				allArgs = append(allArgs, fmt.Sprintf("%q", name))
+			}
+		}
+
+		// Add namespace star expanded names (prefixed temporary imports + struct).
+		for _, ns := range namespaces {
+			var structArgs []string
+			for _, name := range starNames {
+				tmpName := fmt.Sprintf("_ns_%s__%s", ns, name)
+				allArgs = append(allArgs, fmt.Sprintf("%s=%q", tmpName, name))
+				structArgs = append(structArgs, fmt.Sprintf("%s=%s", name, tmpName))
+			}
+			structLine := fmt.Sprintf("%s = struct(%s)", ns, strings.Join(structArgs, ", "))
+			structLines = append(structLines, structLine)
+		}
+
+		// If no load args and no struct lines, remove the load statement entirely.
+		if len(allArgs) == 0 && len(structLines) == 0 {
+			startLine := int(sl.stmt.Load.Line) - 1
 			endLine := int(sl.stmt.Rparen.Line) - 1
 			for l := startLine; l <= endLine && l < len(lines); l++ {
 				lines[l] = ""
@@ -333,12 +367,23 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 			continue
 		}
 
-		newLoad := fmt.Sprintf("load(%q, %s)", mod, strings.Join(allArgs, ", "))
+		// Build the replacement load + optional struct lines.
+		var replacement string
+		if len(allArgs) > 0 {
+			replacement = fmt.Sprintf("load(%q, %s)", mod, strings.Join(allArgs, ", "))
+		}
+		if len(structLines) > 0 {
+			if replacement != "" {
+				replacement = replacement + "\n" + strings.Join(structLines, "\n")
+			} else {
+				replacement = strings.Join(structLines, "\n")
+			}
+		}
 
 		// Replace the original load line(s).
 		startLine := int(sl.stmt.Load.Line) - 1
 		endLine := int(sl.stmt.Rparen.Line) - 1
-		lines[startLine] = newLoad
+		lines[startLine] = replacement
 		// Clear any continuation lines.
 		for l := startLine + 1; l <= endLine && l < len(lines); l++ {
 			lines[l] = ""
