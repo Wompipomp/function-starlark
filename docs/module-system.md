@@ -211,6 +211,51 @@ load("source", "name1", "name2")
 - Aliased imports are supported: `load("module.star", renamed = "original")`
 - Star imports bring in all public exports: `load("module.star", "*")`
 
+### Namespace alias imports
+
+Namespace alias imports wrap all public exports in a `struct` bound to a name
+you choose. Use the syntax `load("module.star", alias="*")` where `alias` is
+any valid Starlark identifier:
+
+```python
+load("helpers.star", h="*")
+h.my_function()
+h.MY_CONSTANT
+```
+
+Access all exports via dot notation on the alias struct.
+
+**Solving name conflicts across provider packages.** When two modules export the
+same name (e.g., Azure `storage` and `cosmosdb` both export `Account`), flat
+star imports clash. Namespace aliases solve this by keeping each module's exports
+in a separate struct:
+
+```python
+load("oci://ghcr.io/wompipomp/schemas-k8s:v1.35/apps/v1.star", k8s="*")
+load("oci://ghcr.io/wompipomp/schemas-azure:v2.5.0/storage/v1.star", storage="*")
+load("oci://ghcr.io/wompipomp/schemas-azure:v2.5.0/cosmosdb/v1.star", cosmosdb="*")
+
+k8s.Deployment(...)
+storage.Account(...)    # no conflict with cosmosdb.Account
+cosmosdb.Account(...)
+```
+
+**Backwards compatibility.** Plain star imports still work exactly as before:
+
+```python
+load("module.star", "*")  # flat import -- all exports available at top level
+```
+
+**Mixed syntax.** You can combine named imports with a namespace alias in the
+same `load()` call. Named imports are available flat, while the namespace struct
+contains everything:
+
+```python
+load("module.star", "SpecificFunc", ns="*")
+SpecificFunc()   # available flat
+ns.OtherFunc()   # available via namespace
+```
+
 ### Module resolution order
 
 When `load()` is called, function-starlark resolves the module source in this

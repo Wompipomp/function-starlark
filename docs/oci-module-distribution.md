@@ -93,6 +93,30 @@ load("oci://ghcr.io/my-org/lib:v1/helpers.star", "create_bucket", "*")
 
 Names starting with `_` are private and never exported through star import.
 
+### Namespace alias imports
+
+Namespace aliases solve name conflicts when loading from multiple OCI packages
+that export the same type names. Use the `alias="*"` syntax to wrap all exports
+in a struct:
+
+```python
+# Short-form with namespace alias
+load("schemas-k8s:v1.35/apps/v1.star", k8s="*")
+load("schemas-azure:v2.5.0/storage/v1.star", storage="*")
+
+# Explicit URL with namespace alias
+load("oci://ghcr.io/wompipomp/schemas-azure:v2.5.0/cosmosdb/v1.star", cosmosdb="*")
+
+# Access via dot notation
+k8s.Deployment(...)
+storage.Account(...)
+cosmosdb.Account(...)
+```
+
+Namespace aliases work identically for short-form and explicit OCI loads. See
+the [module system guide](module-system.md#namespace-alias-imports) for full
+syntax details and mixed import examples.
+
 ## Configuring the Default Registry
 
 The default registry enables short-form load syntax by providing the

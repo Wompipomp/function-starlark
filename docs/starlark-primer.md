@@ -80,7 +80,14 @@ from helpers import my_function
 
 # Starlark
 load("helpers.star", "my_function")
+
+# Starlark -- namespace import (all exports in a struct)
+load("helpers.star", h="*")
+h.my_function()
 ```
+
+Namespace alias imports wrap all exports in a struct, useful when multiple
+modules export the same names.
 
 **No with statement** -- no context managers.
 
