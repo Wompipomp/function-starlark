@@ -311,6 +311,29 @@ Use standard library modules for common patterns (networking, naming, labels,
 conditions) rather than reimplementing. See the
 [standard library reference](stdlib-reference.md).
 
+### Namespace aliases for provider schemas
+
+When multiple schema packages export the same type name (common with cloud
+providers that define `Account`, `Network`, or `Subnet` across API groups),
+use namespace alias imports to avoid name conflicts:
+
+```python
+# Problem: both modules export "Account" -- flat star imports clash
+# load("schemas-azure:v2.5.0/storage/v1.star", "*")
+# load("schemas-azure:v2.5.0/cosmosdb/v1.star", "*")
+
+# Solution: namespace alias imports keep each provider's types separate
+load("schemas-azure:v2.5.0/storage/v1.star", storage="*")
+load("schemas-azure:v2.5.0/cosmosdb/v1.star", cosmosdb="*")
+
+storage.Account(location="eastus", account_replication_type="LRS")
+cosmosdb.Account(location="eastus", kind="GlobalDocumentDB")
+```
+
+Use one namespace per API group or provider package. This mirrors how Go and
+Python organize types by package path and makes it clear which provider each
+type belongs to.
+
 ## Error handling
 
 Starlark has no `try/except`. Use defensive coding patterns:

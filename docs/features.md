@@ -404,6 +404,23 @@ Resource("storage-account", {
 For full signatures and parameter tables, see the
 [builtins reference](builtins-reference.md).
 
+### Provider schema packages with namespace aliases
+
+When loading generated schema packages that export many types (e.g., Azure
+provider schemas with different `Account` types across API groups), use
+namespace alias imports to avoid name conflicts:
+
+```python
+load("oci://ghcr.io/wompipomp/schemas-azure:v2.5.0/storage/v1.star", storage="*")
+load("oci://ghcr.io/wompipomp/schemas-azure:v2.5.0/cosmosdb/v1.star", cosmosdb="*")
+
+sa = storage.Account(location="eastus", account_replication_type="LRS")
+db = cosmosdb.Account(location="eastus", kind="GlobalDocumentDB")
+```
+
+Each namespace struct keeps its provider's types separate. See the
+[module system guide](module-system.md#namespace-alias-imports) for full syntax.
+
 ## Observability (metrics)
 
 function-starlark exposes 9 Prometheus metrics on the standard `/metrics`

@@ -57,6 +57,12 @@ Rules:
   `emit_event()` at the top level of a library module. These must only appear
   inside function bodies.
 
+When your module exports names that are common across provider packages (e.g.,
+`Account`, `Network`), consumers can use namespace alias imports to avoid
+conflicts: `load("my-module.star", ns="*")`. This wraps all exports in a struct
+bound to `ns`. Design your module's public API knowing that consumers may access
+it via dot notation (`ns.Account`) as well as flat imports.
+
 ## Docstring format
 
 Every exported function requires a docstring. Use this format:

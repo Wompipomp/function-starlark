@@ -237,6 +237,28 @@ Valid short-form patterns:
 - `package:tag/subdir/file.star` (nested file path)
 - `package@sha256:hex.../file.star` (digest pinning)
 
+### Namespace alias imports
+
+Namespace alias imports wrap all exports in a struct. Solves name conflicts when multiple modules export the same name.
+
+```python
+# Namespace import -- all exports wrapped in a struct
+load("schemas-k8s:v1.35/apps/v1.star", k8s="*")
+load("schemas-azure:v2.5.0/storage/v1.star", storage="*")
+load("schemas-azure:v2.5.0/cosmosdb/v1.star", cosmosdb="*")
+
+# Access via namespace dot notation
+k8s.Deployment(...)
+storage.Account(...)    # no conflict with cosmosdb.Account
+cosmosdb.Account(...)
+
+# Mix named and namespace imports
+load("module.star", "SpecificFunc", ns="*")
+# SpecificFunc available flat, everything else via ns.Name
+```
+
+Backwards compatible -- plain `load("mod", "*")` still works for flat imports.
+
 ## Standard library (oci://ghcr.io/wompipomp/starlark-stdlib:v1/)
 
 ### naming.star
@@ -287,6 +309,7 @@ Resource("bucket", bucket_config)
 - Use %s string formatting (Starlark convention, .format() also works).
 - Put helper functions at the top of the script.
 - End scripts with emit_event("Normal", "Reconciled ...") for observability.
+- Use namespace alias imports (alias="*") when loading provider schema packages to avoid name conflicts across API groups.
 
 ## Schema validation
 
