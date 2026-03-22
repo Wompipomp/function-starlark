@@ -304,11 +304,12 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 
 		for j, from := range sl.stmt.From {
 			to := sl.stmt.To[j]
-			if from.Name == "*" && to.Name == "*" {
+			switch {
+			case from.Name == "*" && to.Name == "*":
 				hasPlainStar = true
-			} else if from.Name == "*" && to.Name != "*" {
+			case from.Name == "*":
 				namespaces = append(namespaces, to.Name)
-			} else {
+			default:
 				explicitNames[to.Name] = true
 			}
 		}
