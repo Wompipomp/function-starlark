@@ -163,6 +163,22 @@ load target "function-starlark-stdlib:v1/naming.star" requires a default OCI reg
 set STARLARK_OCI_DEFAULT_REGISTRY env var on the function pod or spec.ociDefaultRegistry in function input
 ```
 
+### Editor configuration
+
+If you use the [function-starlark VS Code extension](https://github.com/wompipomp/function-starlark-vscode),
+short-form load targets also need a default registry for schema IntelliSense
+(autocomplete, type checking, diagnostics). Set it in VS Code settings:
+
+```json
+{
+  "functionStarlark.schemas.registry": "ghcr.io/my-org"
+}
+```
+
+The default is `ghcr.io/wompipomp`. If your runtime uses a different registry,
+make sure the VS Code setting matches so that editor IntelliSense resolves the
+same schemas as your deployed compositions.
+
 ### Detection rules
 
 function-starlark determines the load type using these rules, applied in order:

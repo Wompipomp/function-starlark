@@ -192,6 +192,21 @@ spec:
 and a short-form load target is encountered, the function returns a fatal error
 with a clear message explaining both configuration options.
 
+### Editor configuration
+
+If you use the [function-starlark VS Code extension](https://github.com/wompipomp/function-starlark-vscode)
+for schema IntelliSense, you also need to configure the default registry in
+VS Code settings so the editor can resolve short-form load targets:
+
+```json
+{
+  "functionStarlark.schemas.registry": "ghcr.io/my-org"
+}
+```
+
+The default is `ghcr.io/wompipomp`. Keep this in sync with your runtime
+registry configuration so that editor diagnostics match deployed behavior.
+
 ### Registry value format
 
 The registry value is `host/namespace` (e.g., `ghcr.io/my-org`). Do not
