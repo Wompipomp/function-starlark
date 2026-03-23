@@ -198,6 +198,16 @@ field(type=SubSchema)  # nested schema reference
 field(type="list", items=SubSchema)  # list of schema
 ```
 
+### struct(**kwargs)
+
+Create an immutable struct with named fields accessible via dot notation. Used internally by namespace alias imports to wrap module exports, but also available directly.
+
+```python
+point = struct(x=1, y=2)
+point.x  # 1
+point.y  # 2
+```
+
 ## Module system
 
 Load shared code via standard Starlark load():
@@ -348,6 +358,12 @@ Schema constructors return dict-compatible values that work transparently with R
 | "crossplane.io/external-name" annotation | external_name= kwarg on Resource() |
 | assert condition, message | if not condition: fatal(message) |
 | import module | load("module.star", "func") |
+
+## Ecosystem
+
+- **function-starlark-gen** (github.com/wompipomp/function-starlark-gen): Go CLI code generator. Generates typed Starlark schema libraries from OpenAPI specs, K8s CRDs, and Crossplane provider CRDs. Three modes: `starlark-gen k8s`, `starlark-gen crd`, `starlark-gen provider`. Generated schemas use schema() and field() builtins.
+- **function-starlark-schemas** (github.com/wompipomp/function-starlark-schemas): Pre-built schema packages published as OCI artifacts at ghcr.io/wompipomp/schemas-*. Load via `load("schemas-k8s:v1.35/apps/v1.star", k8s="*")`.
+- **function-starlark-vscode** (github.com/wompipomp/function-starlark-vscode): VS Code extension. Autocomplete for all builtins, hover docs, signature help, syntax highlighting, format-on-save via buildifier, schema IntelliSense with OCI-based schema auto-download.
 
 ## Starlark language notes
 
