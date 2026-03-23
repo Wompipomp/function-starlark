@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 21 predeclared names -- 6 globals and 15 functions --
+function-starlark provides 22 predeclared names -- 6 globals and 16 functions --
 that are automatically available in every Starlark script without import. These
 are the core API for interacting with Crossplane's composite resource model.
 
@@ -29,6 +29,7 @@ are the core API for interacting with Crossplane's composite resource model.
 | `require_extra_resources()` | function | Request multiple extra resources |
 | `schema()` | function | Define a typed constructor with field validation |
 | `field()` | function | Define a field descriptor for schema constructors |
+| `struct()` | function | Create an immutable struct with named fields (dot-access) |
 
 ---
 
@@ -890,6 +891,42 @@ field(required=True)  # any type, required
 
 # Documentation
 field(type="string", doc="The Azure region for this resource")
+```
+
+---
+
+### struct
+
+```python
+struct(**kwargs)
+```
+
+Create an immutable struct with named fields accessible via dot notation. This
+is the standard Starlark struct constructor from `starlarkstruct.Make`. It is
+used internally by namespace alias imports (`load("mod.star", ns="*")`) to wrap
+module exports in a dot-accessible namespace. It is also available directly for
+creating lightweight record types.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `**kwargs` | any | required | Named fields. Each kwarg becomes a field on the struct. |
+
+**Returns:** An immutable struct value. Fields are accessed via dot notation.
+Structs support `==` comparison, `str()`, and `dir()`.
+
+**Example:**
+
+```python
+# Create a struct directly
+point = struct(x=1, y=2)
+point.x  # 1
+point.y  # 2
+
+# Namespace alias imports use struct internally
+load("helpers.star", h="*")
+h.my_function()  # h is a struct wrapping all exports from helpers.star
 ```
 
 ---
