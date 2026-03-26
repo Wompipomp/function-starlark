@@ -61,16 +61,22 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	// preserving resources set by previous functions in the pipeline.
 	rsp := response.To(req, response.DefaultTTL)
 
+	// fatal logs at error level and sets the response to Fatal.
+	fatal := func(err error) {
+		log.Info("Fatal error", "error", err.Error())
+		response.Fatal(rsp, err)
+	}
+
 	// Parse the StarlarkInput from the Composition.
 	in := &v1alpha1.StarlarkInput{}
 	if err := request.GetInput(req, in); err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot get Function input"))
+		fatal(errors.Wrapf(err, "cannot get Function input"))
 		return rsp, nil
 	}
 
 	// Validate that a source script is provided.
 	if in.Spec.Source == "" && in.Spec.ScriptConfigRef == nil {
-		response.Fatal(rsp, errors.New("spec.source or spec.scriptConfigRef is required"))
+		fatal(errors.New("spec.source or spec.scriptConfigRef is required"))
 		return rsp, nil
 	}
 
@@ -90,7 +96,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		var err error
 		source, err = f.loadScript(in.Spec.ScriptConfigRef)
 		if err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "loading script from ConfigMap"))
+			fatal(errors.Wrapf(err, "loading script from ConfigMap"))
 			return rsp, nil
 		}
 	}
@@ -117,7 +123,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 		globals, err := builtins.BuildGlobals(req, collector, condCollector, connCollector, reqCollector)
 		if err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "building Starlark globals"))
+			fatal(errors.Wrapf(err, "building Starlark globals"))
 			return rsp, nil
 		}
 
@@ -140,7 +146,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		// input boundary rather than deep inside expansion/resolution.
 		if defaultRegistry != "" {
 			if err := oci.ValidateRegistry(defaultRegistry); err != nil {
-				response.Fatal(rsp, errors.Wrap(err, "validating default OCI registry"))
+				fatal(errors.Wrap(err, "validating default OCI registry"))
 				return rsp, nil
 			}
 		}
@@ -152,7 +158,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		ociTargets, scanErr := oci.ScanForOCILoads(source, inlineModules, defaultRegistry)
 		if scanErr != nil {
 			if strings.Contains(scanErr.Error(), "requires a default OCI registry") {
-				response.Fatal(rsp, errors.Wrapf(scanErr, "scanning for OCI load targets"))
+				fatal(errors.Wrapf(scanErr, "scanning for OCI load targets"))
 				return rsp, nil
 			}
 			log.Debug("OCI scan skipped due to parse error", "error", scanErr)
@@ -174,7 +180,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			resolvedModules, resolveErr := resolver.Resolve(ctx, ociTargets)
 			ociTimer.ObserveDuration()
 			if resolveErr != nil {
-				response.Fatal(rsp, errors.Wrapf(resolveErr, "resolving OCI modules"))
+				fatal(errors.Wrapf(resolveErr, "resolving OCI modules"))
 				return rsp, nil
 			}
 
@@ -207,7 +213,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		// Expand star imports before execution.
 		source, err = loader.ResolveStarImports(source, filename)
 		if err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "resolving star imports"))
+			fatal(errors.Wrapf(err, "resolving star imports"))
 			return rsp, nil
 		}
 
@@ -218,7 +224,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			// Check for FatalError from fatal() builtin before generic error handling.
 			var fatalErr *builtins.FatalError
 			if errors.As(err, &fatalErr) {
-				response.Fatal(rsp, errors.New(fatalErr.Message))
+				fatal(errors.New(fatalErr.Message))
 				// Still apply conditions/events/requirements collected before fatal().
 				// These are useful diagnostics even though execution was halted.
 				builtins.ApplyConditions(rsp, condCollector.Conditions())
@@ -226,7 +232,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				builtins.ApplyRequirements(rsp, reqCollector.Requirements())
 				return rsp, nil
 			}
-			response.Fatal(rsp, errors.Wrapf(err, "starlark execution failed"))
+			fatal(errors.Wrapf(err, "starlark execution failed"))
 			return rsp, nil
 		}
 
@@ -240,7 +246,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			}
 
 			if err := builtins.ValidateDependencies(deps, resourceNames); err != nil {
-				response.Fatal(rsp, errors.Wrapf(err, "dependency validation failed"))
+				fatal(errors.Wrapf(err, "dependency validation failed"))
 				return rsp, nil
 			}
 
@@ -280,7 +286,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			if in.Spec.SequencingTTL != "" {
 				parsed, parseErr := time.ParseDuration(in.Spec.SequencingTTL)
 				if parseErr != nil {
-					response.Fatal(rsp, errors.Wrapf(parseErr, "invalid spec.sequencingTTL %q", in.Spec.SequencingTTL))
+					fatal(errors.Wrapf(parseErr, "invalid spec.sequencingTTL %q", in.Spec.SequencingTTL))
 					return rsp, nil
 				}
 				seqTTLDuration = parsed
@@ -316,20 +322,20 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 		// Apply collected resources to response (merges with prior desired state).
 		if err := builtins.ApplyResources(rsp, collector); err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "applying composed resources"))
+			fatal(errors.Wrapf(err, "applying composed resources"))
 			return rsp, nil
 		}
 		metrics.ResourcesEmittedTotal.WithLabelValues(filename).Add(float64(len(collector.Resources())))
 
 		// Apply dxr status changes to response desired composite.
 		if err := builtins.ApplyDXR(rsp, globals["dxr"]); err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "applying dxr status"))
+			fatal(errors.Wrapf(err, "applying dxr status"))
 			return rsp, nil
 		}
 
 		// Apply pipeline context changes.
 		if err := builtins.ApplyContext(rsp, globals["context"]); err != nil {
-			response.Fatal(rsp, errors.Wrapf(err, "applying context"))
+			fatal(errors.Wrapf(err, "applying context"))
 			return rsp, nil
 		}
 

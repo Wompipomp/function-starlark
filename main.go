@@ -29,6 +29,8 @@ func (c *CLI) Run() error {
 		return err
 	}
 
+	log.Info("Starting function-starlark", "debug", c.Debug, "address", c.Address, "insecure", c.Insecure)
+
 	rt := runtime.NewRuntime(log)
 	cache := oci.NewCache(5 * time.Minute)
 
