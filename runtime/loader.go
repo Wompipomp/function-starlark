@@ -73,14 +73,33 @@ func validateModuleName(module string) error {
 	return nil
 }
 
-// ociBaseFilename extracts the base filename from an oci:// URL.
-// For "oci://ghcr.io/org/lib:v1/helpers.star" it returns "helpers.star".
-func ociBaseFilename(module string) string {
-	idx := strings.LastIndex(module, "/")
-	if idx == -1 {
-		return module
+// ociFilePath extracts the file path from an oci:// URL using the same
+// parsing logic as reference.splitRefAndFile. For flat files like
+// "oci://ghcr.io/org/lib:v1/helpers.star" it returns "helpers.star".
+// For nested files like "oci://ghcr.io/org/lib:v2/storage/v1.star"
+// it returns "storage/v1.star".
+func ociFilePath(module string) string {
+	raw := strings.TrimPrefix(module, "oci://")
+	// Digest reference: file path follows the hex after @sha256:hex/
+	if idx := strings.Index(raw, "@sha256:"); idx != -1 {
+		after := raw[idx+len("@sha256:"):]
+		if slashIdx := strings.Index(after, "/"); slashIdx != -1 {
+			return after[slashIdx+1:]
+		}
+		return raw
 	}
-	return module[idx+1:]
+	// Tag reference: file path follows the tag after :tag/
+	if lastColon := strings.LastIndex(raw, ":"); lastColon != -1 {
+		after := raw[lastColon+1:]
+		if slashIdx := strings.Index(after, "/"); slashIdx != -1 {
+			return after[slashIdx+1:]
+		}
+	}
+	// Fallback: last path segment.
+	if idx := strings.LastIndex(raw, "/"); idx != -1 {
+		return raw[idx+1:]
+	}
+	return raw
 }
 
 // resolve returns the source for a module by checking inline modules first,
@@ -122,20 +141,20 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 		module = expanded
 	}
 
-	// Handle OCI module references: route to inline modules by base filename.
+	// Handle OCI module references: route to inline modules by file path.
 	if strings.HasPrefix(module, "oci://") {
-		baseName := ociBaseFilename(module)
-		if _, ok := m.inlineModules[baseName]; !ok {
+		filePath := ociFilePath(module)
+		if _, ok := m.inlineModules[filePath]; !ok {
 			return nil, fmt.Errorf(
 				"OCI module %q not resolved; ensure the OCI reference was resolvable before execution",
-				baseName,
+				filePath,
 			)
 		}
-		// Use the base filename as the cache key and module name.
-		module = baseName
-	}
-
-	if err := validateModuleName(module); err != nil {
+		// Use the file path as the cache key and module name.
+		// Skip validateModuleName — OCI paths may contain "/" for nested files
+		// (e.g. "cosmosdb/v1.star") and are already validated by the OCI parser.
+		module = filePath
+	} else if err := validateModuleName(module); err != nil {
 		return nil, err
 	}
 
@@ -288,7 +307,7 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 		// Resolve the module name (handle OCI routing).
 		resolvedMod := mod
 		if strings.HasPrefix(mod, "oci://") {
-			resolvedMod = ociBaseFilename(mod)
+			resolvedMod = ociFilePath(mod)
 		}
 
 		exports, err := m.getModuleExports(resolvedMod)

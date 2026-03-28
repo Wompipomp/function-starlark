@@ -40,13 +40,17 @@ func TestUsageName(t *testing.T) {
 }
 
 func TestBuildUsageResource(t *testing.T) {
+	typeInfos := map[string]resourceTypeInfo{
+		"app": {APIVersion: "nop.crossplane.io/v1alpha1", Kind: "NopResource"},
+		"db":  {APIVersion: "nop.crossplane.io/v1alpha1", Kind: "NopResource"},
+	}
 	t.Run("v1alpha1 API version", func(t *testing.T) {
-		res := buildUsageResource("app", "db", UsageAPIVersionV1)
+		res := buildUsageResource("app", "db", UsageAPIVersionV1, typeInfos)
 		assertUsageResource(t, res, "app", "db", UsageAPIVersionV1)
 	})
 
 	t.Run("v1beta1 API version", func(t *testing.T) {
-		res := buildUsageResource("app", "db", UsageAPIVersionV2)
+		res := buildUsageResource("app", "db", UsageAPIVersionV2, typeInfos)
 		assertUsageResource(t, res, "app", "db", UsageAPIVersionV2)
 	})
 }
@@ -57,7 +61,7 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "cache", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil)
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
@@ -77,14 +81,14 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "A", Dependency: "B", IsRef: true},
 			{Dependent: "B", Dependency: "C", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil)
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
 	})
 
 	t.Run("empty dependency list", func(t *testing.T) {
-		result := BuildUsageResources(nil, UsageAPIVersionV1)
+		result := BuildUsageResources(nil, UsageAPIVersionV1, nil)
 		if len(result) != 0 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 0", len(result))
 		}
@@ -95,7 +99,7 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "db", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil)
 		// Same dependent+dependency hashes to the same name, so map deduplicates.
 		if len(result) != 1 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 1 (deduplicated)", len(result))
@@ -387,15 +391,23 @@ func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependen
 		t.Errorf("spec.replayDeletion = %v, want true", got)
 	}
 
-	// spec.of.resourceRef.name
-	ofRef := spec["of"].GetStructValue().GetFields()["resourceRef"].GetStructValue().GetFields()
-	if got := ofRef["name"].GetStringValue(); got != dependency {
-		t.Errorf("spec.of.resourceRef.name = %q, want %q", got, dependency)
+	// spec.of.resourceSelector.matchControllerRef
+	ofSel := spec["of"].GetStructValue().GetFields()["resourceSelector"].GetStructValue().GetFields()
+	if got := ofSel["matchControllerRef"].GetBoolValue(); !got {
+		t.Errorf("spec.of.resourceSelector.matchControllerRef = %v, want true", got)
+	}
+	ofLabels := ofSel["matchLabels"].GetStructValue().GetFields()
+	if got := ofLabels[ResourceNameLabel].GetStringValue(); got != dependency {
+		t.Errorf("spec.of matchLabels[%s] = %q, want %q", ResourceNameLabel, got, dependency)
 	}
 
-	// spec.by.resourceRef.name
-	byRef := spec["by"].GetStructValue().GetFields()["resourceRef"].GetStructValue().GetFields()
-	if got := byRef["name"].GetStringValue(); got != dependent {
-		t.Errorf("spec.by.resourceRef.name = %q, want %q", got, dependent)
+	// spec.by.resourceSelector.matchControllerRef
+	bySel := spec["by"].GetStructValue().GetFields()["resourceSelector"].GetStructValue().GetFields()
+	if got := bySel["matchControllerRef"].GetBoolValue(); !got {
+		t.Errorf("spec.by.resourceSelector.matchControllerRef = %v, want true", got)
+	}
+	byLabels := bySel["matchLabels"].GetStructValue().GetFields()
+	if got := byLabels[ResourceNameLabel].GetStringValue(); got != dependent {
+		t.Errorf("spec.by matchLabels[%s] = %q, want %q", ResourceNameLabel, got, dependent)
 	}
 }

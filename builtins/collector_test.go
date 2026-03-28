@@ -265,8 +265,14 @@ func TestCollector_EmptyBody(t *testing.T) {
 	if cr.Body == nil {
 		t.Fatal("body is nil")
 	}
-	if len(cr.Body.GetFields()) != 0 {
-		t.Errorf("fields = %d, want 0", len(cr.Body.GetFields()))
+	// Empty body still gets metadata with the resource-name label.
+	metadata := cr.Body.GetFields()["metadata"]
+	if metadata == nil {
+		t.Fatal("metadata is nil; expected resource-name label")
+	}
+	labels := metadata.GetStructValue().GetFields()["labels"].GetStructValue().GetFields()
+	if got := labels[ResourceNameLabel].GetStringValue(); got != "empty-item" {
+		t.Errorf("resource-name label = %q, want %q", got, "empty-item")
 	}
 }
 
@@ -981,9 +987,14 @@ func TestCollector_ExternalName_Omitted(t *testing.T) {
 	res := c.Resources()
 	cr := res["item"]
 
-	// No metadata.annotations should be injected
-	if cr.Body.GetFields()["metadata"] != nil {
-		t.Error("metadata should not be present when external_name is omitted")
+	// metadata should exist (resource-name label) but no annotations
+	metadata := cr.Body.GetFields()["metadata"]
+	if metadata == nil {
+		t.Fatal("metadata is nil; expected resource-name label")
+	}
+	annotations := metadata.GetStructValue().GetFields()["annotations"]
+	if annotations != nil {
+		t.Error("annotations should not be present when external_name is omitted")
 	}
 }
 

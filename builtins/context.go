@@ -5,6 +5,7 @@ import (
 
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"go.starlark.net/starlark"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/convert"
 )
@@ -78,6 +79,9 @@ func ApplyContext(rsp *fnv1.RunFunctionResponse, ctxVal starlark.Value) error {
 	}
 
 	// Merge: script keys overwrite existing, existing-only keys preserved.
+	if rsp.Context.Fields == nil {
+		rsp.Context.Fields = make(map[string]*structpb.Value)
+	}
 	for k, v := range s.GetFields() {
 		rsp.Context.Fields[k] = v
 	}

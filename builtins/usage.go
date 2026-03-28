@@ -11,7 +11,9 @@ import (
 
 // Usage API version constants for Crossplane Usage resources.
 const (
-	UsageAPIVersionV1 = "apiextensions.crossplane.io/v1alpha1"
+	// UsageAPIVersionV1 is for Crossplane 1.x (v1.19+).
+	UsageAPIVersionV1 = "apiextensions.crossplane.io/v1beta1"
+	// UsageAPIVersionV2 is for Crossplane 2.x which moved Usage to a new API group.
 	UsageAPIVersionV2 = "protection.crossplane.io/v1beta1"
 )
 
@@ -22,8 +24,40 @@ func usageName(dependent, dependency string) string {
 	return "usage-" + fmt.Sprintf("%x", h[:4])
 }
 
+// ResourceNameLabel is the label added to each composed resource by Resource()
+// to enable Usage selector matching. The value is the composition-resource-name.
+const ResourceNameLabel = "function-starlark.crossplane.io/resource-name"
+
+// resourceTypeInfo holds the apiVersion and kind extracted from a composed resource body.
+type resourceTypeInfo struct {
+	APIVersion string
+	Kind       string
+}
+
 // buildUsageResource constructs a single Usage resource as a protobuf Struct.
-func buildUsageResource(dependent, dependency, apiVersion string) *structpb.Struct {
+// Uses resourceSelector with matchControllerRef to match composed resources by
+// label, since actual K8s resource names aren't known at pipeline time.
+func buildUsageResource(dependent, dependency, apiVersion string, typeInfos map[string]resourceTypeInfo) *structpb.Struct {
+	selector := func(name string) *structpb.Value {
+		fields := map[string]*structpb.Value{
+			"resourceSelector": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"matchControllerRef": structpb.NewBoolValue(true),
+					"matchLabels": structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							ResourceNameLabel: structpb.NewStringValue(name),
+						},
+					}),
+				},
+			}),
+		}
+		if info, ok := typeInfos[name]; ok {
+			fields["apiVersion"] = structpb.NewStringValue(info.APIVersion)
+			fields["kind"] = structpb.NewStringValue(info.Kind)
+		}
+		return structpb.NewStructValue(&structpb.Struct{Fields: fields})
+	}
+
 	return &structpb.Struct{
 		Fields: map[string]*structpb.Value{
 			"apiVersion": structpb.NewStringValue(apiVersion),
@@ -36,24 +70,8 @@ func buildUsageResource(dependent, dependency, apiVersion string) *structpb.Stru
 			"spec": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{
 					"replayDeletion": structpb.NewBoolValue(true),
-					"of": structpb.NewStructValue(&structpb.Struct{
-						Fields: map[string]*structpb.Value{
-							"resourceRef": structpb.NewStructValue(&structpb.Struct{
-								Fields: map[string]*structpb.Value{
-									"name": structpb.NewStringValue(dependency),
-								},
-							}),
-						},
-					}),
-					"by": structpb.NewStructValue(&structpb.Struct{
-						Fields: map[string]*structpb.Value{
-							"resourceRef": structpb.NewStructValue(&structpb.Struct{
-								Fields: map[string]*structpb.Value{
-									"name": structpb.NewStringValue(dependent),
-								},
-							}),
-						},
-					}),
+					"of":            selector(dependency),
+					"by":            selector(dependent),
 				},
 			}),
 		},
@@ -61,12 +79,26 @@ func buildUsageResource(dependent, dependency, apiVersion string) *structpb.Stru
 }
 
 // BuildUsageResources generates Usage resources for all dependency pairs.
+// resources is the map of collected resources (name -> CollectedResource) used
+// to extract apiVersion/kind for Usage selectors.
 // Returns a map keyed by Usage resource name.
-func BuildUsageResources(deps []DependencyPair, apiVersion string) map[string]*structpb.Struct {
+func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map[string]CollectedResource) map[string]*structpb.Struct {
+	// Build type info map from collected resources.
+	typeInfos := make(map[string]resourceTypeInfo, len(resources))
+	for name, cr := range resources {
+		if cr.Body == nil {
+			continue
+		}
+		typeInfos[name] = resourceTypeInfo{
+			APIVersion: cr.Body.GetFields()["apiVersion"].GetStringValue(),
+			Kind:       cr.Body.GetFields()["kind"].GetStringValue(),
+		}
+	}
+
 	result := make(map[string]*structpb.Struct, len(deps))
 	for _, d := range deps {
 		name := usageName(d.Dependent, d.Dependency)
-		result[name] = buildUsageResource(d.Dependent, d.Dependency, apiVersion)
+		result[name] = buildUsageResource(d.Dependent, d.Dependency, apiVersion, typeInfos)
 	}
 	return result
 }

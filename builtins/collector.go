@@ -255,6 +255,11 @@ func (c *Collector) resourceFn(
 		return nil, err
 	}
 
+	// Inject resource-name label for Usage selector matching.
+	metadata := getOrCreateNestedStruct(s, "metadata")
+	labels := getOrCreateNestedStruct(metadata, "labels")
+	labels.Fields[ResourceNameLabel] = structpb.NewStringValue(name)
+
 	// Convert connection_details dict to map[string][]byte if provided.
 	var cd map[string][]byte
 	if connDetails != nil {

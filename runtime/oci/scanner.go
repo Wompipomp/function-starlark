@@ -79,16 +79,18 @@ func scanSource(source, filename, defaultRegistry string) ([]*OCILoadTarget, err
 	return targets, nil
 }
 
-// dedup removes duplicate targets by RefStr. The first target for each unique
-// RefStr is kept.
+// dedup removes duplicate targets by RefStr+File combination. Multiple files
+// from the same artifact are preserved so the resolver maps all of them.
 func dedup(targets []*OCILoadTarget) []*OCILoadTarget {
-	seen := make(map[string]bool, len(targets))
+	type key struct{ ref, file string }
+	seen := make(map[key]bool, len(targets))
 	result := make([]*OCILoadTarget, 0, len(targets))
 	for _, t := range targets {
-		if seen[t.RefStr] {
+		k := key{t.RefStr, t.File}
+		if seen[k] {
 			continue
 		}
-		seen[t.RefStr] = true
+		seen[k] = true
 		result = append(result, t)
 	}
 	return result

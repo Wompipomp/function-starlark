@@ -185,8 +185,16 @@ func (r *Resolver) resolveRef(ctx context.Context, refStr string, target *OCILoa
 		return nil, fmt.Errorf("parsing OCI reference %q: %w", refStr, err)
 	}
 
-	// Fetch the image.
+	// Fetch the image. If HTTPS fails with an HTTP-response error, retry
+	// with name.Insecure to fall back to plain HTTP (common for local registries).
 	img, err := r.fetcher.Fetch(ref, r.keychain)
+	if err != nil && strings.Contains(err.Error(), "http: server gave HTTP response to HTTPS client") {
+		r.log.Debug("HTTPS failed, retrying with plain HTTP", "ref", refStr)
+		insecureRef, parseErr := name.ParseReference(refStr, name.StrictValidation, name.Insecure)
+		if parseErr == nil {
+			img, err = r.fetcher.Fetch(insecureRef, r.keychain)
+		}
+	}
 	if err != nil {
 		// If we have stale content, serve it with a warning.
 		if files != nil {

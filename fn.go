@@ -257,7 +257,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 			// Generate Usage resources and insert into response.
 			apiVersion := builtins.DetectUsageAPIVersion(in.Spec.UsageAPIVersion)
-			usageResources := builtins.BuildUsageResources(deps, apiVersion)
+			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources())
 
 			// Ensure Desired and Resources maps exist.
 			if rsp.Desired == nil {

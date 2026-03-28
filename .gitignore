@@ -16,3 +16,6 @@ function-starlark.xpkg
 
 # KCL conversions (local only, may contain internal references)
 .conversions/
+
+# E2E rendered files (generated at test time)
+test/e2e/*-rendered.yaml

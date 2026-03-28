@@ -2174,6 +2174,9 @@ func TestRunFunction(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := &Function{log: logging.NewNopLogger(), runtime: rt}
 			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
+			// Strip the auto-injected resource-name label from actual output
+			// to avoid updating every golden-file test case.
+			stripResourceNameLabel(rsp)
 			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
 				t.Errorf("%s\nRunFunction(...): -want, +got:\n%s", tc.reason, diff)
 			}
@@ -2181,6 +2184,45 @@ func TestRunFunction(t *testing.T) {
 				t.Errorf("%s\nRunFunction(...) err: -want, +got:\n%s", tc.reason, diff)
 			}
 		})
+	}
+}
+
+// stripResourceNameLabel removes the auto-injected resource-name label from all
+// desired composed resources in a RunFunctionResponse. This avoids updating every
+// golden-file test case after the label was added.
+func stripResourceNameLabel(rsp *fnv1.RunFunctionResponse) {
+	if rsp == nil || rsp.GetDesired() == nil {
+		return
+	}
+	for _, dr := range rsp.GetDesired().GetResources() {
+		res := dr.GetResource()
+		if res == nil {
+			continue
+		}
+		md := res.GetFields()["metadata"]
+		if md == nil {
+			continue
+		}
+		mdStruct := md.GetStructValue()
+		if mdStruct == nil {
+			continue
+		}
+		lblVal := mdStruct.GetFields()["labels"]
+		if lblVal == nil {
+			continue
+		}
+		lblStruct := lblVal.GetStructValue()
+		if lblStruct == nil {
+			continue
+		}
+		delete(lblStruct.Fields, "function-starlark.crossplane.io/resource-name")
+		// Clean up empty labels/metadata to match pre-label expectations.
+		if len(lblStruct.Fields) == 0 {
+			delete(mdStruct.Fields, "labels")
+		}
+		if len(mdStruct.Fields) == 0 {
+			delete(res.Fields, "metadata")
+		}
 	}
 }
 
@@ -2441,8 +2483,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 
 	// Verify Usage resource structure.
 	body := usage.GetResource()
-	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "apiextensions.crossplane.io/v1alpha1" {
-		t.Errorf("Usage apiVersion = %q, want apiextensions.crossplane.io/v1alpha1", got)
+	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "apiextensions.crossplane.io/v1beta1" {
+		t.Errorf("Usage apiVersion = %q, want apiextensions.crossplane.io/v1beta1", got)
 	}
 	if got := body.GetFields()["kind"].GetStringValue(); got != "Usage" {
 		t.Errorf("Usage kind = %q, want Usage", got)
@@ -2453,16 +2495,24 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Error("Usage spec.replayDeletion should be true")
 	}
 
-	// "of" should reference the dependency (db).
-	ofRef := spec.GetFields()["of"].GetStructValue().GetFields()["resourceRef"].GetStructValue()
-	if got := ofRef.GetFields()["name"].GetStringValue(); got != "db" {
-		t.Errorf("Usage of.resourceRef.name = %q, want 'db'", got)
+	// "of" should use resourceSelector with matchControllerRef and matchLabels.
+	ofSel := spec.GetFields()["of"].GetStructValue().GetFields()["resourceSelector"].GetStructValue()
+	if got := ofSel.GetFields()["matchControllerRef"].GetBoolValue(); !got {
+		t.Error("Usage of.resourceSelector.matchControllerRef should be true")
+	}
+	ofLabels := ofSel.GetFields()["matchLabels"].GetStructValue()
+	if got := ofLabels.GetFields()["function-starlark.crossplane.io/resource-name"].GetStringValue(); got != "db" {
+		t.Errorf("Usage of matchLabels resource-name = %q, want 'db'", got)
 	}
 
-	// "by" should reference the dependent (app).
-	byRef := spec.GetFields()["by"].GetStructValue().GetFields()["resourceRef"].GetStructValue()
-	if got := byRef.GetFields()["name"].GetStringValue(); got != "app" {
-		t.Errorf("Usage by.resourceRef.name = %q, want 'app'", got)
+	// "by" should use resourceSelector with matchControllerRef and matchLabels.
+	bySel := spec.GetFields()["by"].GetStructValue().GetFields()["resourceSelector"].GetStructValue()
+	if got := bySel.GetFields()["matchControllerRef"].GetBoolValue(); !got {
+		t.Error("Usage by.resourceSelector.matchControllerRef should be true")
+	}
+	byLabels := bySel.GetFields()["matchLabels"].GetStructValue()
+	if got := byLabels.GetFields()["function-starlark.crossplane.io/resource-name"].GetStringValue(); got != "app" {
+		t.Errorf("Usage by matchLabels resource-name = %q, want 'app'", got)
 	}
 
 	// Usage should be READY_TRUE.
@@ -2709,7 +2759,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 }
 
 // TestRunFunctionDependsOnUsageAPIVersionV2 verifies that usageAPIVersion="v2"
-// produces Usage resources with protection.crossplane.io/v1beta1 apiVersion.
+// produces Usage resources with protection.crossplane.io/v1beta1 apiVersion (Crossplane 2.x).
 func TestRunFunctionDependsOnUsageAPIVersionV2(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}

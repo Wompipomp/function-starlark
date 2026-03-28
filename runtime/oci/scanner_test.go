@@ -33,11 +33,11 @@ load("oci://ghcr.io/org/lib:v1/h.star", "fn2")`,
 			wantRefs:  []string{"ghcr.io/org/lib:v1"},
 		},
 		{
-			name: "dedup same artifact different files",
+			name: "same artifact different files preserved",
 			source: `load("oci://ghcr.io/org/lib:v1/a.star", "fn1")
 load("oci://ghcr.io/org/lib:v1/b.star", "fn2")`,
-			wantCount: 1,
-			wantRefs:  []string{"ghcr.io/org/lib:v1"},
+			wantCount: 2,
+			wantRefs:  []string{"ghcr.io/org/lib:v1", "ghcr.io/org/lib:v1"},
 		},
 		{
 			name:   "inline modules scanned too",
