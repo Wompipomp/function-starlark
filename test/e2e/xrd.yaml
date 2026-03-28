@@ -1,0 +1,43 @@
+# XRD for all e2e tests. Uses a loose schema so compositions can set
+# arbitrary spec/status fields without CRD validation blocking them.
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xtests.e2e.fn-starlark.io
+spec:
+  defaultCompositeDeletePolicy: Foreground
+  group: e2e.fn-starlark.io
+  names:
+    kind: XTest
+    plural: xtests
+  versions:
+    - name: v1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                region:
+                  type: string
+                  default: us-east-1
+                environment:
+                  type: string
+                  default: prod
+                name:
+                  type: string
+                  default: test
+              x-kubernetes-preserve-unknown-fields: true
+            status:
+              type: object
+              properties:
+                test:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+              x-kubernetes-preserve-unknown-fields: true
+  connectionSecretKeys:
+    - region
+    - endpoint

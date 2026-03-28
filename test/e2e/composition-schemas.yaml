@@ -1,0 +1,119 @@
+# Composition that tests OCI schema package loading with namespace aliases.
+# Loads mock K8s and Azure schemas from the local registry and validates them.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: schemas-test
+  labels:
+    e2e-test: schemas
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-schema-loading
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          ociDefaultRegistry: "localhost:5050"
+          source: |
+            # ============================================================
+            # E2E SCHEMA PACKAGE LOADING TEST
+            # Loads K8s and Azure schema packages via namespace aliases
+            # and validates typed construction with schema validation.
+            # ============================================================
+
+            # --- Test: load K8s schemas with namespace alias ---
+            load("schemas-k8s:v1.35/apps/v1.star", k8s="*")
+
+            # --- Test: load Azure schemas with namespace aliases ---
+            load("schemas-azure:v2.5.0/storage/v1.star", storage="*")
+            load("schemas-azure:v2.5.0/cosmosdb/v1.star", cosmosdb="*")
+
+            # --- Test: K8s Deployment schema ---
+            port = k8s.ContainerPort(container_port=8080)
+            container = k8s.Container(
+                name="app",
+                image="nginx:1.25",
+                ports=[port],
+            )
+            pod_spec = k8s.PodSpec(containers=[container])
+            deployment = k8s.Deployment(
+                metadata={"name": "test-app", "labels": {"app": "test"}},
+                spec=k8s.DeploymentSpec(
+                    replicas=3,
+                    selector={"matchLabels": {"app": "test"}},
+                    template={"metadata": {"labels": {"app": "test"}}, "spec": pod_spec},
+                ),
+            )
+
+            # --- Test: K8s StatefulSet schema ---
+            statefulset = k8s.StatefulSet(
+                metadata={"name": "test-db"},
+                spec=k8s.StatefulSetSpec(
+                    replicas=1,
+                    service_name="test-db",
+                    selector={"matchLabels": {"app": "db"}},
+                    template={"metadata": {"labels": {"app": "db"}}, "spec": pod_spec},
+                ),
+            )
+
+            # --- Test: Azure Storage Account schema (no name conflict with CosmosDB) ---
+            sa = storage.Account(
+                location="eastus",
+                account_replication_type="GRS",
+                network_rules=storage.NetworkRules(
+                    default_action="Deny",
+                    bypass=["AzureServices"],
+                ),
+                tags={"env": "e2e"},
+            )
+
+            # --- Test: Azure CosmosDB Account schema (same name "Account", no conflict) ---
+            cosmos = cosmosdb.Account(
+                location="westeurope",
+                kind="GlobalDocumentDB",
+                consistency_policy=cosmosdb.ConsistencyPolicy(
+                    consistency_level="Session",
+                ),
+                geo_locations=[
+                    cosmosdb.GeoLocation(location="westeurope", failover_priority=0),
+                ],
+                tags={"env": "e2e"},
+            )
+
+            # --- Verify schema values ---
+            if deployment["spec"]["replicas"] != 3: fatal("deployment replicas wrong")
+            if sa["location"] != "eastus": fatal("storage location wrong")
+            if sa["account_replication_type"] != "GRS": fatal("storage replication wrong")
+            if cosmos["location"] != "westeurope": fatal("cosmosdb location wrong")
+            if cosmos["kind"] != "GlobalDocumentDB": fatal("cosmosdb kind wrong")
+
+            # --- Create a NopResource to prove the composition ran ---
+            Resource("schema-test", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            set_xr_status("test.schemasLoaded", True)
+            set_xr_status("test.k8sDeploymentReplicas", deployment["spec"]["replicas"])
+            set_xr_status("test.storageLocation", sa["location"])
+            set_xr_status("test.cosmosLocation", cosmos["location"])
+
+            emit_event(severity="Normal",
+                message="E2E schemas test: loaded k8s, storage, cosmosdb schemas via namespace aliases")
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

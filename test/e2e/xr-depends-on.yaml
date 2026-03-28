@@ -1,0 +1,10 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-depends-on
+  labels:
+    e2e-test: depends-on
+spec:
+  compositionRef:
+    name: depends-on-test
+  region: us-east-1

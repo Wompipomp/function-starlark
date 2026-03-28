@@ -1,0 +1,108 @@
+# Composition that tests depends_on for creation sequencing and deletion ordering.
+#
+# Dependency chain: database -> schema -> app
+#   - "schema" depends_on "database"
+#   - "app" depends_on "schema"
+#
+# Creation: database is created first, schema deferred until database is Ready,
+#           app deferred until schema is Ready.
+# Deletion: Usage resources ensure reverse deletion order (app -> schema -> database).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: depends-on-test
+  labels:
+    e2e-test: depends-on
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-depends-on
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          sequencingTTL: "5s"
+          source: |
+            # ============================================================
+            # E2E DEPENDS_ON TEST
+            # Three-resource chain: database -> schema -> app
+            # Tests creation sequencing + Usage resource generation.
+            # ============================================================
+
+            region = get(oxr, "spec.region", "us-east-1")
+
+            # --- Layer 1: database (no dependencies) ---
+            db_ref = Resource("database", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "5s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            # --- Layer 2: schema (depends on database) ---
+            schema_ref = Resource("schema", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "5s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, depends_on=[db_ref])
+
+            # --- Layer 3: app (depends on schema) ---
+            Resource("app", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "5s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, depends_on=[schema_ref])
+
+            # --- Layer 4: standalone (no deps, created immediately) ---
+            Resource("standalone", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            # Report status
+            db_ready = get_observed("database", "status.conditions", [])
+            schema_ready = get_observed("schema", "status.conditions", [])
+            app_ready = get_observed("app", "status.conditions", [])
+
+            set_xr_status("test.databaseObserved", len(str(db_ready)) > 2)
+            set_xr_status("test.schemaObserved", len(str(schema_ready)) > 2)
+            set_xr_status("test.appObserved", len(str(app_ready)) > 2)
+
+            emit_event(severity="Normal",
+                message="E2E depends_on test: 3-resource chain with creation sequencing")
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

@@ -1,0 +1,177 @@
+# Composition that exercises all 22 builtins in a single reconciliation.
+# Uses provider-nop NopResource for composed resources (no cloud credentials needed).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: builtins-test
+  labels:
+    e2e-test: builtins
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-all-builtins
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          modules:
+            helper.star: |
+              # Inline module to test load() with inline modules
+              def make_tags(env, component):
+                  return {"environment": env, "component": component, "managed-by": "function-starlark"}
+          source: |
+            # ============================================================
+            # E2E BUILTINS REGRESSION TEST
+            # Tests all 22 predeclared names in a single composition.
+            # ============================================================
+
+            # --- Test: inline module loading ---
+            load("helper.star", "make_tags")
+
+            # --- Test: globals (oxr, dxr, observed, context, environment, extra_resources) ---
+            # oxr: read composite resource
+            if type(oxr) != "dict": fatal("oxr must be a dict")
+
+            # dxr: write to desired composite resource
+            if type(dxr) != "dict": fatal("dxr must be a dict")
+
+            # observed: check composed resources dict
+            if type(observed) != "dict": fatal("observed must be a dict")
+
+            # context: pipeline context (read-write dict)
+            if type(context) != "dict": fatal("context must be a dict")
+
+            # environment: EnvironmentConfig data
+            if type(environment) != "dict": fatal("environment must be a dict")
+
+            # extra_resources: extra resources dict
+            if type(extra_resources) != "dict": fatal("extra_resources must be a dict")
+
+            # --- Test: get() - safe nested access ---
+            region = get(oxr, "spec.region", "fallback")
+            if region != "us-east-1": fatal("get() should read spec.region")
+
+            env = get(oxr, "spec.environment", "fallback")
+            if env != "prod": fatal("get() should read spec.environment")
+
+            # Test default when path missing
+            missing = get(oxr, "spec.does.not.exist", "default-val")
+            if missing != "default-val": fatal("get() should return default for missing path")
+
+            xr_name = get(oxr, "metadata.name", "unknown")
+
+            # --- Test: get_label() ---
+            managed_by = get_label(oxr, "e2e-test", "none")
+            # XR may or may not have this label; test that function doesn't crash
+
+            # --- Test: get_annotation() ---
+            ext_name = get_annotation(oxr, "crossplane.io/external-name", "")
+
+            # --- Test: get_observed() ---
+            # On first reconcile, no observed resources exist yet
+            obs_val = get_observed("nonexistent", "status.atProvider.id", "pending")
+            if obs_val != "pending": fatal("get_observed() should return default when resource not observed")
+
+            # --- Test: schema() + field() ---
+            ResourceConfig = schema("ResourceConfig",
+                doc="Config for a test resource",
+                name=field(type="string", required=True),
+                region=field(type="string", required=True),
+                replicas=field(type="int", default=1),
+                enabled=field(type="bool", default=True),
+            )
+
+            cfg = ResourceConfig(name="test-resource", region=region, replicas=3)
+            if cfg["name"] != "test-resource": fatal("schema instance should hold values")
+            if cfg["replicas"] != 3: fatal("schema instance should hold custom values")
+            if cfg["enabled"] != True: fatal("schema instance should apply defaults")
+
+            # --- Test: struct() ---
+            s = struct(name="test-struct", x=1, y="hello")
+            if s.x != 1: fatal("struct field access x")
+            if s.y != "hello": fatal("struct field access y")
+
+            # --- Test: Resource() - create composed resources ---
+            tags = make_tags(env, "primary")
+
+            ref_a = Resource("resource-a", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, labels=tags)
+
+            ref_b = Resource("resource-b", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, labels=tags, depends_on=[ref_a])
+
+            # Resource with connection_details
+            Resource("resource-with-conn", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, connection_details={"endpoint": "test-endpoint-value"})
+
+            # --- Test: skip_resource() ---
+            # Intentionally omit a resource and emit a Warning event.
+            # The resource will NOT appear in desired state.
+            skip_resource("to-be-skipped", reason="testing skip_resource builtin")
+
+            # --- Test: set_condition() ---
+            set_condition(
+                type="BuiltinsTest",
+                status="True",
+                reason="Passed",
+                message="E2E builtins regression passed",
+            )
+
+            # --- Test: emit_event() ---
+            emit_event(
+                severity="Normal",
+                message="E2E builtins test: all 22 builtins validated in %s" % region,
+            )
+
+            # --- Test: set_xr_status() ---
+            set_xr_status("test.builtinsCount", 22)
+            set_xr_status("test.region", region)
+            set_xr_status("test.environment", env)
+            set_xr_status("test.schemaWorked", True)
+
+            # --- Test: set_connection_details() ---
+            set_connection_details({
+                "region": region,
+                "endpoint": "https://test.example.com",
+            })
+
+            # --- Test: context read/write ---
+            context["e2e-test"] = "builtins-passed"
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

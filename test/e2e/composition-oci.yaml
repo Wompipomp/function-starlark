@@ -1,0 +1,96 @@
+# Composition that tests OCI module loading from a local registry.
+# Loads stdlib modules (naming, labels, networking) and uses them.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: oci-loading-test
+  labels:
+    e2e-test: oci-loading
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-oci-loading
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          # Point OCI loads at the local registry
+          ociDefaultRegistry: "localhost:5050"
+          source: |
+            # ============================================================
+            # E2E OCI MODULE LOADING TEST
+            # Loads stdlib modules from local registry and validates them.
+            # ============================================================
+
+            # --- Test: load from OCI using short-form + namespace alias ---
+            load("starlark-stdlib:v1/naming.star", naming="*")
+            load("starlark-stdlib:v1/labels.star", labels_mod="*")
+            load("starlark-stdlib:v1/networking.star", net="*")
+
+            # --- Test: use loaded functions via namespace ---
+            region = get(oxr, "spec.region", "us-east-1")
+            xr_name = get(oxr, "metadata.name", "unknown")
+
+            # naming module
+            name = naming.resource_name("test-oci")
+            suffix = naming.hash_suffix("My_Test Resource!")
+
+            # labels module
+            labels = labels_mod.merge_labels(
+                labels_mod.standard_labels("oci-test", component="e2e"),
+                {"e2e-test": "oci-loading"},
+            )
+
+            # networking module
+            subnet = net.subnet_cidr("10.0.0.0/16", 8, 1)
+
+            # --- Create a resource using OCI-loaded helpers ---
+            Resource("oci-resource", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "metadata": {
+                    "labels": labels,
+                },
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            # --- Test: schema with OCI-loaded values ---
+            NetConfig = schema("NetConfig",
+                subnet=field(type="string", required=True),
+                region=field(type="string", required=True),
+            )
+            net_config = NetConfig(subnet=subnet, region=region)
+
+            Resource("oci-net-resource", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            set_xr_status("test.ociLoaded", True)
+            set_xr_status("test.subnet", subnet)
+
+            emit_event(severity="Normal",
+                message="E2E OCI test: loaded naming, labels, networking from local registry")
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

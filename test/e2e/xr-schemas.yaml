@@ -1,0 +1,11 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-schemas
+  labels:
+    e2e-test: schemas
+spec:
+  compositionRef:
+    name: schemas-test
+  region: us-east-1
+  environment: prod

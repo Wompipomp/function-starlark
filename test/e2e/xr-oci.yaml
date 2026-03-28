@@ -1,0 +1,10 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-oci
+  labels:
+    e2e-test: oci-loading
+spec:
+  compositionRef:
+    name: oci-loading-test
+  region: eu-west-1
