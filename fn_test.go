@@ -2174,8 +2174,9 @@ func TestRunFunction(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := &Function{log: logging.NewNopLogger(), runtime: rt}
 			rsp, err := f.RunFunction(tc.args.ctx, tc.args.req)
-			// Strip the auto-injected resource-name label from actual output
-			// to avoid updating every golden-file test case.
+			// Strip the auto-injected resource-name label before golden comparison.
+			// A dedicated test (TestResourceNameLabelInjected) positively asserts
+			// the label is present on Resource()-created resources.
 			stripResourceNameLabel(rsp)
 			if diff := cmp.Diff(tc.want.rsp, rsp, protocmp.Transform()); diff != "" {
 				t.Errorf("%s\nRunFunction(...): -want, +got:\n%s", tc.reason, diff)
@@ -2188,8 +2189,8 @@ func TestRunFunction(t *testing.T) {
 }
 
 // stripResourceNameLabel removes the auto-injected resource-name label from all
-// desired composed resources in a RunFunctionResponse. This avoids updating every
-// golden-file test case after the label was added.
+// desired composed resources so golden-file comparisons don't need updating.
+// TestResourceNameLabelInjected positively asserts the label is present.
 func stripResourceNameLabel(rsp *fnv1.RunFunctionResponse) {
 	if rsp == nil || rsp.GetDesired() == nil {
 		return
@@ -2216,12 +2217,95 @@ func stripResourceNameLabel(rsp *fnv1.RunFunctionResponse) {
 			continue
 		}
 		delete(lblStruct.Fields, "function-starlark.crossplane.io/resource-name")
-		// Clean up empty labels/metadata to match pre-label expectations.
 		if len(lblStruct.Fields) == 0 {
 			delete(mdStruct.Fields, "labels")
 		}
 		if len(mdStruct.Fields) == 0 {
 			delete(res.Fields, "metadata")
+		}
+	}
+}
+
+// TestResourceNameLabelInjected verifies that Resource() auto-injects the
+// function-starlark.crossplane.io/resource-name label on every composed resource.
+func TestResourceNameLabelInjected(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"})
+Resource("cache", {"apiVersion": "v1", "kind": "Cache"}, labels={"env": "prod"})`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	const labelKey = "function-starlark.crossplane.io/resource-name"
+	for name, dr := range rsp.GetDesired().GetResources() {
+		res := dr.GetResource()
+		labels := res.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue().GetFields()
+		got := labels[labelKey].GetStringValue()
+		if got != name {
+			t.Errorf("resource %q: label %s = %q, want %q", name, labelKey, got, name)
+		}
+	}
+
+	// Verify the label coexists with user-supplied labels.
+	cacheLabels := rsp.GetDesired().GetResources()["cache"].GetResource().GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue().GetFields()
+	if got := cacheLabels["env"].GetStringValue(); got != "prod" {
+		t.Errorf("cache env label = %q, want %q", got, "prod")
+	}
+}
+
+// TestResourceNameLabelNotOnPassthrough verifies that pass-through resources
+// from prior pipeline steps do NOT get the resource-name label injected.
+func TestResourceNameLabelNotOnPassthrough(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": "x = 1"}
+		}`),
+		Desired: &fnv1.State{
+			Composite: &fnv1.Resource{
+				Resource: resource.MustStructJSON(`{"apiVersion":"example.crossplane.io/v1","kind":"XR"}`),
+			},
+			Resources: map[string]*fnv1.Resource{
+				"prior-step": {
+					Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Existing"}`),
+				},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	res := rsp.GetDesired().GetResources()["prior-step"].GetResource()
+	md := res.GetFields()["metadata"]
+	if md != nil {
+		labels := md.GetStructValue().GetFields()["labels"]
+		if labels != nil {
+			if labels.GetStructValue().GetFields()["function-starlark.crossplane.io/resource-name"] != nil {
+				t.Error("pass-through resource should not have resource-name label injected")
+			}
 		}
 	}
 }
@@ -2483,8 +2567,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 
 	// Verify Usage resource structure.
 	body := usage.GetResource()
-	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "apiextensions.crossplane.io/v1beta1" {
-		t.Errorf("Usage apiVersion = %q, want apiextensions.crossplane.io/v1beta1", got)
+	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "protection.crossplane.io/v1beta1" {
+		t.Errorf("Usage apiVersion = %q, want protection.crossplane.io/v1beta1", got)
 	}
 	if got := body.GetFields()["kind"].GetStringValue(); got != "Usage" {
 		t.Errorf("Usage kind = %q, want Usage", got)
@@ -2758,9 +2842,9 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	}
 }
 
-// TestRunFunctionDependsOnUsageAPIVersionV2 verifies that usageAPIVersion="v2"
-// produces Usage resources with protection.crossplane.io/v1beta1 apiVersion (Crossplane 2.x).
-func TestRunFunctionDependsOnUsageAPIVersionV2(t *testing.T) {
+// TestRunFunctionDependsOnUsageAPIVersionV1 verifies that usageAPIVersion="v1"
+// produces Usage resources with apiextensions.crossplane.io/v1beta1 apiVersion (Crossplane 1.x).
+func TestRunFunctionDependsOnUsageAPIVersionV1(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
 
@@ -2771,7 +2855,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		Input: resource.MustStructJSON(fmt.Sprintf(`{
 			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
 			"kind": "StarlarkInput",
-			"spec": {"source": %q, "usageAPIVersion": "v2"}
+			"spec": {"source": %q, "usageAPIVersion": "v1"}
 		}`, script)),
 	}
 
@@ -2782,7 +2866,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 
 	assertNormalResult(t, rsp)
 
-	// Check Usage resource has v2 apiVersion.
+	// Check Usage resource has v1 apiVersion.
 	usageName := "usage-c2727553"
 	usage, ok := rsp.GetDesired().GetResources()[usageName]
 	if !ok {
@@ -2790,7 +2874,7 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	}
 
 	got := usage.GetResource().GetFields()["apiVersion"].GetStringValue()
-	want := "protection.crossplane.io/v1beta1"
+	want := "apiextensions.crossplane.io/v1beta1"
 	if got != want {
 		t.Errorf("Usage apiVersion = %q, want %q", got, want)
 	}
