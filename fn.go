@@ -401,7 +401,7 @@ func buildKeychain(dockerConfigSecret string) authn.Keychain {
 		return authn.DefaultKeychain
 	}
 	configDir := filepath.Join("/var/run/secrets/docker", dockerConfigSecret)
-	if _, err := os.Stat(configDir); err != nil {
+	if _, err := os.Stat(configDir); err != nil { //nolint:gosec // path validated by filepath.IsLocal above
 		return authn.DefaultKeychain
 	}
 	return authn.NewMultiKeychain(
