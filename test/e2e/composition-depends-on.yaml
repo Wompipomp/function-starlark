@@ -26,6 +26,7 @@ spec:
         apiVersion: starlark.fn.crossplane.io/v1alpha1
         kind: StarlarkInput
         spec:
+          usageAPIVersion: "v1"  # e2e uses Crossplane 1.x
           sequencingTTL: "5s"
           source: |
             # ============================================================
