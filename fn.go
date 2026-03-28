@@ -165,16 +165,34 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			ociTargets = nil
 		}
 
+		// Resolve effective docker config secret (spec > env var).
+		dockerConfigSecret := in.Spec.DockerConfigSecret
+		if dockerConfigSecret == "" {
+			dockerConfigSecret = os.Getenv("STARLARK_DOCKER_CONFIG_SECRET")
+		}
+
+		// Resolve effective insecure registries (spec > env var, comma-separated).
+		insecureRegistries := in.Spec.OCIInsecureRegistries
+		if len(insecureRegistries) == 0 {
+			if envInsecure := os.Getenv("STARLARK_OCI_INSECURE_REGISTRIES"); envInsecure != "" {
+				for _, r := range strings.Split(envInsecure, ",") {
+					if trimmed := strings.TrimSpace(r); trimmed != "" {
+						insecureRegistries = append(insecureRegistries, trimmed)
+					}
+				}
+			}
+		}
+
 		if len(ociTargets) > 0 {
 			// Build keychain from Docker config secret if specified.
-			keychain := buildKeychain(in.Spec.DockerConfigSecret)
+			keychain := buildKeychain(dockerConfigSecret)
 
 			fetcher := f.ociFetcher
 			if fetcher == nil {
 				fetcher = oci.RemoteFetcher{}
 			}
 
-			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log, defaultRegistry)
+			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log, defaultRegistry, insecureRegistries)
 
 			ociTimer := prometheus.NewTimer(metrics.OCIResolveDurationSeconds.WithLabelValues(filename))
 			resolvedModules, resolveErr := resolver.Resolve(ctx, ociTargets)
@@ -255,8 +273,12 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				response.Warning(rsp, errors.New(w))
 			}
 
-			// Generate Usage resources and insert into response.
-			apiVersion := builtins.DetectUsageAPIVersion(in.Spec.UsageAPIVersion)
+			// Resolve effective usage API version (spec > env var > default).
+			usageAPIOverride := in.Spec.UsageAPIVersion
+			if usageAPIOverride == "" {
+				usageAPIOverride = os.Getenv("STARLARK_USAGE_API_VERSION")
+			}
+			apiVersion := builtins.ResolveUsageAPIVersion(usageAPIOverride)
 			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources())
 
 			// Ensure Desired and Resources maps exist.

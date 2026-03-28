@@ -24,6 +24,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-0
     index: "0"
   name: example-xr-bucket-0
   ownerReferences:
@@ -50,6 +51,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-1
     index: "1"
   name: example-xr-bucket-1
   ownerReferences:
@@ -76,6 +78,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-2
     index: "2"
   name: example-xr-bucket-2
   ownerReferences:
@@ -102,6 +105,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-3
     index: "3"
   name: example-xr-bucket-3
   ownerReferences:
@@ -128,6 +132,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-4
     index: "4"
   name: example-xr-bucket-4
   ownerReferences:
@@ -154,6 +159,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-5
     index: "5"
   name: example-xr-bucket-5
   ownerReferences:
@@ -180,6 +186,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-6
     index: "6"
   name: example-xr-bucket-6
   ownerReferences:
@@ -206,6 +213,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: bucket-7
     index: "7"
   name: example-xr-bucket-7
   ownerReferences:
@@ -232,6 +240,7 @@ metadata:
     app.kubernetes.io/managed-by: function-starlark
     crossplane.io/composite: example-xr
     environment: prod
+    function-starlark.crossplane.io/resource-name: monitoring-dashboard
   name: example-xr-dashboard
   ownerReferences:
   - apiVersion: example.crossplane.io/v1
@@ -246,7 +255,7 @@ spec:
     refreshInterval: 30s
     region: us-east-1
 ---
-apiVersion: apiextensions.crossplane.io/v1alpha1
+apiVersion: apiextensions.crossplane.io/v1beta1
 kind: Usage
 metadata:
   annotations:
@@ -263,11 +272,19 @@ metadata:
     uid: ""
 spec:
   by:
-    resourceRef:
-      name: notification-topic
+    apiVersion: sns.aws.upbound.io/v1beta1
+    kind: Topic
+    resourceSelector:
+      matchControllerRef: true
+      matchLabels:
+        function-starlark.crossplane.io/resource-name: notification-topic
   of:
-    resourceRef:
-      name: bucket-0
+    apiVersion: s3.aws.upbound.io/v1beta1
+    kind: Bucket
+    resourceSelector:
+      matchControllerRef: true
+      matchLabels:
+        function-starlark.crossplane.io/resource-name: bucket-0
   replayDeletion: true
 ---
 apiVersion: render.crossplane.io/v1beta1

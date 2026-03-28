@@ -21,6 +21,7 @@ spec:
         spec:
           # Point OCI loads at the local registry
           ociDefaultRegistry: "localhost:5050"
+          ociInsecureRegistries: ["localhost:5050"]
           source: |
             # ============================================================
             # E2E OCI MODULE LOADING TEST

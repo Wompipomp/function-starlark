@@ -29,9 +29,10 @@ type StarlarkInputSpec struct {
 	// +optional
 	ScriptConfigRef *ScriptConfigRef `json:"scriptConfigRef,omitempty"`
 
-	// UsageAPIVersion overrides the auto-detected Crossplane Usage API version.
-	// Valid values: "v1" (apiextensions.crossplane.io/v1alpha1) or "v2" (protection.crossplane.io/v1beta1).
-	// If empty, defaults to v1 for maximum backward compatibility.
+	// UsageAPIVersion selects the Crossplane Usage API version.
+	// "v1" = apiextensions.crossplane.io/v1beta1 (Crossplane 1.x).
+	// "v2" = protection.crossplane.io/v1beta1 (Crossplane 2.x, default).
+	// Set to "v1" if running Crossplane 1.x.
 	// +optional
 	UsageAPIVersion string `json:"usageAPIVersion,omitempty"`
 
@@ -46,11 +47,6 @@ type StarlarkInputSpec struct {
 	// +optional
 	ModulePaths []string `json:"modulePaths,omitempty"`
 
-	// OCICacheTTL configures the TTL for OCI tag-to-digest cache entries.
-	// Parsed as Go duration (e.g. "5m", "1h"). Default: 5m.
-	// +optional
-	OCICacheTTL string `json:"ociCacheTTL,omitempty"`
-
 	// DockerConfigSecret is the name of a Kubernetes Secret containing Docker
 	// registry credentials. The secret should be mounted via DeploymentRuntimeConfig.
 	// +optional
@@ -61,6 +57,13 @@ type StarlarkInputSpec struct {
 	// Format: "registry/namespace" (e.g. "ghcr.io/my-org").
 	// +optional
 	OCIDefaultRegistry string `json:"ociDefaultRegistry,omitempty"`
+
+	// OCIInsecureRegistries lists registries that should be accessed over plain
+	// HTTP instead of HTTPS. Use for local or development registries only.
+	// Credentials are never sent over insecure connections.
+	// Format: ["localhost:5050", "registry.internal:5000"]
+	// +optional
+	OCIInsecureRegistries []string `json:"ociInsecureRegistries,omitempty"`
 
 	// SequencingTTL configures the response TTL when resources are deferred
 	// by creation sequencing. Parsed as Go duration (e.g. "10s", "30s").

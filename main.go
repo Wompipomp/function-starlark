@@ -20,7 +20,8 @@ type CLI struct {
 	TLSCertsDir string `help:"Directory containing TLS certificates." env:"TLS_SERVER_CERTS_DIR"`
 	Insecure    bool   `help:"Run without mTLS credentials." env:"FUNCTION_INSECURE"`
 
-	MaxRecvMessageSize int `help:"Maximum message size in MB." default:"4" env:"MAX_RECV_MESSAGE_SIZE"`
+	MaxRecvMessageSize int           `help:"Maximum message size in MB." default:"4" env:"MAX_RECV_MESSAGE_SIZE"`
+	OCICacheTTL        time.Duration `help:"TTL for OCI tag-to-digest cache entries." default:"5m" env:"STARLARK_OCI_CACHE_TTL"`
 }
 
 func (c *CLI) Run() error {
@@ -29,10 +30,10 @@ func (c *CLI) Run() error {
 		return err
 	}
 
-	log.Info("Starting function-starlark", "debug", c.Debug, "address", c.Address, "insecure", c.Insecure)
+	log.Info("Starting function-starlark", "debug", c.Debug, "address", c.Address, "insecure", c.Insecure, "ociCacheTTL", c.OCICacheTTL)
 
 	rt := runtime.NewRuntime(log)
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(c.OCICacheTTL)
 
 	return function.Serve(&Function{log: log, runtime: rt, scriptDir: "/scripts", ociCache: cache},
 		function.Listen(c.Network, c.Address),

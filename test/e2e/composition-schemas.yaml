@@ -20,6 +20,7 @@ spec:
         kind: StarlarkInput
         spec:
           ociDefaultRegistry: "localhost:5050"
+          ociInsecureRegistries: ["localhost:5050"]
           source: |
             # ============================================================
             # E2E SCHEMA PACKAGE LOADING TEST
