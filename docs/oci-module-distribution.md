@@ -428,14 +428,15 @@ OCI modules are cached in-memory with a two-layer architecture:
 
 ### Configuring cache TTL
 
+The cache TTL is a pod-level setting configured via the `STARLARK_OCI_CACHE_TTL`
+environment variable (default: `5m`). Set it on the function pod via
+DeploymentRuntimeConfig:
+
 ```yaml
-apiVersion: starlark.fn.crossplane.io/v1alpha1
-kind: StarlarkInput
-spec:
-  ociCacheTTL: "10m"  # default: 5m
-  source: |
-    load("oci://ghcr.io/my-org/lib:v1/helpers.star", "create_bucket")
-    # ...
+# In your DeploymentRuntimeConfig
+env:
+  - name: STARLARK_OCI_CACHE_TTL
+    value: "10m"
 ```
 
 The cache lives in-memory on the function pod. It does not survive pod
@@ -614,12 +615,11 @@ spec:
   # Format: "registry/namespace" (e.g. "ghcr.io/my-org")
   ociDefaultRegistry: "ghcr.io/my-org"
 
-  # OCI cache TTL for tag-to-digest resolution (Go duration format)
-  # Default: "5m"
-  ociCacheTTL: "5m"
+  # Registries to access over plain HTTP (overrides env var)
+  ociInsecureRegistries: ["localhost:5050"]
 
   # Name of the Kubernetes Secret with Docker registry credentials
-  # Must be mounted via DeploymentRuntimeConfig
+  # Must be mounted via DeploymentRuntimeConfig (overrides env var)
   dockerConfigSecret: "my-registry-creds"
 
   # Inline modules (OCI-resolved modules are merged into this map)

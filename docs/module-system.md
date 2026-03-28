@@ -371,16 +371,9 @@ Prometheus metrics:
 ### OCI tag resolution caching
 
 OCI tag-to-digest mappings are cached with a configurable TTL (default 5
-minutes). This avoids re-resolving tags on every reconciliation:
-
-```yaml
-apiVersion: starlark.fn.crossplane.io/v1alpha1
-kind: StarlarkInput
-spec:
-  ociCacheTTL: "10m"   # default: 5m
-  source: |
-    load("oci://ghcr.io/my-org/lib:v1/helpers.star", "create_bucket")
-```
+minutes). This avoids re-resolving tags on every reconciliation. The cache TTL
+is a pod-level setting configured via the `STARLARK_OCI_CACHE_TTL` environment
+variable (e.g., `10m`).
 
 Digest-pinned references (e.g., `@sha256:abc123...`) bypass the tag cache
 entirely and are cached permanently, since a digest is immutable. Use tags for

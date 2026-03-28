@@ -85,8 +85,10 @@ spec:
 
 For each `depends_on` relationship, a Usage resource is automatically created
 with `replayDeletion: true`, ensuring deletion happens in reverse dependency
-order. The `spec.usageAPIVersion` field controls which Usage API version is
-used (`"v1"` or `"v2"`, default `"v1"`).
+order. The `spec.usageAPIVersion` field (or `STARLARK_USAGE_API_VERSION` env var)
+controls which Usage API version is used. Default is `"v2"`
+(`protection.crossplane.io/v1beta1`, Crossplane 2.x). Set to `"v1"` for
+Crossplane 1.x (`apiextensions.crossplane.io/v1beta1`).
 
 A single summary Warning event is emitted when Usage resources are generated,
 reminding that `compositeDeletePolicy: Foreground` is needed on the XRD for

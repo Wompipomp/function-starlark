@@ -177,10 +177,40 @@ All fields under `spec` in a `StarlarkInput` resource:
 | `scriptConfigRef.key` | string | `main.star` | Key within the ConfigMap |
 | `modules` | map[string]string | -- | Inline modules loadable via `load("name.star", "func")` |
 | `modulePaths` | []string | -- | Additional filesystem directories for module resolution |
-| `ociCacheTTL` | duration | `5m` | TTL for OCI tag-to-digest resolution cache |
 | `dockerConfigSecret` | string | -- | Kubernetes Secret name for private OCI registry credentials |
-| `usageAPIVersion` | string | `v1` | Crossplane Usage API version -- `v1` or `v2` |
+| `ociDefaultRegistry` | string | -- | Default OCI registry for short-form `load()` targets |
+| `ociInsecureRegistries` | []string | -- | Registries to access over plain HTTP (development only) |
+| `usageAPIVersion` | string | `v2` | Crossplane Usage API version -- `v1` (Crossplane 1.x) or `v2` (Crossplane 2.x) |
 | `sequencingTTL` | duration | `10s` | Response TTL when creation sequencing defers resources |
+
+### Crossplane 1.x compatibility
+
+The `depends_on` feature generates Usage resources using the Crossplane 2.x API
+(`protection.crossplane.io/v1beta1`) by default. If you are running **Crossplane 1.x**,
+set the Usage API version to `v1` — either per-composition or cluster-wide:
+
+```yaml
+# Per-composition (in StarlarkInput spec)
+usageAPIVersion: "v1"
+```
+
+```bash
+# Or cluster-wide (env var on function pod)
+STARLARK_USAGE_API_VERSION=v1
+```
+
+### Environment variables
+
+Settings that apply cluster-wide can be set as environment variables on the function pod.
+Per-composition `spec` fields take precedence over env vars.
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `STARLARK_OCI_DEFAULT_REGISTRY` | -- | Default OCI registry for short-form `load()` targets |
+| `STARLARK_OCI_INSECURE_REGISTRIES` | -- | Comma-separated list of HTTP-only registries |
+| `STARLARK_OCI_CACHE_TTL` | `5m` | TTL for OCI tag-to-digest resolution cache |
+| `STARLARK_DOCKER_CONFIG_SECRET` | -- | Kubernetes Secret name for private OCI registry credentials |
+| `STARLARK_USAGE_API_VERSION` | -- | Crossplane Usage API version override (`v1` or `v2`) |
 
 Example with all fields:
 
@@ -202,9 +232,10 @@ spec:
   modulePaths:
     - /scripts/shared-lib
 
-  ociCacheTTL: "5m"
   dockerConfigSecret: registry-creds
-  usageAPIVersion: "v1"
+  ociDefaultRegistry: "ghcr.io/my-org"
+  ociInsecureRegistries: ["localhost:5050"]
+  usageAPIVersion: "v2"
   sequencingTTL: "10s"
 ```
 
