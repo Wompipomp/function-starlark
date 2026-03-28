@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.8.0](https://github.com/Wompipomp/function-starlark/compare/v0.7.0...v0.8.0) (2026-03-28)
+
+
+### Features
+
+* add env var fallbacks and promote ociCacheTTL to CLI ([8a5fd4c](https://github.com/Wompipomp/function-starlark/commit/8a5fd4c29987a2cf0fe2558c7c329caa679197c6))
+* default Usage API to v2 (Crossplane 2.x) and rename to ResolveUsageAPIVersion ([e96d6c5](https://github.com/Wompipomp/function-starlark/commit/e96d6c5d04c39417fc0c864fe5940194035990e6))
+* implement end-to-end testing suite, add OCI insecure registry fallback, and update resource metadata handling in builtins ([eed5dcd](https://github.com/Wompipomp/function-starlark/commit/eed5dcdf65fc6618e600f445e9a1beeceed36330))
+* inject resource-name labels, update Usage to use resourceSelectors, and improve OCI resolution and deduplication logic ([ad2d0eb](https://github.com/Wompipomp/function-starlark/commit/ad2d0ebec71d66397e2be8e64389166c0a8de81a))
+* **quick-3:** preserve relative paths in OCI extraction and raise maxFileCount to 1000 ([60e2ec2](https://github.com/Wompipomp/function-starlark/commit/60e2ec2587ece3fa6ac60231e3741c77c87a553b))
+* **quick-4:** implement namespace alias support for load() star imports ([4817ada](https://github.com/Wompipomp/function-starlark/commit/4817adaa969362ed3df8bc715a6fc8cce624865b))
+
+
+### Bug Fixes
+
+* **quick-4:** update expected globals count for struct builtin ([2e4be5f](https://github.com/Wompipomp/function-starlark/commit/2e4be5f3ba4bbae44d8aaedcab068418dd16509b))
+* rewrite if-else chain to switch in ResolveStarImports per gocritic lint ([1dd65a9](https://github.com/Wompipomp/function-starlark/commit/1dd65a98b41775ab25ad102890cf770407b867d4))
+* set usageAPIVersion to v1 in e2e compositions for Crossplane 1.x ([0901eae](https://github.com/Wompipomp/function-starlark/commit/0901eaebe5f3c7045a5f4c0a8449716d7a8b71d1))
+* suppress gosec G703 false positive on validated path in buildKeychain ([7ad53ac](https://github.com/Wompipomp/function-starlark/commit/7ad53ac2779c42e30366d2b5a043895d2b38a985))
+* update expected render output for v2 Usage API default ([233ac9d](https://github.com/Wompipomp/function-starlark/commit/233ac9dda0bf26ff5091f236348e734fb942d6b7))
+* use canonical registry matching for insecure registries and add test coverage ([f7673c9](https://github.com/Wompipomp/function-starlark/commit/f7673c93b8e0b906e6feb81725b016f6c57bd043))
+
 ## [0.7.0](https://github.com/Wompipomp/function-starlark/compare/v0.6.0...v0.7.0) (2026-03-20)
 
 
