@@ -255,7 +255,7 @@ spec:
     refreshInterval: 30s
     region: us-east-1
 ---
-apiVersion: apiextensions.crossplane.io/v1beta1
+apiVersion: protection.crossplane.io/v1beta1
 kind: Usage
 metadata:
   annotations:
