@@ -54,17 +54,23 @@ type Resolver struct {
 	fetcher         Fetcher
 	log             logging.Logger
 	defaultRegistry string
+	insecureRegs    map[string]bool
 }
 
 // NewResolver creates a Resolver with the given cache, keychain, fetcher, logger,
-// and default registry for short-form OCI load targets.
-func NewResolver(cache *Cache, keychain authn.Keychain, fetcher Fetcher, log logging.Logger, defaultRegistry string) *Resolver {
+// default registry, and list of insecure (HTTP-only) registries.
+func NewResolver(cache *Cache, keychain authn.Keychain, fetcher Fetcher, log logging.Logger, defaultRegistry string, insecureRegistries []string) *Resolver {
+	insecure := make(map[string]bool, len(insecureRegistries))
+	for _, r := range insecureRegistries {
+		insecure[r] = true
+	}
 	return &Resolver{
 		cache:           cache,
 		keychain:        keychain,
 		fetcher:         fetcher,
 		log:             log,
 		defaultRegistry: defaultRegistry,
+		insecureRegs:    insecure,
 	}
 }
 
@@ -179,21 +185,31 @@ func (r *Resolver) resolveRef(ctx context.Context, refStr string, target *OCILoa
 		}
 	}
 
-	// Parse the OCI reference for go-containerregistry.
+	// Parse the OCI reference first to get the canonical registry name.
 	ref, err := name.ParseReference(refStr, name.StrictValidation)
 	if err != nil {
 		return nil, fmt.Errorf("parsing OCI reference %q: %w", refStr, err)
 	}
 
-	// Fetch the image. If HTTPS fails with an HTTP-response error, retry
-	// with name.Insecure to fall back to plain HTTP (common for local registries).
-	img, err := r.fetcher.Fetch(ref, r.keychain)
-	if err != nil && strings.Contains(err.Error(), "http: server gave HTTP response to HTTPS client") {
-		r.log.Debug("HTTPS failed, retrying with plain HTTP", "ref", refStr)
-		insecureRef, parseErr := name.ParseReference(refStr, name.StrictValidation, name.Insecure)
-		if parseErr == nil {
-			img, err = r.fetcher.Fetch(insecureRef, r.keychain)
+	// Check if this registry is in the insecure list. Use the canonical
+	// registry name from the parsed reference to handle normalization
+	// (e.g. docker.io vs index.docker.io).
+	insecure := r.insecureRegs[ref.Context().RegistryStr()]
+	if insecure {
+		// Re-parse with name.Insecure to allow plain HTTP connections.
+		ref, err = name.ParseReference(refStr, name.StrictValidation, name.Insecure)
+		if err != nil {
+			return nil, fmt.Errorf("parsing insecure OCI reference %q: %w", refStr, err)
 		}
+	}
+
+	// Fetch the image. For insecure registries, use an empty keychain
+	// (resolves to anonymous) to avoid sending credentials over plaintext HTTP.
+	var img v1.Image
+	if insecure {
+		img, err = r.fetcher.Fetch(ref, authn.NewMultiKeychain())
+	} else {
+		img, err = r.fetcher.Fetch(ref, r.keychain)
 	}
 	if err != nil {
 		// If we have stale content, serve it with a warning.

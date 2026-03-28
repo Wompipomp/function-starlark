@@ -23,13 +23,15 @@ import (
 
 // mockFetcher implements Fetcher for testing.
 type mockFetcher struct {
-	images map[string]v1.Image
-	calls  int
-	err    error
+	images    map[string]v1.Image
+	calls     int
+	err       error
+	keychains []authn.Keychain // records keychains passed to each Fetch call
 }
 
-func (m *mockFetcher) Fetch(ref name.Reference, _ authn.Keychain) (v1.Image, error) {
+func (m *mockFetcher) Fetch(ref name.Reference, kc authn.Keychain) (v1.Image, error) {
 	m.calls++
+	m.keychains = append(m.keychains, kc)
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -154,7 +156,7 @@ func TestResolveOrasPerFileLayers(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/wompipomp/starlark-stdlib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star")
 	if err != nil {
@@ -176,7 +178,7 @@ func TestResolveFromCache(t *testing.T) {
 	c.PutTag("ghcr.io/org/lib:v1", "sha256:abc")
 
 	f := &mockFetcher{images: map[string]v1.Image{}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -205,7 +207,7 @@ func TestResolveFetchAndExtract(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -233,7 +235,7 @@ func TestResolveWrongArtifactType(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -258,7 +260,7 @@ func TestResolveWrongLayerType(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	if err != nil {
@@ -285,7 +287,7 @@ func TestResolveDeduplicatesSameRef(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	t1, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/a.star")
 	t2, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/b.star")
@@ -315,7 +317,7 @@ func TestResolveEmptyLayers(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -336,7 +338,7 @@ func TestResolveFileNotInArtifact(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/helpers.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -365,7 +367,7 @@ a_fn = lambda: b_fn()`,
 		"ghcr.io/org/lib:v1": imgA,
 		"ghcr.io/org/dep:v1": imgB,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/a.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -398,7 +400,7 @@ func TestResolveCycleDetection(t *testing.T) {
 		"ghcr.io/org/a:v1": imgA,
 		"ghcr.io/org/b:v1": imgB,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/a:v1/a.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -424,7 +426,7 @@ func TestResolveStaleServing(t *testing.T) {
 
 	// Registry is unreachable.
 	f := &mockFetcher{err: fmt.Errorf("connection refused")}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -441,7 +443,7 @@ func TestResolveColdMissFails(t *testing.T) {
 
 	// Registry is unreachable, cache is empty.
 	f := &mockFetcher{err: fmt.Errorf("connection refused")}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -484,7 +486,7 @@ func TestResolveTarSafety(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/passwd.star")
 	_, err = r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -531,7 +533,7 @@ func TestResolveSkipsNonStarAndNonRegular(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/good.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -553,7 +555,7 @@ func TestResolveUsesKeychain(t *testing.T) {
 		"ghcr.io/org/lib:v1": img,
 	}}
 	customKC := authn.NewMultiKeychain(authn.DefaultKeychain)
-	r := NewResolver(c, customKC, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, customKC, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -576,7 +578,7 @@ func TestExtractTarNestedPaths(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/provider:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/provider:v1/apps/v1.star")
 	if err != nil {
@@ -602,7 +604,7 @@ func TestExtractOrasNestedPaths(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/provider:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/provider:v1/apps/v1.star")
 	if err != nil {
@@ -631,7 +633,7 @@ func TestExtractHighFileCount(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/provider-aws:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, err := ParseOCILoadTarget("oci://ghcr.io/org/provider-aws:v1/pkg0/mod.star")
 	if err != nil {
@@ -656,7 +658,7 @@ func TestExtractNestedPathTraversal(t *testing.T) {
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
 	}}
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/etc/passwd.star")
 	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -689,7 +691,7 @@ a_fn = lambda: b_fn()`,
 	}}
 	// Key: defaultRegistry is set so short-form "dep:v1/b.star" expands
 	// to "oci://ghcr.io/org/dep:v1/b.star" during transitive scanning.
-	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "ghcr.io/org")
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "ghcr.io/org", nil)
 
 	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/a.star")
 	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
@@ -703,5 +705,53 @@ a_fn = lambda: b_fn()`,
 	}
 	if _, ok := result["b.star"]; !ok {
 		t.Error("expected b.star in result (transitive dep via short-form expansion)")
+	}
+}
+
+func TestResolveInsecureRegistry(t *testing.T) {
+	c := NewCache(time.Hour)
+	img := buildTestImage(t, map[string]string{"h.star": `val = 1`}, ArtifactMediaType, LayerMediaType)
+	f := &mockFetcher{images: map[string]v1.Image{
+		"localhost:5050/org/lib:v1": img,
+	}}
+	customKC := authn.NewMultiKeychain(authn.DefaultKeychain)
+	r := NewResolver(c, customKC, f, logging.NewNopLogger(), "", []string{"localhost:5050"})
+
+	target, _ := ParseOCILoadTarget("oci://localhost:5050/org/lib:v1/h.star")
+	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insecure registry should use an empty keychain, not the configured one.
+	if len(f.keychains) != 1 {
+		t.Fatalf("expected 1 fetch call, got %d", len(f.keychains))
+	}
+	if f.keychains[0] == customKC {
+		t.Error("insecure registry should not use the configured keychain")
+	}
+}
+
+func TestResolveSecureRegistryUsesKeychain(t *testing.T) {
+	c := NewCache(time.Hour)
+	img := buildTestImage(t, map[string]string{"h.star": `val = 1`}, ArtifactMediaType, LayerMediaType)
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": img,
+	}}
+	customKC := authn.NewMultiKeychain(authn.DefaultKeychain)
+	// localhost:5050 is insecure, but we're fetching from ghcr.io — should use real keychain.
+	r := NewResolver(c, customKC, f, logging.NewNopLogger(), "", []string{"localhost:5050"})
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
+	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(f.keychains) != 1 {
+		t.Fatalf("expected 1 fetch call, got %d", len(f.keychains))
+	}
+	if f.keychains[0] != customKC {
+		t.Error("secure registry should use the configured keychain")
 	}
 }
