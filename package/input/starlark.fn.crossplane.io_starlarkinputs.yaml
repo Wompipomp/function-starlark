@@ -62,17 +62,21 @@ spec:
                   Modules defines inline Starlark modules loadable by name.
                   Keys must end in ".star". Values are Starlark source code.
                 type: object
-              ociCacheTTL:
-                description: |-
-                  OCICacheTTL configures the TTL for OCI tag-to-digest cache entries.
-                  Parsed as Go duration (e.g. "5m", "1h"). Default: 5m.
-                type: string
               ociDefaultRegistry:
                 description: |-
                   OCIDefaultRegistry overrides the operator-level default OCI registry
                   (STARLARK_OCI_DEFAULT_REGISTRY env var) for this composition.
                   Format: "registry/namespace" (e.g. "ghcr.io/my-org").
                 type: string
+              ociInsecureRegistries:
+                description: |-
+                  OCIInsecureRegistries lists registries that should be accessed over plain
+                  HTTP instead of HTTPS. Use for local or development registries only.
+                  Credentials are never sent over insecure connections.
+                  Format: ["localhost:5050", "registry.internal:5000"]
+                items:
+                  type: string
+                type: array
               scriptConfigRef:
                 description: |-
                   ScriptConfigRef is a reference to a ConfigMap containing the Starlark script.
@@ -100,9 +104,10 @@ spec:
                 type: string
               usageAPIVersion:
                 description: |-
-                  UsageAPIVersion overrides the auto-detected Crossplane Usage API version.
-                  Valid values: "v1" (apiextensions.crossplane.io/v1alpha1) or "v2" (protection.crossplane.io/v1beta1).
-                  If empty, defaults to v1 for maximum backward compatibility.
+                  UsageAPIVersion selects the Crossplane Usage API version.
+                  "v1" = apiextensions.crossplane.io/v1beta1 (Crossplane 1.x).
+                  "v2" = protection.crossplane.io/v1beta1 (Crossplane 2.x, default).
+                  Set to "v1" if running Crossplane 1.x.
                 type: string
             required:
             - source

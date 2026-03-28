@@ -70,8 +70,8 @@ func buildUsageResource(dependent, dependency, apiVersion string, typeInfos map[
 			"spec": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{
 					"replayDeletion": structpb.NewBoolValue(true),
-					"of":            selector(dependency),
-					"by":            selector(dependent),
+					"of":             selector(dependency),
+					"by":             selector(dependent),
 				},
 			}),
 		},
@@ -212,14 +212,14 @@ func WarnUnmatchedStringRefs(deps []DependencyPair, resourceNames map[string]boo
 	return warnings
 }
 
-// DetectUsageAPIVersion returns the Usage API version based on the user override.
-// "v1" returns UsageAPIVersionV1, "v2" returns UsageAPIVersionV2.
-// Empty or unrecognized values default to UsageAPIVersionV1 for maximum compatibility.
-func DetectUsageAPIVersion(override string) string {
+// ResolveUsageAPIVersion returns the Usage API version based on the user override.
+// "v1" returns UsageAPIVersionV1 (Crossplane 1.x), "v2" returns UsageAPIVersionV2.
+// Empty or unrecognized values default to UsageAPIVersionV2 (Crossplane 2.x).
+func ResolveUsageAPIVersion(override string) string {
 	switch override {
-	case "v2":
-		return UsageAPIVersionV2
-	default:
+	case "v1":
 		return UsageAPIVersionV1
+	default:
+		return UsageAPIVersionV2
 	}
 }

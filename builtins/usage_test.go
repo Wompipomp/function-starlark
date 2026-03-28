@@ -107,7 +107,7 @@ func TestBuildUsageResources(t *testing.T) {
 	})
 }
 
-func TestDetectUsageAPIVersion(t *testing.T) {
+func TestResolveUsageAPIVersion(t *testing.T) {
 	tests := []struct {
 		name     string
 		override string
@@ -115,14 +115,14 @@ func TestDetectUsageAPIVersion(t *testing.T) {
 	}{
 		{"v1 override", "v1", UsageAPIVersionV1},
 		{"v2 override", "v2", UsageAPIVersionV2},
-		{"empty default", "", UsageAPIVersionV1},
-		{"unknown string defaults to v1", "garbage", UsageAPIVersionV1},
+		{"empty defaults to v2", "", UsageAPIVersionV2},
+		{"unknown string defaults to v2", "garbage", UsageAPIVersionV2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := DetectUsageAPIVersion(tt.override)
+			got := ResolveUsageAPIVersion(tt.override)
 			if got != tt.want {
-				t.Errorf("DetectUsageAPIVersion(%q) = %q, want %q", tt.override, got, tt.want)
+				t.Errorf("ResolveUsageAPIVersion(%q) = %q, want %q", tt.override, got, tt.want)
 			}
 		})
 	}
