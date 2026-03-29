@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/Wompipomp/function-starlark/compare/v0.8.0...v0.8.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* namespace OCI modules by full URL to prevent cross-package collisions ([67ee8d1](https://github.com/Wompipomp/function-starlark/commit/67ee8d10e5123dbeb0a8bfdd1032c7dc5d772f7b))
+
 ## [0.8.0](https://github.com/Wompipomp/function-starlark/compare/v0.7.0...v0.8.0) (2026-03-28)
 
 
