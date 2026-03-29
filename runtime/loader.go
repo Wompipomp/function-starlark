@@ -73,35 +73,6 @@ func validateModuleName(module string) error {
 	return nil
 }
 
-// ociFilePath extracts the file path from an oci:// URL using the same
-// parsing logic as reference.splitRefAndFile. For flat files like
-// "oci://ghcr.io/org/lib:v1/helpers.star" it returns "helpers.star".
-// For nested files like "oci://ghcr.io/org/lib:v2/storage/v1.star"
-// it returns "storage/v1.star".
-func ociFilePath(module string) string {
-	raw := strings.TrimPrefix(module, "oci://")
-	// Digest reference: file path follows the hex after @sha256:hex/
-	if idx := strings.Index(raw, "@sha256:"); idx != -1 {
-		after := raw[idx+len("@sha256:"):]
-		if slashIdx := strings.Index(after, "/"); slashIdx != -1 {
-			return after[slashIdx+1:]
-		}
-		return raw
-	}
-	// Tag reference: file path follows the tag after :tag/
-	if lastColon := strings.LastIndex(raw, ":"); lastColon != -1 {
-		after := raw[lastColon+1:]
-		if slashIdx := strings.Index(after, "/"); slashIdx != -1 {
-			return after[slashIdx+1:]
-		}
-	}
-	// Fallback: last path segment.
-	if idx := strings.LastIndex(raw, "/"); idx != -1 {
-		return raw[idx+1:]
-	}
-	return raw
-}
-
 // resolve returns the source for a module by checking inline modules first,
 // then searching filesystem paths in order.
 func (m *ModuleLoader) resolve(module string) (string, error) {
@@ -141,19 +112,17 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 		module = expanded
 	}
 
-	// Handle OCI module references: route to inline modules by file path.
+	// Handle OCI module references: use the full oci:// URL as the key.
+	// This avoids collisions when different packages export the same filename.
 	if strings.HasPrefix(module, "oci://") {
-		filePath := ociFilePath(module)
-		if _, ok := m.inlineModules[filePath]; !ok {
+		if _, ok := m.inlineModules[module]; !ok {
 			return nil, fmt.Errorf(
 				"OCI module %q not resolved; ensure the OCI reference was resolvable before execution",
-				filePath,
+				module,
 			)
 		}
-		// Use the file path as the cache key and module name.
-		// Skip validateModuleName — OCI paths may contain "/" for nested files
-		// (e.g. "cosmosdb/v1.star") and are already validated by the OCI parser.
-		module = filePath
+		// Skip validateModuleName — OCI URLs contain "/" and ":" which are
+		// already validated by the OCI parser.
 	} else if err := validateModuleName(module); err != nil {
 		return nil, err
 	}
@@ -304,11 +273,8 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 			mod = expanded
 		}
 
-		// Resolve the module name (handle OCI routing).
+		// Use full OCI URL as module key (matches resolver keying).
 		resolvedMod := mod
-		if strings.HasPrefix(mod, "oci://") {
-			resolvedMod = ociFilePath(mod)
-		}
 
 		exports, err := m.getModuleExports(resolvedMod)
 		if err != nil {

@@ -132,7 +132,7 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 					t.File, refStr, strings.Join(available, ", "),
 				)
 			}
-			result[t.File] = src
+			result[t.RawURL] = src
 		}
 
 		// Scan extracted files for transitive OCI loads.

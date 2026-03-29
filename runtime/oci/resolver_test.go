@@ -167,8 +167,8 @@ func TestResolveOrasPerFileLayers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result["naming.star"] != `def resource_name(key): return key` {
-		t.Errorf("got %q, want resource_name function", result["naming.star"])
+	if result["oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star"] != `def resource_name(key): return key` {
+		t.Errorf("got %q, want resource_name function", result["oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star"])
 	}
 }
 
@@ -189,8 +189,8 @@ func TestResolveFromCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["helpers.star"] != "x = 1" {
-		t.Errorf("got %q, want %q", result["helpers.star"], "x = 1")
+	if result["oci://ghcr.io/org/lib:v1/helpers.star"] != "x = 1" {
+		t.Errorf("got %q, want %q", result["oci://ghcr.io/org/lib:v1/helpers.star"], "x = 1")
 	}
 	if f.calls != 0 {
 		t.Errorf("expected 0 fetch calls (cache hit), got %d", f.calls)
@@ -218,8 +218,8 @@ func TestResolveFetchAndExtract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["helpers.star"] != `helper = "loaded"` {
-		t.Errorf("got %q, want %q", result["helpers.star"], `helper = "loaded"`)
+	if result["oci://ghcr.io/org/lib:v1/helpers.star"] != `helper = "loaded"` {
+		t.Errorf("got %q, want %q", result["oci://ghcr.io/org/lib:v1/helpers.star"], `helper = "loaded"`)
 	}
 	if f.calls != 1 {
 		t.Errorf("expected 1 fetch call, got %d", f.calls)
@@ -296,11 +296,11 @@ func TestResolveDeduplicatesSameRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["a.star"] != "a = 1" {
-		t.Errorf("a.star = %q, want %q", result["a.star"], "a = 1")
+	if result["oci://ghcr.io/org/lib:v1/a.star"] != "a = 1" {
+		t.Errorf("a.star = %q, want %q", result["oci://ghcr.io/org/lib:v1/a.star"], "a = 1")
 	}
-	if result["b.star"] != "b = 2" {
-		t.Errorf("b.star = %q, want %q", result["b.star"], "b = 2")
+	if result["oci://ghcr.io/org/lib:v1/b.star"] != "b = 2" {
+		t.Errorf("b.star = %q, want %q", result["oci://ghcr.io/org/lib:v1/b.star"], "b = 2")
 	}
 	if f.calls != 1 {
 		t.Errorf("expected 1 fetch call (deduplication), got %d", f.calls)
@@ -375,11 +375,11 @@ a_fn = lambda: b_fn()`,
 		t.Fatal(err)
 	}
 
-	// Both a.star and b.star should be resolved.
-	if _, ok := result["a.star"]; !ok {
+	// Both a.star and b.star should be resolved (keyed by full OCI URL).
+	if _, ok := result["oci://ghcr.io/org/lib:v1/a.star"]; !ok {
 		t.Error("expected a.star in result")
 	}
-	if _, ok := result["b.star"]; !ok {
+	if _, ok := result["oci://ghcr.io/org/dep:v1/b.star"]; !ok {
 		t.Error("expected b.star in result (transitive dep)")
 	}
 }
@@ -433,8 +433,8 @@ func TestResolveStaleServing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected stale serving, got error: %v", err)
 	}
-	if result["h.star"] != "x = 1" {
-		t.Errorf("got %q, want %q", result["h.star"], "x = 1")
+	if result["oci://ghcr.io/org/lib:v1/h.star"] != "x = 1" {
+		t.Errorf("got %q, want %q", result["oci://ghcr.io/org/lib:v1/h.star"], "x = 1")
 	}
 }
 
@@ -540,8 +540,8 @@ func TestResolveSkipsNonStarAndNonRegular(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["good.star"] != "x = 1" {
-		t.Errorf("good.star = %q, want %q", result["good.star"], "x = 1")
+	if result["oci://ghcr.io/org/lib:v1/good.star"] != "x = 1" {
+		t.Errorf("good.star = %q, want %q", result["oci://ghcr.io/org/lib:v1/good.star"], "x = 1")
 	}
 }
 
@@ -562,8 +562,8 @@ func TestResolveUsesKeychain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["h.star"] != "x = 1" {
-		t.Errorf("got %q, want %q", result["h.star"], "x = 1")
+	if result["oci://ghcr.io/org/lib:v1/h.star"] != "x = 1" {
+		t.Errorf("got %q, want %q", result["oci://ghcr.io/org/lib:v1/h.star"], "x = 1")
 	}
 }
 
@@ -589,8 +589,8 @@ func TestExtractTarNestedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result["apps/v1.star"] != `apps_v1 = "apps"` {
-		t.Errorf("apps/v1.star = %q, want %q", result["apps/v1.star"], `apps_v1 = "apps"`)
+	if result["oci://ghcr.io/org/provider:v1/apps/v1.star"] != `apps_v1 = "apps"` {
+		t.Errorf("apps/v1.star = %q, want %q", result["oci://ghcr.io/org/provider:v1/apps/v1.star"], `apps_v1 = "apps"`)
 	}
 }
 
@@ -615,8 +615,8 @@ func TestExtractOrasNestedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result["apps/v1.star"] != `apps_v1 = "apps"` {
-		t.Errorf("apps/v1.star = %q, want %q", result["apps/v1.star"], `apps_v1 = "apps"`)
+	if result["oci://ghcr.io/org/provider:v1/apps/v1.star"] != `apps_v1 = "apps"` {
+		t.Errorf("apps/v1.star = %q, want %q", result["oci://ghcr.io/org/provider:v1/apps/v1.star"], `apps_v1 = "apps"`)
 	}
 }
 
@@ -644,8 +644,8 @@ func TestExtractHighFileCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error (should not hit maxFileCount): %v", err)
 	}
-	if result["pkg0/mod.star"] != "val = 0" {
-		t.Errorf("pkg0/mod.star = %q, want %q", result["pkg0/mod.star"], "val = 0")
+	if result["oci://ghcr.io/org/provider-aws:v1/pkg0/mod.star"] != "val = 0" {
+		t.Errorf("pkg0/mod.star = %q, want %q", result["oci://ghcr.io/org/provider-aws:v1/pkg0/mod.star"], "val = 0")
 	}
 }
 
@@ -700,10 +700,10 @@ a_fn = lambda: b_fn()`,
 	}
 
 	// Both a.star (direct) and b.star (transitive via short-form) should be resolved.
-	if _, ok := result["a.star"]; !ok {
+	if _, ok := result["oci://ghcr.io/org/lib:v1/a.star"]; !ok {
 		t.Error("expected a.star in result")
 	}
-	if _, ok := result["b.star"]; !ok {
+	if _, ok := result["oci://ghcr.io/org/dep:v1/b.star"]; !ok {
 		t.Error("expected b.star in result (transitive dep via short-form expansion)")
 	}
 }

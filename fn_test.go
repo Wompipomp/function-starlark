@@ -3416,6 +3416,59 @@ _hidden = 30`,
 	}
 }
 
+// TestRunFunctionOCIMultiPackageSameFilename verifies that two different OCI
+// packages exporting the same filename (e.g. helpers.star) do not silently
+// overwrite each other. Each package's module must be independently accessible.
+func TestRunFunctionOCIMultiPackageSameFilename(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	// Package A: ghcr.io/org/pkg-a:v1 contains helpers.star with greet_a().
+	cache.PutContent("sha256:pkga001", map[string]string{
+		"helpers.star": `def greet_a(): return "from-package-a"`,
+	})
+	cache.PutTag("ghcr.io/org/pkg-a:v1", "sha256:pkga001")
+
+	// Package B: ghcr.io/org/pkg-b:v1 contains helpers.star with greet_b().
+	cache.PutContent("sha256:pkgb001", map[string]string{
+		"helpers.star": `def greet_b(): return "from-package-b"`,
+	})
+	cache.PutTag("ghcr.io/org/pkg-b:v1", "sha256:pkgb001")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	// Script loads helpers.star from both packages and uses both functions.
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"source": "load(\"oci://ghcr.io/org/pkg-a:v1/helpers.star\", \"greet_a\")\nload(\"oci://ghcr.io/org/pkg-b:v1/helpers.star\", \"greet_b\")\nResource(\"test\", {\"a\": greet_a(), \"b\": greet_b()})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	aVal := testRes.GetResource().GetFields()["a"].GetStringValue()
+	bVal := testRes.GetResource().GetFields()["b"].GetStringValue()
+	if aVal != "from-package-a" {
+		t.Errorf("a = %q, want 'from-package-a'", aVal)
+	}
+	if bVal != "from-package-b" {
+		t.Errorf("b = %q, want 'from-package-b'", bVal)
+	}
+}
+
 // TestRunFunctionOCINoTargets verifies that scripts without oci:// loads
 // work normally (no regression).
 func TestRunFunctionOCINoTargets(t *testing.T) {

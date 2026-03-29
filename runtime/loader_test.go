@@ -607,10 +607,10 @@ func TestOCIModuleRouting(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	// Pre-populate inline modules with the base filename that would be
-	// injected by fn.go after OCI resolution.
+	// Pre-populate inline modules with the full OCI URL key (as fn.go
+	// injects after OCI resolution with namespaced keys).
 	inline := map[string]string{
-		"helpers.star": `def greet(name): return "oci-hello " + name`,
+		"oci://ghcr.io/org/lib:v1/helpers.star": `def greet(name): return "oci-hello " + name`,
 	}
 
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
@@ -663,7 +663,7 @@ func TestOCIModuleDigestRouting(t *testing.T) {
 	rt := NewRuntime(log)
 
 	inline := map[string]string{
-		"utils.star": `val = "pinned"`,
+		"oci://ghcr.io/org/lib@sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1/utils.star": `val = "pinned"`,
 	}
 
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
@@ -833,10 +833,10 @@ func TestModuleDefaultRegistryExpansion(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	// Pre-populate inline modules with the base filename that would be
-	// injected by fn.go after OCI resolution.
+	// Pre-populate inline modules with the full OCI URL key (as fn.go
+	// injects after OCI resolution with namespaced keys).
 	inline := map[string]string{
-		"naming.star": `def resource_name(n): return "prefix-" + n`,
+		"oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star": `def resource_name(n): return "prefix-" + n`,
 	}
 
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "ghcr.io/wompipomp")
@@ -891,9 +891,9 @@ func TestResolveStarImportsWithDefaultRegistry(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
 
-	// Inline module keyed by base filename (as fn.go injects after OCI resolution).
+	// Inline module keyed by full OCI URL (as fn.go injects after OCI resolution).
 	inline := map[string]string{
-		"naming.star": `resource_name = "rn"
+		"oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star": `resource_name = "rn"
 helper = "h"
 _private = "p"`,
 	}
@@ -1125,7 +1125,7 @@ func TestNamespaceStarImportOCI(t *testing.T) {
 	rt := NewRuntime(log)
 
 	inline := map[string]string{
-		"helpers.star": `greet = "hello"
+		"oci://ghcr.io/org/lib:v1/helpers.star": `greet = "hello"
 farewell = "bye"`,
 	}
 
