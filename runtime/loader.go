@@ -148,6 +148,21 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 		return nil, err
 	}
 
+	// Expand star imports in module source before compilation. This mirrors
+	// how fn.go expands star imports in the main script. The nil-sentinel
+	// already set above guards against recursive expansion of this same
+	// module: any re-entrant attempt to load it will detect the cycle.
+	//
+	// Note: getModuleExports (called from ResolveStarImports) does NOT set a
+	// cache entry — it is read-only scanning — so it is safe to call here
+	// before the full load() completes.
+	source, err = m.ResolveStarImports(source, module)
+	if err != nil {
+		e = &moduleEntry{nil, fmt.Errorf("expanding star imports in module %s: %w", module, err)}
+		m.cache[module] = e
+		return nil, e.err
+	}
+
 	// Compile via Runtime's bytecode cache (shared across reconciliations).
 	prog, err := m.rt.getOrCompile(source, m.predeclared, module)
 	if err != nil {
@@ -382,11 +397,22 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 }
 
 // getModuleExports resolves a module and returns its sorted public export names.
+// It is read-only: it does NOT set a cache entry in m.cache, so it can safely
+// be called during ResolveStarImports even for modules currently being loaded
+// (the load() nil-sentinel prevents actual re-execution of those modules).
 func (m *ModuleLoader) getModuleExports(module string) ([]string, error) {
 	// Resolve module source.
 	src, err := m.resolve(module)
 	if err != nil {
 		return nil, err
+	}
+
+	// Expand star imports in module source before compilation so that modules
+	// that themselves use load("x.star", "*") are compiled correctly during
+	// export scanning.
+	src, err = m.ResolveStarImports(src, module)
+	if err != nil {
+		return nil, fmt.Errorf("expanding star imports in module %s for export scan: %w", module, err)
 	}
 
 	// Compile and execute the module to get its exports.

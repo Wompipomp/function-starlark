@@ -1226,9 +1226,8 @@ func TestTransitiveStarImportInModule(t *testing.T) {
 	inline := map[string]string{
 		// naming.star: simple value export
 		"naming.star": `upper = "ACME"`,
-		// platform.star: uses star import from naming.star
-		"platform.star": `load("naming.star", "*")
-platform_val = upper + "_platform"`,
+		// platform.star: uses star import from naming.star; load is on its own line
+		"platform.star": "load(\"naming.star\", \"*\")\nplatform_val = upper + \"_platform\"",
 	}
 
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
@@ -1296,9 +1295,9 @@ func TestTransitiveStarImportDiamond(t *testing.T) {
 	rt := NewRuntime(log)
 
 	inline := map[string]string{
-		"naming.star":   `val = 1`,
-		"platform.star": `load("naming.star", "*"); p = val + 10`,
-		"custom.star":   `load("naming.star", "*"); c = val + 20`,
+		"naming.star":   "val = 1",
+		"platform.star": "load(\"naming.star\", \"*\")\np = val + 10",
+		"custom.star":   "load(\"naming.star\", \"*\")\nc = val + 20",
 	}
 
 	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
