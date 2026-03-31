@@ -1211,6 +1211,118 @@ result_ns_y = ns.y`
 	}
 }
 
+// ========================
+// Transitive Star Import Tests
+// ========================
+
+// TestTransitiveStarImportInModule verifies that a module which itself contains
+// load("x.star", "*") can be loaded without error. Previously, star imports
+// inside modules were not expanded before compilation, causing starlark-go to
+// look for a literal "*" key which does not exist.
+func TestTransitiveStarImportInModule(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		// naming.star: simple value export
+		"naming.star": `upper = "ACME"`,
+		// platform.star: uses star import from naming.star
+		"platform.star": `load("naming.star", "*")
+platform_val = upper + "_platform"`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	loaded, err := thread.Load(thread, "platform.star")
+	if err != nil {
+		t.Fatalf("loading platform.star (which uses load(\"naming.star\", \"*\")): %v", err)
+	}
+
+	v, ok := loaded["platform_val"]
+	if !ok {
+		t.Fatal("expected 'platform_val' in loaded globals")
+	}
+	if v.(starlark.String) != "ACME_platform" {
+		t.Errorf("platform_val = %v, want 'ACME_platform'", v)
+	}
+}
+
+// TestDiamondDependencyDedup verifies that when two modules both import a shared
+// module (diamond pattern), the shared module executes exactly once (cache hit).
+func TestDiamondDependencyDedup(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"naming.star":   `val = 1`,
+		"platform.star": `load("naming.star", "val"); p = val + 10`,
+		"custom.star":   `load("naming.star", "val"); c = val + 20`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	// Load platform.star -- triggers load of naming.star (cached as side effect)
+	pGlobals, err := thread.Load(thread, "platform.star")
+	if err != nil {
+		t.Fatalf("loading platform.star: %v", err)
+	}
+	pVal, _ := starlark.AsInt32(pGlobals["p"].(starlark.Int))
+	if pVal != 11 {
+		t.Errorf("p = %d, want 11 (val+10 = 1+10)", pVal)
+	}
+
+	// Load custom.star -- naming.star should be a cache hit
+	cGlobals, err := thread.Load(thread, "custom.star")
+	if err != nil {
+		t.Fatalf("loading custom.star: %v", err)
+	}
+	cVal, _ := starlark.AsInt32(cGlobals["c"].(starlark.Int))
+	if cVal != 21 {
+		t.Errorf("c = %d, want 21 (val+20 = 1+20)", cVal)
+	}
+
+	// Verify naming.star cache entry exists (deduplication working).
+	if _, ok := loader.cache["naming.star"]; !ok {
+		t.Error("naming.star should be in loader cache after diamond dependency")
+	}
+}
+
+// TestTransitiveStarImportDiamond verifies the diamond pattern when both
+// intermediate modules use load("naming.star", "*") instead of named imports.
+func TestTransitiveStarImportDiamond(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"naming.star":   `val = 1`,
+		"platform.star": `load("naming.star", "*"); p = val + 10`,
+		"custom.star":   `load("naming.star", "*"); c = val + 20`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	pGlobals, err := thread.Load(thread, "platform.star")
+	if err != nil {
+		t.Fatalf("loading platform.star (with star import of naming.star): %v", err)
+	}
+	pVal, _ := starlark.AsInt32(pGlobals["p"].(starlark.Int))
+	if pVal != 11 {
+		t.Errorf("p = %d, want 11 (val+10 = 1+10)", pVal)
+	}
+
+	cGlobals, err := thread.Load(thread, "custom.star")
+	if err != nil {
+		t.Fatalf("loading custom.star (with star import of naming.star): %v", err)
+	}
+	cVal, _ := starlark.AsInt32(cGlobals["c"].(starlark.Int))
+	if cVal != 21 {
+		t.Errorf("c = %d, want 21 (val+20 = 1+20)", cVal)
+	}
+}
+
 func TestNamespaceStarImportMultiline(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)
