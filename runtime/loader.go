@@ -51,6 +51,7 @@ func NewModuleLoader(inlineModules map[string]string, searchPaths []string, pred
 		searchPaths:     searchPaths,
 		predeclared:     predeclared,
 		cache:           make(map[string]*moduleEntry),
+		expanding:       make(map[string]bool),
 		rt:              rt,
 		defaultRegistry: defaultRegistry,
 	}
@@ -238,9 +239,6 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 	// will produce a proper error at runtime.
 	if m.expanding[filename] {
 		return source, nil
-	}
-	if m.expanding == nil {
-		m.expanding = make(map[string]bool)
 	}
 	m.expanding[filename] = true
 	defer delete(m.expanding, filename)
