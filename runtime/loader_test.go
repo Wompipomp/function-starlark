@@ -1322,6 +1322,52 @@ func TestTransitiveStarImportDiamond(t *testing.T) {
 	}
 }
 
+// TestSelfReferentialStarImport verifies that a module which star-imports itself
+// does not cause infinite recursion. The cycle guard in ResolveStarImports
+// short-circuits, and the load() nil-sentinel produces a cycle error.
+func TestSelfReferentialStarImport(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"self.star": "load(\"self.star\", \"*\")\nx = 1",
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "self.star")
+	if err == nil {
+		t.Fatal("expected error for self-referential star import, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("expected cycle error, got: %v", err)
+	}
+}
+
+// TestCircularStarImport verifies that two modules which star-import each other
+// do not cause infinite recursion.
+func TestCircularStarImport(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"a.star": "load(\"b.star\", \"*\")\na_val = 1",
+		"b.star": "load(\"a.star\", \"*\")\nb_val = 2",
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "a.star")
+	if err == nil {
+		t.Fatal("expected error for circular star import, got nil")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("expected cycle error, got: %v", err)
+	}
+}
+
 func TestNamespaceStarImportMultiline(t *testing.T) {
 	log := &testLogger{}
 	rt := NewRuntime(log)

@@ -3688,6 +3688,21 @@ type testOCIFetcher struct {
 	err    error
 }
 
+func (f *testOCIFetcher) Head(ref name.Reference, _ authn.Keychain) (*v1.Descriptor, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	img, ok := f.images[ref.String()]
+	if !ok {
+		return nil, fmt.Errorf("image not found: %s", ref.String())
+	}
+	digest, err := img.Digest()
+	if err != nil {
+		return nil, err
+	}
+	return &v1.Descriptor{Digest: digest}, nil
+}
+
 func (f *testOCIFetcher) Fetch(ref name.Reference, _ authn.Keychain) (v1.Image, error) {
 	if f.err != nil {
 		return nil, f.err

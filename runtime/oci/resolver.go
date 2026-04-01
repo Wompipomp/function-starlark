@@ -36,6 +36,7 @@ const (
 // Fetcher abstracts OCI image fetching for testability.
 type Fetcher interface {
 	Fetch(ref name.Reference, keychain authn.Keychain) (v1.Image, error)
+	Head(ref name.Reference, keychain authn.Keychain) (*v1.Descriptor, error)
 }
 
 // RemoteFetcher is the default Fetcher that pulls from remote registries.
@@ -44,6 +45,12 @@ type RemoteFetcher struct{}
 // Fetch pulls an image from a remote registry using the given keychain.
 func (RemoteFetcher) Fetch(ref name.Reference, keychain authn.Keychain) (v1.Image, error) {
 	return remote.Image(ref, remote.WithAuthFromKeychain(keychain))
+}
+
+// Head returns the remote descriptor (digest + metadata) without downloading
+// the full image. Used to check if a tag still points to the same digest.
+func (RemoteFetcher) Head(ref name.Reference, keychain authn.Keychain) (*v1.Descriptor, error) {
+	return remote.Head(ref, remote.WithAuthFromKeychain(keychain))
 }
 
 // Resolver fetches OCI artifacts, validates media types, extracts .star files,
@@ -203,14 +210,32 @@ func (r *Resolver) resolveRef(ctx context.Context, refStr string, target *OCILoa
 		}
 	}
 
-	// Fetch the image. For insecure registries, use an empty keychain
-	// (resolves to anonymous) to avoid sending credentials over plaintext HTTP.
-	var img v1.Image
+	// Select keychain: empty for insecure registries to avoid sending
+	// credentials over plaintext HTTP; configured keychain for secure.
+	kc := r.keychain
 	if insecure {
-		img, err = r.fetcher.Fetch(ref, authn.NewMultiKeychain())
-	} else {
-		img, err = r.fetcher.Fetch(ref, r.keychain)
+		kc = authn.NewMultiKeychain()
 	}
+
+	// If we have stale cache content, try a HEAD request first to avoid a full
+	// pull when the digest hasn't changed (the common case).
+	if files != nil {
+		desc, headErr := r.fetcher.Head(ref, kc)
+		if headErr == nil {
+			digestStr := desc.Digest.String()
+			if cached, ok := r.cache.GetByDigest(digestStr); ok {
+				r.log.Debug("OCI digest unchanged, serving from cache", "ref", refStr, "digest", digestStr)
+				r.cache.PutTag(refStr, digestStr)
+				return cached, nil
+			}
+			r.log.Debug("OCI digest changed, pulling new version", "ref", refStr, "new", digestStr)
+		}
+		// HEAD failed — fall through to full fetch.
+	}
+
+	// Fetch the image.
+	var img v1.Image
+	img, err = r.fetcher.Fetch(ref, kc)
 	if err != nil {
 		// If we have stale content, serve it with a warning.
 		if files != nil {

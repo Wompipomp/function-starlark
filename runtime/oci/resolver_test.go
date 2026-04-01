@@ -25,6 +25,7 @@ import (
 type mockFetcher struct {
 	images    map[string]v1.Image
 	calls     int
+	headCalls int
 	err       error
 	keychains []authn.Keychain // records keychains passed to each Fetch call
 }
@@ -40,6 +41,22 @@ func (m *mockFetcher) Fetch(ref name.Reference, kc authn.Keychain) (v1.Image, er
 		return nil, fmt.Errorf("image not found: %s", ref.String())
 	}
 	return img, nil
+}
+
+func (m *mockFetcher) Head(ref name.Reference, _ authn.Keychain) (*v1.Descriptor, error) {
+	m.headCalls++
+	if m.err != nil {
+		return nil, m.err
+	}
+	img, ok := m.images[ref.String()]
+	if !ok {
+		return nil, fmt.Errorf("image not found: %s", ref.String())
+	}
+	digest, err := img.Digest()
+	if err != nil {
+		return nil, err
+	}
+	return &v1.Descriptor{Digest: digest}, nil
 }
 
 // buildTar creates a tar archive from a map of filename -> content.
@@ -753,5 +770,89 @@ func TestResolveSecureRegistryUsesKeychain(t *testing.T) {
 	}
 	if f.keychains[0] != customKC {
 		t.Error("secure registry should use the configured keychain")
+	}
+}
+
+func TestResolveHeadOptimization(t *testing.T) {
+	now := time.Now()
+	c := NewCache(5 * time.Minute)
+	c.nowFn = func() time.Time { return now }
+
+	// Build image and compute its digest.
+	img := buildTestImage(t, map[string]string{
+		"h.star": `x = 1`,
+	}, ArtifactMediaType, LayerMediaType)
+	digest, err := img.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-populate cache with content at this digest.
+	c.PutContent(digest.String(), map[string]string{"h.star": "x = 1"})
+	c.PutTag("ghcr.io/org/lib:v1", digest.String())
+
+	// Expire the tag cache.
+	c.nowFn = func() time.Time { return now.Add(10 * time.Minute) }
+
+	// Fetcher has the same image (same digest).
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result["oci://ghcr.io/org/lib:v1/h.star"] != "x = 1" {
+		t.Errorf("got %q, want %q", result["oci://ghcr.io/org/lib:v1/h.star"], "x = 1")
+	}
+	// HEAD should be called, but Fetch should NOT (digest unchanged).
+	if f.headCalls != 1 {
+		t.Errorf("expected 1 HEAD call, got %d", f.headCalls)
+	}
+	if f.calls != 0 {
+		t.Errorf("expected 0 Fetch calls (HEAD optimization), got %d", f.calls)
+	}
+}
+
+func TestResolveHeadDigestChanged(t *testing.T) {
+	now := time.Now()
+	c := NewCache(5 * time.Minute)
+	c.nowFn = func() time.Time { return now }
+
+	// Pre-populate cache with old content.
+	c.PutContent("sha256:old", map[string]string{"h.star": "x = 1"})
+	c.PutTag("ghcr.io/org/lib:v1", "sha256:old")
+
+	// Expire the tag cache.
+	c.nowFn = func() time.Time { return now.Add(10 * time.Minute) }
+
+	// Registry has a new image (different digest).
+	img := buildTestImage(t, map[string]string{
+		"h.star": `x = 2`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": img,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/h.star")
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should get the NEW content.
+	if result["oci://ghcr.io/org/lib:v1/h.star"] != `x = 2` {
+		t.Errorf("got %q, want %q", result["oci://ghcr.io/org/lib:v1/h.star"], `x = 2`)
+	}
+	// Both HEAD and Fetch should be called (digest changed).
+	if f.headCalls != 1 {
+		t.Errorf("expected 1 HEAD call, got %d", f.headCalls)
+	}
+	if f.calls != 1 {
+		t.Errorf("expected 1 Fetch call (digest changed), got %d", f.calls)
 	}
 }

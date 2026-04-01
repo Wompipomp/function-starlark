@@ -26,8 +26,9 @@ type ModuleLoader struct {
 	searchPaths     []string            // ordered filesystem directories
 	predeclared     starlark.StringDict // same builtins as main script
 	cache           map[string]*moduleEntry
-	rt              *Runtime // for bytecode caching and logging
-	defaultRegistry string   // default OCI registry for short-form load targets
+	expanding       map[string]bool // modules currently being star-expanded (cycle guard)
+	rt              *Runtime        // for bytecode caching and logging
+	defaultRegistry string          // default OCI registry for short-form load targets
 }
 
 // moduleEntry stores the cached result of loading a module.
@@ -149,13 +150,9 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 	}
 
 	// Expand star imports in module source before compilation. This mirrors
-	// how fn.go expands star imports in the main script. The nil-sentinel
-	// already set above guards against recursive expansion of this same
-	// module: any re-entrant attempt to load it will detect the cycle.
-	//
-	// Note: getModuleExports (called from ResolveStarImports) does NOT set a
-	// cache entry — it is read-only scanning — so it is safe to call here
-	// before the full load() completes.
+	// how fn.go expands star imports in the main script. Cycle detection for
+	// the ResolveStarImports → getModuleExports → ResolveStarImports chain
+	// is handled by the expanding map inside ResolveStarImports itself.
 	source, err = m.ResolveStarImports(source, module)
 	if err != nil {
 		e = &moduleEntry{nil, fmt.Errorf("expanding star imports in module %s: %w", module, err)}
@@ -236,6 +233,18 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 // This is needed because starlark-go does not natively support "*" in load()
 // statements -- it would look for a literal key named "*" in the loaded dict.
 func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, error) {
+	// Cycle guard: if we're already expanding star imports for this module,
+	// return source unchanged. The actual load() cycle detection (nil-sentinel)
+	// will produce a proper error at runtime.
+	if m.expanding[filename] {
+		return source, nil
+	}
+	if m.expanding == nil {
+		m.expanding = make(map[string]bool)
+	}
+	m.expanding[filename] = true
+	defer delete(m.expanding, filename)
+
 	opts := fileOptions()
 	f, err := opts.Parse(filename, source, 0)
 	if err != nil {
