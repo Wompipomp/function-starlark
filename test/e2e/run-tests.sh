@@ -89,6 +89,7 @@ else
     kubectl apply -f "$SCRIPT_DIR/composition-oci.yaml"
 fi
 kubectl apply -f "$SCRIPT_DIR/composition-depends-on.yaml"
+kubectl apply -f "$SCRIPT_DIR/composition-star-imports.yaml"
 if [ -f "$SCRIPT_DIR/composition-schemas-rendered.yaml" ]; then
     kubectl apply -f "$SCRIPT_DIR/composition-schemas-rendered.yaml"
 else
@@ -255,7 +256,45 @@ else
 fi
 
 # ============================================================
-# TEST 4: DEPENDS_ON (CREATION SEQUENCING)
+# TEST 4: TRANSITIVE STAR IMPORTS IN MODULES
+# ============================================================
+log ""
+log "===== TEST 4: TRANSITIVE STAR IMPORTS IN MODULES ====="
+
+log "Creating XR for star-imports test"
+kubectl apply -f "$SCRIPT_DIR/xr-star-imports.yaml"
+
+log "Waiting for star-imports XR to become Ready..."
+if wait_for_condition "xtest/test-star-imports" "Ready" 120; then
+    pass "star-imports: XR reached Ready (transitive star imports work in modules)"
+else
+    fail "star-imports: XR did not reach Ready (star imports in modules may have failed)"
+    kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+fi
+
+star_worked=$(get_status_field "xtest/test-star-imports" "test.starImportsWorked")
+if [ "$star_worked" = "true" ]; then
+    pass "star-imports: all transitive star import assertions passed"
+else
+    fail "star-imports: starImportsWorked='$star_worked' (expected true)"
+fi
+
+platform_name=$(get_status_field "xtest/test-star-imports" "test.platformName")
+if [ "$platform_name" = "acme-platform-prod" ]; then
+    pass "star-imports: platform.star resolved naming.star exports via load(*, \"*\")"
+else
+    fail "star-imports: platformName='$platform_name' (expected acme-platform-prod)"
+fi
+
+network_name=$(get_status_field "xtest/test-star-imports" "test.networkName")
+if [ "$network_name" = "acme-network-prod" ]; then
+    pass "star-imports: diamond pattern — network.star also resolved naming.star exports"
+else
+    fail "star-imports: networkName='$network_name' (expected acme-network-prod)"
+fi
+
+# ============================================================
+# TEST 5: DEPENDS_ON (CREATION SEQUENCING)
 # ============================================================
 log ""
 log "===== TEST 4: DEPENDS_ON (CREATION SEQUENCING) ====="
@@ -349,10 +388,10 @@ else
 fi
 
 # ============================================================
-# TEST 5: DEPENDS_ON (DELETION ORDERING)
+# TEST 6: DEPENDS_ON (DELETION ORDERING)
 # ============================================================
 log ""
-log "===== TEST 5: DEPENDS_ON (DELETION ORDERING) ====="
+log "===== TEST 6: DEPENDS_ON (DELETION ORDERING) ====="
 
 log "Starting deletion watcher..."
 DELETION_LOG=$(mktemp)
@@ -440,6 +479,7 @@ log "Deleting remaining test XRs..."
 kubectl delete xtest test-builtins --wait=false 2>/dev/null || true
 kubectl delete xtest test-oci --wait=false 2>/dev/null || true
 kubectl delete xtest test-schemas --wait=false 2>/dev/null || true
+kubectl delete xtest test-star-imports --wait=false 2>/dev/null || true
 
 # Wait for cleanup
 sleep 10

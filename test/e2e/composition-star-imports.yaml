@@ -1,0 +1,93 @@
+# Composition that tests transitive star imports in modules.
+# Module platform.star uses load("naming.star", "*") to pull all exports.
+# Validates that star imports inside modules (not just the main script) work.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: star-imports-test
+  labels:
+    e2e-test: star-imports
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-star-imports
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          modules:
+            # Base module with simple exports
+            naming.star: |
+              prefix = "acme"
+              suffix = "prod"
+              def resource_name(component):
+                  return prefix + "-" + component + "-" + suffix
+
+            # Module that star-imports from naming.star (transitive star import)
+            platform.star: |
+              load("naming.star", "*")
+              platform_name = resource_name("platform")
+              full_prefix = prefix + "-platform"
+
+            # Module that also star-imports naming.star (diamond pattern)
+            network.star: |
+              load("naming.star", "*")
+              network_name = resource_name("network")
+              vnet_name = prefix + "-vnet-" + suffix
+
+          source: |
+            # ============================================================
+            # E2E TRANSITIVE STAR IMPORT TEST
+            # Tests that modules can use load("x.star", "*") internally.
+            # ============================================================
+
+            # Direct star import in main script (baseline)
+            load("naming.star", "*")
+
+            # Named imports from modules that themselves use star imports
+            load("platform.star", "platform_name", "full_prefix")
+            load("network.star", "network_name", "vnet_name")
+
+            # Validate naming.star exports available via star import
+            if prefix != "acme":
+                fatal("star import: prefix should be 'acme', got '%s'" % prefix)
+            if suffix != "prod":
+                fatal("star import: suffix should be 'prod', got '%s'" % suffix)
+
+            # Validate transitive star import worked in platform.star
+            if platform_name != "acme-platform-prod":
+                fatal("transitive star import: platform_name should be 'acme-platform-prod', got '%s'" % platform_name)
+            if full_prefix != "acme-platform":
+                fatal("transitive star import: full_prefix should be 'acme-platform', got '%s'" % full_prefix)
+
+            # Validate diamond pattern: network.star also star-imported naming.star
+            if network_name != "acme-network-prod":
+                fatal("diamond star import: network_name should be 'acme-network-prod', got '%s'" % network_name)
+            if vnet_name != "acme-vnet-prod":
+                fatal("diamond star import: vnet_name should be 'acme-vnet-prod', got '%s'" % vnet_name)
+
+            # All passed - create a resource and report status
+            Resource("star-import-result", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            set_xr_status("test.starImportsWorked", True)
+            set_xr_status("test.platformName", platform_name)
+            set_xr_status("test.networkName", network_name)
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-star-imports
+spec:
+  compositionRef:
+    name: star-imports-test
+  region: us-east-1
+  environment: prod

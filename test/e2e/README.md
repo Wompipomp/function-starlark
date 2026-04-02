@@ -8,6 +8,7 @@ End-to-end tests that run function-starlark in a real Crossplane cluster.
 |------|-------------|-------------------|
 | **builtins** | `composition-builtins.yaml` | All 22 builtins: globals, safe access, Resource, conditions, events, status, connection details, schema, struct |
 | **oci-loading** | `composition-oci.yaml` | `load("oci://...")` from a local registry, transitive module resolution |
+| **star-imports** | `composition-star-imports.yaml` | Transitive `load("x.star", "*")` inside modules, diamond dependency pattern |
 | **depends-on** | `composition-depends-on.yaml` | Creation sequencing (A->B->C chain), deletion ordering via Usage resources |
 
 ## Prerequisites
