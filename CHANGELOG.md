@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/Wompipomp/function-starlark/compare/v0.8.1...v0.9.0) (2026-04-04)
+
+
+### Features
+
+* optimize OCI resolution with HEAD requests and add cycle detection for star imports ([9dba680](https://github.com/Wompipomp/function-starlark/commit/9dba68075341454f809ea52366ac4f9ecabb33c6))
+* **quick-8-01:** expand star imports in module source before compilation ([2223859](https://github.com/Wompipomp/function-starlark/commit/22238591c155e278ea300dfb05bbc45315675318))
+
+
+### Bug Fixes
+
+* mirror requirements to ExtraResources for backward compatibility with crossplane render &lt;=v1.20 ([9b16a1f](https://github.com/Wompipomp/function-starlark/commit/9b16a1f01d8e14995490ebcbedd00d43605b346b))
+
 ## [0.8.1](https://github.com/Wompipomp/function-starlark/compare/v0.8.0...v0.8.1) (2026-03-29)
 
 
