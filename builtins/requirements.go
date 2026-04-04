@@ -161,7 +161,9 @@ func dictToStringMap(d *starlark.Dict) (map[string]string, error) {
 }
 
 // ApplyRequirements sets resource requirements on the response.
-// It creates Requirements and Resources map if nil.
+// It populates both Requirements.Resources (current) and
+// Requirements.ExtraResources (deprecated) so that older Crossplane
+// versions (including crossplane render <=v1.20) can read them.
 func ApplyRequirements(rsp *fnv1.RunFunctionResponse, reqs []CollectedRequirement) {
 	if len(reqs) == 0 {
 		return
@@ -188,6 +190,10 @@ func ApplyRequirements(rsp *fnv1.RunFunctionResponse, reqs []CollectedRequiremen
 		}
 		rsp.Requirements.Resources[req.Name] = sel
 	}
+
+	// Mirror to deprecated field for backward compatibility with
+	// crossplane render <=v1.20 which only reads ExtraResources.
+	rsp.Requirements.ExtraResources = rsp.Requirements.Resources //nolint:staticcheck // intentional backward compat
 }
 
 // buildExtraResourcesDict builds a frozen starlark.Dict from request extra

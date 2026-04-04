@@ -1457,14 +1457,16 @@ func TestRunFunction(t *testing.T) {
 							Resource: resource.MustStructJSON(`{}`),
 						},
 					}
-					rsp.Requirements = &fnv1.Requirements{
-						Resources: map[string]*fnv1.ResourceSelector{
-							"my-db": {
-								ApiVersion: "rds.aws.upbound.io/v1beta1",
-								Kind:       "Instance",
-								Match:      &fnv1.ResourceSelector_MatchName{MatchName: "my-database"},
-							},
+					sel := map[string]*fnv1.ResourceSelector{
+						"my-db": {
+							ApiVersion: "rds.aws.upbound.io/v1beta1",
+							Kind:       "Instance",
+							Match:      &fnv1.ResourceSelector_MatchName{MatchName: "my-database"},
 						},
+					}
+					rsp.Requirements = &fnv1.Requirements{
+						Resources:      sel,
+						ExtraResources: sel, //nolint:staticcheck // backward compat
 					}
 					return rsp
 				}(),
