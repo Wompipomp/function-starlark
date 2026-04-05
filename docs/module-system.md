@@ -401,6 +401,12 @@ The secret must be mounted into the function pod via a
 DeploymentRuntimeConfig. For complete authentication setup (ACR, ECR, GHCR),
 see the [OCI module distribution guide](oci-module-distribution.md#authentication).
 
+For local development with `crossplane render`, use `spec.dockerConfigCredential`
+instead -- it receives Docker credentials via the gRPC request rather than a
+filesystem mount. See the
+[OCI module distribution guide](oci-module-distribution.md#local-development-with-crossplane-render)
+for setup instructions.
+
 ## See also
 
 - [OCI Module Distribution](oci-module-distribution.md) -- full guide for

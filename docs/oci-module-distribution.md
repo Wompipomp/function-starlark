@@ -408,6 +408,56 @@ kubectl create secret docker-registry ghcr-creds \
   -n crossplane-system
 ```
 
+### Local development with `crossplane render`
+
+`crossplane render` cannot mount volumes into function containers. To access
+private registries during local rendering, use `--function-credentials` to pass
+Docker credentials via gRPC:
+
+**1. Generate a credentials file from your local Docker config:**
+
+```bash
+kubectl create secret generic docker-config \
+  --from-file=config.json=$HOME/.docker/config.json \
+  --dry-run=client -o yaml > credentials.yaml
+```
+
+**2. Add `credentials` block and `dockerConfigCredential` to your Composition:**
+
+```yaml
+pipeline:
+- step: starlark
+  functionRef:
+    name: function-starlark
+  credentials:
+  - name: registry-creds
+    source: Secret
+    secretRef:
+      name: docker-config
+      namespace: default
+  input:
+    apiVersion: starlark.fn.crossplane.io/v1alpha1
+    kind: StarlarkInput
+    spec:
+      dockerConfigCredential: registry-creds
+      source: |
+        load("oci://myregistry.azurecr.io/modules/helpers:v1/helpers.star", "*")
+```
+
+**3. Render with credentials:**
+
+```bash
+crossplane render xr.yaml composition.yaml functions.yaml \
+  --function-credentials credentials.yaml
+```
+
+This works with any registry you've authenticated to via `docker login`,
+`az acr login`, or similar.
+
+> **Note:** The `secretRef.namespace` in the Composition's `credentials` block
+> must match the `metadata.namespace` in the `credentials.yaml` file used with
+> `crossplane render`. The CLI matches credentials by both name and namespace.
+
 ## Caching
 
 OCI modules are cached in-memory with a two-layer architecture:

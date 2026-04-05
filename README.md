@@ -178,6 +178,7 @@ All fields under `spec` in a `StarlarkInput` resource:
 | `modules` | map[string]string | -- | Inline modules loadable via `load("name.star", "func")` |
 | `modulePaths` | []string | -- | Additional filesystem directories for module resolution |
 | `dockerConfigSecret` | string | -- | Kubernetes Secret name for private OCI registry credentials |
+| `dockerConfigCredential` | string | -- | gRPC credential name for private OCI registry auth (for `crossplane render`) |
 | `ociDefaultRegistry` | string | -- | Default OCI registry for short-form `load()` targets |
 | `ociInsecureRegistries` | []string | -- | Registries to access over plain HTTP (development only) |
 | `usageAPIVersion` | string | `v2` | Crossplane Usage API version -- `v1` (Crossplane 1.x) or `v2` (Crossplane 2.x) |
@@ -233,6 +234,7 @@ spec:
     - /scripts/shared-lib
 
   dockerConfigSecret: registry-creds
+  dockerConfigCredential: registry-creds
   ociDefaultRegistry: "ghcr.io/my-org"
   ociInsecureRegistries: ["localhost:5050"]
   usageAPIVersion: "v2"

@@ -28,6 +28,7 @@ spec:
 | ociDefaultRegistry | string | -- | Default OCI registry for short-form load syntax. Overrides STARLARK_OCI_DEFAULT_REGISTRY env var. |
 | ociInsecureRegistries | []string | -- | HTTP-only registries (dev only). Overrides STARLARK_OCI_INSECURE_REGISTRIES env var. |
 | dockerConfigSecret | string | -- | Secret name for private OCI registry auth. Overrides STARLARK_DOCKER_CONFIG_SECRET env var. |
+| dockerConfigCredential | string | -- | gRPC credential name for private OCI registry auth. Used with crossplane render --function-credentials or Composition credentials block. |
 | usageAPIVersion | string | v2 | Crossplane Usage API version: v1 (Crossplane 1.x) or v2 (Crossplane 2.x, default). Overrides STARLARK_USAGE_API_VERSION env var. |
 | sequencingTTL | duration | 10s | Response TTL when creation sequencing defers resources |
 
@@ -241,6 +242,7 @@ Configuration (spec fields override env vars):
 - `spec.ociDefaultRegistry` / `STARLARK_OCI_DEFAULT_REGISTRY` env var
 - `spec.ociInsecureRegistries` / `STARLARK_OCI_INSECURE_REGISTRIES` env var (comma-separated)
 - `spec.dockerConfigSecret` / `STARLARK_DOCKER_CONFIG_SECRET` env var
+- `spec.dockerConfigCredential` (gRPC credential for crossplane render / Composition credentials block)
 - `spec.usageAPIVersion` / `STARLARK_USAGE_API_VERSION` env var
 - `STARLARK_OCI_CACHE_TTL` env var (pod-level only, default 5m)
 
