@@ -3684,6 +3684,137 @@ func TestRunFunctionDefaultRegistryNotConfigured(t *testing.T) {
 	assertFatalResult(t, rsp, "requires a default OCI registry", "STARLARK_OCI_DEFAULT_REGISTRY", "spec.ociDefaultRegistry")
 }
 
+func TestRunFunctionOCICredentialKeychain(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	cache.PutContent("sha256:abc123", map[string]string{
+		"helpers.star": `def greet(name): return "cred-hello " + name`,
+	})
+	cache.PutTag("myregistry.azurecr.io/modules/helpers:v1", "sha256:abc123")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"dockerConfigCredential": "registry-creds",
+				"source": "load(\"oci://myregistry.azurecr.io/modules/helpers:v1/helpers.star\", \"greet\")\nResource(\"test\", {\"greeting\": greet(\"world\")})"
+			}
+		}`),
+		Credentials: map[string]*fnv1.Credentials{
+			"registry-creds": {
+				Source: &fnv1.Credentials_CredentialData{
+					CredentialData: &fnv1.CredentialData{
+						Data: map[string][]byte{
+							"config.json": []byte(`{"auths":{"myregistry.azurecr.io":{"auth":"dXNlcjpwYXNz"}}}`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	greeting := testRes.GetResource().GetFields()["greeting"].GetStringValue()
+	if greeting != "cred-hello world" {
+		t.Errorf("greeting = %q, want 'cred-hello world'", greeting)
+	}
+}
+
+func TestRunFunctionOCICredentialMissingFallback(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	cache.PutContent("sha256:abc123", map[string]string{
+		"helpers.star": `def greet(name): return "fallback-hello " + name`,
+	})
+	cache.PutTag("myregistry.azurecr.io/modules/helpers:v1", "sha256:abc123")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	// Set dockerConfigCredential but do NOT include it in request credentials.
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"dockerConfigCredential": "missing-creds",
+				"source": "load(\"oci://myregistry.azurecr.io/modules/helpers:v1/helpers.star\", \"greet\")\nResource(\"test\", {\"greeting\": greet(\"world\")})"
+			}
+		}`),
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+
+	testRes, ok := rsp.GetDesired().GetResources()["test"]
+	if !ok {
+		t.Fatal("expected 'test' resource in desired state")
+	}
+	greeting := testRes.GetResource().GetFields()["greeting"].GetStringValue()
+	if greeting != "fallback-hello world" {
+		t.Errorf("greeting = %q, want 'fallback-hello world'", greeting)
+	}
+}
+
+func TestRunFunctionOCICredentialNoConfigKey(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	cache := oci.NewCache(5 * time.Minute)
+
+	cache.PutContent("sha256:abc123", map[string]string{
+		"helpers.star": `val = "ok"`,
+	})
+	cache.PutTag("ghcr.io/org/lib:v1", "sha256:abc123")
+
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {
+				"dockerConfigCredential": "bad-creds",
+				"source": "load(\"oci://ghcr.io/org/lib:v1/helpers.star\", \"val\")\nResource(\"test\", {\"v\": val})"
+			}
+		}`),
+		Credentials: map[string]*fnv1.Credentials{
+			"bad-creds": {
+				Source: &fnv1.Credentials_CredentialData{
+					CredentialData: &fnv1.CredentialData{
+						Data: map[string][]byte{
+							"wrong-key": []byte(`not a docker config`),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+
+	assertNormalResult(t, rsp)
+}
+
 // testOCIFetcher is a mock OCI fetcher for E2E tests.
 type testOCIFetcher struct {
 	images map[string]v1.Image

@@ -42,6 +42,13 @@ spec:
           spec:
             description: Spec contains the function configuration.
             properties:
+              dockerConfigCredential:
+                description: |-
+                  DockerConfigCredential is the name of a gRPC credential containing a
+                  Docker config.json for private OCI registry authentication. The credential
+                  is delivered via the Composition's credentials block or crossplane render
+                  --function-credentials flag. The Data map must contain a "config.json" key.
+                type: string
               dockerConfigSecret:
                 description: |-
                   DockerConfigSecret is the name of a Kubernetes Secret containing Docker
