@@ -52,6 +52,13 @@ type StarlarkInputSpec struct {
 	// +optional
 	DockerConfigSecret string `json:"dockerConfigSecret,omitempty"`
 
+	// DockerConfigCredential is the name of a gRPC credential containing a
+	// Docker config.json for private OCI registry authentication. The credential
+	// is delivered via the Composition's credentials block or crossplane render
+	// --function-credentials flag. The Data map must contain a "config.json" key.
+	// +optional
+	DockerConfigCredential string `json:"dockerConfigCredential,omitempty"`
+
 	// OCIDefaultRegistry overrides the operator-level default OCI registry
 	// (STARLARK_OCI_DEFAULT_REGISTRY env var) for this composition.
 	// Format: "registry/namespace" (e.g. "ghcr.io/my-org").

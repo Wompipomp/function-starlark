@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -171,6 +172,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			dockerConfigSecret = os.Getenv("STARLARK_DOCKER_CONFIG_SECRET")
 		}
 
+		// Resolve gRPC credential name for OCI registry auth.
+		dockerConfigCredential := in.Spec.DockerConfigCredential
+
 		// Resolve effective insecure registries (spec > env var, comma-separated).
 		insecureRegistries := in.Spec.OCIInsecureRegistries
 		if len(insecureRegistries) == 0 {
@@ -184,8 +188,28 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		}
 
 		if len(ociTargets) > 0 {
-			// Build keychain from Docker config secret if specified.
-			keychain := buildKeychain(dockerConfigSecret)
+			// Build keychain chain: gRPC credential > filesystem secret > default.
+			var keychains []authn.Keychain
+
+			// 1. gRPC credential (crossplane render --function-credentials / Composition credentials block).
+			if dockerConfigCredential != "" {
+				cred, err := request.GetCredentials(req, dockerConfigCredential)
+				if err == nil {
+					if kc := buildKeychainFromCredential(cred.Data); kc != nil {
+						keychains = append(keychains, kc)
+					}
+				}
+			}
+
+			// 2. Filesystem secret (DeploymentRuntimeConfig volume mount).
+			if fsKC := buildKeychain(dockerConfigSecret); fsKC != authn.DefaultKeychain {
+				keychains = append(keychains, fsKC)
+			}
+
+			// 3. Default keychain (host Docker config).
+			keychains = append(keychains, authn.DefaultKeychain)
+
+			keychain := authn.NewMultiKeychain(keychains...)
 
 			fetcher := f.ociFetcher
 			if fetcher == nil {
@@ -443,6 +467,51 @@ func (k *configDirKeychain) Resolve(target authn.Resource) (authn.Authenticator,
 		IdentityToken: cfg.IdentityToken,
 		RegistryToken: cfg.RegistryToken,
 	}), nil
+}
+
+// credentialKeychain implements authn.Keychain by loading credentials from
+// Docker config.json bytes delivered via gRPC credential data.
+type credentialKeychain struct {
+	data []byte
+}
+
+func (k *credentialKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
+	cf, err := config.LoadFromReader(bytes.NewReader(k.data))
+	if err != nil {
+		return authn.Anonymous, nil
+	}
+	var cfg, empty types.AuthConfig
+	for _, key := range []string{target.String(), target.RegistryStr()} {
+		cfg, err = cf.GetAuthConfig(key)
+		if err != nil {
+			return authn.Anonymous, nil
+		}
+		cfg.ServerAddress = ""
+		if cfg != empty {
+			break
+		}
+	}
+	if cfg == empty {
+		return authn.Anonymous, nil
+	}
+	return authn.FromConfig(authn.AuthConfig{
+		Username:      cfg.Username,
+		Password:      cfg.Password,
+		Auth:          cfg.Auth,
+		IdentityToken: cfg.IdentityToken,
+		RegistryToken: cfg.RegistryToken,
+	}), nil
+}
+
+// buildKeychainFromCredential creates an authn.Keychain from gRPC credential
+// data containing a Docker config.json. Returns nil if the data map does not
+// contain a "config.json" key.
+func buildKeychainFromCredential(data map[string][]byte) authn.Keychain {
+	configJSON, ok := data["config.json"]
+	if !ok {
+		return nil
+	}
+	return &credentialKeychain{data: configJSON}
 }
 
 // loadScript reads a Starlark script from a ConfigMap volume mount.
