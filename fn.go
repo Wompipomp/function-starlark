@@ -504,12 +504,16 @@ func (k *credentialKeychain) Resolve(target authn.Resource) (authn.Authenticator
 }
 
 // buildKeychainFromCredential creates an authn.Keychain from gRPC credential
-// data containing a Docker config.json. Returns nil if the data map does not
-// contain a "config.json" key.
+// data containing a Docker config.json. Checks "config.json" first (generic
+// secrets), then ".dockerconfigjson" (kubernetes.io/dockerconfigjson secrets).
+// Returns nil if neither key is found.
 func buildKeychainFromCredential(data map[string][]byte) authn.Keychain {
 	configJSON, ok := data["config.json"]
 	if !ok {
-		return nil
+		configJSON, ok = data[".dockerconfigjson"]
+		if !ok {
+			return nil
+		}
 	}
 	return &credentialKeychain{data: configJSON}
 }

@@ -242,7 +242,7 @@ Configuration (spec fields override env vars):
 - `spec.ociDefaultRegistry` / `STARLARK_OCI_DEFAULT_REGISTRY` env var
 - `spec.ociInsecureRegistries` / `STARLARK_OCI_INSECURE_REGISTRIES` env var (comma-separated)
 - `spec.dockerConfigSecret` / `STARLARK_DOCKER_CONFIG_SECRET` env var
-- `spec.dockerConfigCredential` (gRPC credential for crossplane render / Composition credentials block)
+- `spec.dockerConfigCredential` (gRPC credential name for private OCI registry auth — used with `crossplane render --function-credentials` locally or Composition `credentials` block in-cluster. Accepts secrets with `config.json` or `.dockerconfigjson` keys. Keychain priority: gRPC credential > filesystem secret > default)
 - `spec.usageAPIVersion` / `STARLARK_USAGE_API_VERSION` env var
 - `STARLARK_OCI_CACHE_TTL` env var (pod-level only, default 5m)
 

@@ -402,10 +402,11 @@ DeploymentRuntimeConfig. For complete authentication setup (ACR, ECR, GHCR),
 see the [OCI module distribution guide](oci-module-distribution.md#authentication).
 
 For local development with `crossplane render`, use `spec.dockerConfigCredential`
-instead -- it receives Docker credentials via the gRPC request rather than a
-filesystem mount. See the
+instead — it passes Docker credentials via gRPC since `crossplane render` cannot
+mount volumes into function containers. Both fields can coexist in the same
+Composition (gRPC credential is tried first, filesystem secret second). See the
 [OCI module distribution guide](oci-module-distribution.md#local-development-with-crossplane-render)
-for setup instructions.
+for setup instructions including Azure ACR token generation.
 
 ## See also
 

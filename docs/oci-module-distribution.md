@@ -410,19 +410,120 @@ kubectl create secret docker-registry ghcr-creds \
 
 ### Local development with `crossplane render`
 
-`crossplane render` cannot mount volumes into function containers. To access
-private registries during local rendering, use `--function-credentials` to pass
-Docker credentials via gRPC:
+`crossplane render` cannot mount volumes into function containers, so the
+in-cluster `dockerConfigSecret` + DeploymentRuntimeConfig approach does not work
+locally. Instead, use `dockerConfigCredential` to pass Docker credentials via
+the gRPC request.
 
-**1. Generate a credentials file from your local Docker config:**
+#### How it works
+
+`crossplane render --function-credentials <file>` reads a Kubernetes Secret
+manifest from the file and delivers its data to the function via gRPC. The
+function extracts the Docker `config.json` (or `.dockerconfigjson`) from the
+credential data and uses it to authenticate against private registries.
+
+Both mechanisms can coexist in the same Composition:
+
+| Mechanism | Field | When used |
+|-----------|-------|-----------|
+| gRPC credential | `dockerConfigCredential` | `crossplane render` locally + in-cluster via Composition `credentials` block |
+| Filesystem mount | `dockerConfigSecret` | In-cluster via DeploymentRuntimeConfig (set via env var `STARLARK_DOCKER_CONFIG_SECRET`) |
+
+The keychain priority is: gRPC credential → filesystem secret → host default.
+
+#### Step 1: Generate a credentials file
+
+> **Important:** If Docker Desktop is installed, `~/.docker/config.json` likely
+> contains `"credsStore": "desktop"` instead of actual credentials. This means
+> the real tokens are in Docker Desktop's keychain, not in the file — and they
+> won't be available to `crossplane render`. You must generate a credentials
+> file with inline credentials instead.
+
+**Azure Container Registry:**
 
 ```bash
+# Get an ACR access token and build a config.json with inline credentials
+TOKEN=$(az acr login --name myregistry --expose-token --output tsv --query accessToken)
+AUTH=$(printf '00000000-0000-0000-0000-000000000000:%s' "$TOKEN" | base64)
+printf '{"auths":{"myregistry.azurecr.io":{"auth":"%s"}}}' "$AUTH" > /tmp/config.json
+
+kubectl create secret generic docker-config \
+  --from-file=config.json=/tmp/config.json \
+  --namespace=crossplane-system \
+  --dry-run=client -o yaml > credentials.yaml
+
+rm /tmp/config.json
+```
+
+> The ACR token expires after ~3 hours. Re-run the commands to refresh.
+
+**GitHub Container Registry (GHCR):**
+
+```bash
+# Create a PAT at GitHub → Settings → Developer settings → Personal access tokens
+# with read:packages scope. The PAT is used directly — no token exchange needed.
+AUTH=$(printf '<github-username>:<github-pat>' | base64)
+printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' "$AUTH" > /tmp/config.json
+
+kubectl create secret generic docker-config \
+  --from-file=config.json=/tmp/config.json \
+  --namespace=crossplane-system \
+  --dry-run=client -o yaml > credentials.yaml
+
+rm /tmp/config.json
+```
+
+**GitLab Container Registry:**
+
+```bash
+# Create a PAT at GitLab → Settings → Access Tokens with read_registry scope,
+# or use a deploy token (username is the deploy token name, not your GitLab username).
+AUTH=$(printf '<username>:<token>' | base64)
+printf '{"auths":{"registry.gitlab.com":{"auth":"%s"}}}' "$AUTH" > /tmp/config.json
+
+kubectl create secret generic docker-config \
+  --from-file=config.json=/tmp/config.json \
+  --namespace=crossplane-system \
+  --dry-run=client -o yaml > credentials.yaml
+
+rm /tmp/config.json
+```
+
+**Amazon ECR:**
+
+```bash
+# ECR tokens expire every 12 hours — re-run to refresh.
+TOKEN=$(aws ecr get-login-password --region us-east-1)
+AUTH=$(printf 'AWS:%s' "$TOKEN" | base64)
+printf '{"auths":{"123456789.dkr.ecr.us-east-1.amazonaws.com":{"auth":"%s"}}}' "$AUTH" > /tmp/config.json
+
+kubectl create secret generic docker-config \
+  --from-file=config.json=/tmp/config.json \
+  --namespace=crossplane-system \
+  --dry-run=client -o yaml > credentials.yaml
+
+rm /tmp/config.json
+```
+
+**Multiple registries in one file:**
+
+```bash
+# Combine multiple registries into a single credentials file
+printf '{"auths":{"ghcr.io":{"auth":"%s"},"registry.gitlab.com":{"auth":"%s"}}}' \
+  "$GHCR_AUTH" "$GITLAB_AUTH" > /tmp/config.json
+```
+
+**Other registries / no `credsStore`:**
+
+```bash
+# If your ~/.docker/config.json already contains inline credentials:
 kubectl create secret generic docker-config \
   --from-file=config.json=$HOME/.docker/config.json \
+  --namespace=crossplane-system \
   --dry-run=client -o yaml > credentials.yaml
 ```
 
-**2. Add `credentials` block and `dockerConfigCredential` to your Composition:**
+#### Step 2: Add `dockerConfigCredential` to your Composition
 
 ```yaml
 pipeline:
@@ -434,7 +535,7 @@ pipeline:
     source: Secret
     secretRef:
       name: docker-config
-      namespace: default
+      namespace: crossplane-system
   input:
     apiVersion: starlark.fn.crossplane.io/v1alpha1
     kind: StarlarkInput
@@ -444,19 +545,37 @@ pipeline:
         load("oci://myregistry.azurecr.io/modules/helpers:v1/helpers.star", "*")
 ```
 
-**3. Render with credentials:**
+#### Step 3: Render
 
 ```bash
 crossplane render xr.yaml composition.yaml functions.yaml \
   --function-credentials credentials.yaml
 ```
 
-This works with any registry you've authenticated to via `docker login`,
-`az acr login`, or similar.
+#### Namespace matching
 
-> **Note:** The `secretRef.namespace` in the Composition's `credentials` block
-> must match the `metadata.namespace` in the `credentials.yaml` file used with
-> `crossplane render`. The CLI matches credentials by both name and namespace.
+`crossplane render` matches credentials by **both name and namespace**. The
+`secretRef` in the Composition must exactly match the `metadata` in your
+credentials file:
+
+```yaml
+# credentials.yaml                       # Composition secretRef
+metadata:                                 secretRef:
+  name: docker-config           ← must →    name: docker-config
+  namespace: crossplane-system  ← match →   namespace: crossplane-system
+```
+
+If they don't match, the credential won't be found and the function silently
+falls back to the default keychain (which will fail for private registries).
+
+#### Coexisting with in-cluster `dockerConfigSecret`
+
+If your in-cluster setup uses `dockerConfigSecret` via DeploymentRuntimeConfig
+and environment variable, you can add `dockerConfigCredential` to the same
+Composition without conflict. The gRPC credential is only used when present in
+the request — during `crossplane render` or when the Composition has a
+`credentials` block pointing to a valid Secret. In-cluster, the filesystem
+secret still works independently via the env var.
 
 ## Caching
 
