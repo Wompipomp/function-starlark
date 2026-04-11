@@ -8,7 +8,11 @@ import (
 	"github.com/crossplane/function-sdk-go/logging"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/wompipomp/function-starlark/convert"
 	"github.com/wompipomp/function-starlark/runtime"
 )
 
@@ -31,7 +35,7 @@ import (
 //   Layer 3 (protobuf round-trip through convert.PlainDictToStruct):
 //     - TestJSON_RoundTrip_ToProtobuf   (added in Task 2 of this plan)
 //
-// Fixtures are all inline Go string/map literals (no testdata/, no .star files)
+// Fixtures are all inline Go string/map literals (no external fixture files)
 // per 29-CONTEXT.md §Fixture placement.
 // ---------------------------------------------------------------------------
 
@@ -407,4 +411,189 @@ func TestJSON_NegativeCases(t *testing.T) {
 		`x = json.decode("not json")`,
 		"json",
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Layer 3 — full protobuf round-trip through convert.PlainDictToStruct.
+//
+// NOTE on int64 boundaries: math.MaxInt64 / math.MinInt64 and any value
+// with |n| > 2^53 - 1 are deliberately EXCLUDED from this layer. The
+// convert layer enforces a safe-integer ceiling at 2^53 in
+// convert/convert.go:234 so that all round-tripped numbers are exactly
+// representable as float64 on the protobuf side. int64 edge cases are
+// exercised only at the Starlark level in TestJSON_RoundTrip_ViaRuntime,
+// per 29-RESEARCH.md §Pitfall 3 and 29-CONTEXT.md §Round-trip edge cases.
+//
+// TestJSON_RoundTrip_ToProtobuf is the canonical proof of SC3 —
+// "byte-identical round-trip of an observed resource body."
+// ---------------------------------------------------------------------------
+
+func TestJSON_RoundTrip_ToProtobuf(t *testing.T) {
+	// Helpers for building structpb.Value instances.
+	str := structpb.NewStringValue
+	num := structpb.NewNumberValue
+	nul := structpb.NewNullValue
+	stct := func(fields map[string]*structpb.Value) *structpb.Value {
+		return structpb.NewStructValue(&structpb.Struct{Fields: fields})
+	}
+	lst := func(values ...*structpb.Value) *structpb.Value {
+		return structpb.NewListValue(&structpb.ListValue{Values: values})
+	}
+
+	cases := []struct {
+		name     string
+		original *structpb.Struct
+	}{
+		{
+			name: "k8s_deployment",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"apiVersion": str("apps/v1"),
+				"kind":       str("Deployment"),
+				"metadata": stct(map[string]*structpb.Value{
+					"name":   str("web"),
+					"labels": stct(map[string]*structpb.Value{"app": str("web")}),
+				}),
+				"spec": stct(map[string]*structpb.Value{
+					"replicas": num(3),
+					"selector": stct(map[string]*structpb.Value{
+						"matchLabels": stct(map[string]*structpb.Value{"app": str("web")}),
+					}),
+				}),
+			}},
+		},
+		{
+			name: "k8s_configmap",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"apiVersion": str("v1"),
+				"kind":       str("ConfigMap"),
+				"metadata":   stct(map[string]*structpb.Value{"name": str("cfg")}),
+				"data": stct(map[string]*structpb.Value{
+					"key1": str("v1"),
+					"key2": str("v2"),
+				}),
+			}},
+		},
+		{
+			name: "null_value",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"a": nul(),
+				"b": str("x"),
+			}},
+		},
+		{
+			name: "empty_dict",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"a": stct(map[string]*structpb.Value{}),
+			}},
+		},
+		{
+			name: "empty_list",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"a": lst(),
+			}},
+		},
+		{
+			name: "nested_empty",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"a": stct(map[string]*structpb.Value{}),
+				"b": lst(),
+			}},
+		},
+		{
+			name: "escaped_ascii",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"s": str(`a "b" c\d`),
+			}},
+		},
+		{
+			name: "unicode_bmp_astral",
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"s": str("héllo 🌍"),
+			}},
+		},
+		{
+			name: "ints_safe_range",
+			// All inside [-(2^53 - 1), 2^53 - 1]; 9007199254740991 == 2^53-1.
+			// See convert/convert.go:234 (maxSafeInt guard) for rationale.
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"zero": num(0),
+				"one":  num(1),
+				"neg":  num(-1),
+				"max":  num(9007199254740991),
+				"min":  num(-9007199254740991),
+			}},
+		},
+		{
+			name: "floats",
+			// Note: floats must be non-whole or within [−2^53, 2^53] to
+			// survive convert.convertNumber's int64-range guard. Large
+			// whole-value floats such as 1.23e45 are rejected at input.
+			// Non-whole values always pass straight through as starlark.Float.
+			original: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"half":     num(1.5),
+				"neghalf":  num(-0.5),
+				"pi":       num(3.14159),
+				"smallsci": num(1.23e-5),
+				"bignonwh": num(1.2345e10), // non-whole, safely inside int64
+			}},
+		},
+	}
+
+	// rtHelper is a shared Runtime for all subtests (the bytecode cache
+	// keys on source+filename, so subtests that use different source bodies
+	// each get their own compilation).
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Seed the `body` global via protojson → json.decode in the
+			// script. This path mirrors production (a request Struct
+			// becomes a plain *starlark.Dict after json.decode) and avoids
+			// the *convert.StarlarkDict wrapper type, which upstream
+			// json.encode does not recognize as a mapping (it falls back
+			// to Iterable and emits a JSON array of keys — see
+			// RESEARCH.md §Pitfall 1 / Plan 02 execution note).
+			jsonBytes, err := protojson.Marshal(tc.original)
+			if err != nil {
+				t.Fatalf("protojson.Marshal: %v", err)
+			}
+
+			req := makeReq(nil, nil, nil)
+			c := NewCollector(NewConditionCollector(), "test.star", nil)
+			globals, err := testBuildGlobals(req, c)
+			if err != nil {
+				t.Fatalf("testBuildGlobals: %v", err)
+			}
+			globals["body_json"] = starlark.String(string(jsonBytes))
+
+			out, err := rt.Execute(
+				`body = json.decode(body_json)
+decoded = json.decode(json.encode(body))`,
+				globals,
+				"test.star",
+				nil,
+			)
+			if err != nil {
+				t.Fatalf("rt.Execute: %v", err)
+			}
+
+			// json.decode always returns a plain *starlark.Dict. For
+			// top-level matrix rows whose root is a JSON object, decoded
+			// must type-assert to *starlark.Dict for the convert layer.
+			decoded, ok := out["decoded"].(*starlark.Dict)
+			if !ok {
+				t.Fatalf(`out["decoded"] is %T, want *starlark.Dict`, out["decoded"])
+			}
+
+			got, err := convert.PlainDictToStruct(decoded)
+			if err != nil {
+				t.Fatalf("convert.PlainDictToStruct: %v", err)
+			}
+
+			if !proto.Equal(tc.original, got) {
+				t.Errorf("case %q: proto mismatch\n original=%v\n got=%v", tc.name, tc.original, got)
+			}
+		})
+	}
 }
