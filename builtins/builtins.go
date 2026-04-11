@@ -6,6 +6,7 @@ import (
 
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
 	"github.com/crossplane/function-sdk-go/resource"
+	starlarkjson "go.starlark.net/lib/json"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 
@@ -105,6 +106,7 @@ func BuildGlobals(
 		"schema":                  schema.SchemaBuiltin(),
 		"field":                   schema.FieldBuiltin(),
 		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),
+		"json":                    starlarkjson.Module,
 	}, nil
 }
 
