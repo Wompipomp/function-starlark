@@ -247,12 +247,13 @@ function-starlark-specific:
 
 ## function-starlark builtins
 
-On top of standard Starlark, function-starlark adds 21 predeclared names:
+On top of standard Starlark, function-starlark adds 22 predeclared names:
 6 globals (`oxr`, `dxr`, `observed`, `context`, `environment`,
-`extra_resources`) and 15 functions (`Resource`, `skip_resource`, `get`,
+`extra_resources`) and 16 functions (`Resource`, `skip_resource`, `get`,
 `get_label`, `get_annotation`, `set_condition`, `emit_event`, `fatal`,
 `set_connection_details`, `set_xr_status`, `get_observed`,
-`require_extra_resource`, `require_extra_resources`, `schema`, `field`).
+`require_extra_resource`, `require_extra_resources`, `schema`, `field`,
+`struct`).
 
 See the [builtins reference](builtins-reference.md) for complete signatures,
 parameter types, defaults, and examples.
