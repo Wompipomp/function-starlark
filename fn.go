@@ -367,6 +367,15 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			}
 		}
 
+		// User-set TTL overrides sequencing TTL (CONTEXT.md decision: user intent wins).
+		if userTTL := ttlCollector.TTL(); userTTL != nil {
+			if *userTTL == 0 {
+				rsp.Meta.Ttl = nil // Zero clears TTL, use Crossplane default.
+			} else {
+				rsp.Meta.Ttl = durationpb.New(*userTTL)
+			}
+		}
+
 		// Apply collected resources to response (merges with prior desired state).
 		if err := builtins.ApplyResources(rsp, collector); err != nil {
 			fatal(errors.Wrapf(err, "applying composed resources"))
