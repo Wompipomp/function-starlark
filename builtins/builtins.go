@@ -107,6 +107,7 @@ func BuildGlobals(
 		"field":                   schema.FieldBuiltin(),
 		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),
 		"json":                    starlarkjson.Module,
+		"crypto":                  CryptoModule,
 	}, nil
 }
 
