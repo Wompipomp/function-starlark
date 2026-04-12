@@ -11,8 +11,9 @@ _MIN_XR_LEN = 8
 def _sanitize(name):
     """Normalize a string to a valid DNS-1123 label component.
 
-    Lowercases, replaces non-alphanumeric characters with hyphens,
-    collapses consecutive hyphens, and strips leading/trailing hyphens.
+    Uses regex-based normalization: lowercases, replaces runs of
+    non-alphanumeric characters with a single hyphen, and strips
+    leading/trailing hyphens.
 
     Args:
       name: String to sanitize
@@ -20,41 +21,24 @@ def _sanitize(name):
     Returns:
       DNS-1123 label-safe string
     """
-    result = ""
-    for c in name.elems():
-        lc = c.lower()
-        if ("a" <= lc and lc <= "z") or ("0" <= lc and lc <= "9"):
-            result += lc
-        else:
-            result += "-"
-    while "--" in result:
-        result = result.replace("--", "-")
+    result = regex.replace_all(r"[^a-z0-9]+", name.lower(), "-")
     return result.strip("-")
 
 def hash_suffix(name, length = _HASH_LEN):
-    """Generate a short deterministic hash suffix from a string.
+    """Generate a short deterministic hex hash suffix from a string.
 
-    Uses base-36 encoding of the built-in hash() value to produce a
-    compact, deterministic suffix for name truncation.
+    Delegates to crypto.stable_id which returns the first `length`
+    hex characters of a SHA-256 digest, providing a compact and
+    deterministic suffix for name truncation.
 
     Args:
       name: String to hash
       length: Desired suffix length (default: 5)
 
     Returns:
-      Base-36 encoded hash string of the specified length
+      Hex hash string of the specified length
     """
-    h = hash(name)
-    if h < 0:
-        h = -h
-    chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-    result = ""
-    while h > 0 and len(result) < length:
-        result = chars[h % 36] + result
-        h = h // 36
-    while len(result) < length:
-        result = "0" + result
-    return result
+    return crypto.stable_id(name, length = length)
 
 def resource_name(suffix, xr_name = None):
     """Generate a Kubernetes-safe resource name.
