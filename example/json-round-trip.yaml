@@ -1,0 +1,42 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xconfigs.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XConfig
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # JSON round-trip: parse config from annotation, modify, re-encode.
+            # Demonstrates: json.decode(), json.encode(), json.encode_indent()
+
+            config_json = get_annotation(oxr, "example.io/config", "{}")
+            config = json.decode(config_json)
+            config["managed"] = True
+            config["timestamp"] = "2024-01-01"
+
+            Resource("configmap", {
+                "apiVersion": "kubernetes.crossplane.io/v1alpha2",
+                "kind": "Object",
+                "spec": {
+                    "forProvider": {
+                        "manifest": {
+                            "apiVersion": "v1",
+                            "kind": "ConfigMap",
+                            "metadata": {"name": get(oxr, "metadata.name", "config") + "-app"},
+                            "data": {"config.json": json.encode_indent(config, indent="  ")},
+                        },
+                    },
+                },
+            })
+
+            set_condition("Ready", "True", "Available", "ConfigMap created with %d keys" % len(config))

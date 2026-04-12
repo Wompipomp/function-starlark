@@ -1,0 +1,44 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xprovisioners.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XProvisioner
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Adaptive requeue intervals based on resource readiness.
+            # Demonstrates: set_response_ttl() with string and int forms
+
+            xr_name = get(oxr, "metadata.name", "unknown")
+            region = get(oxr, "spec.region", "us-east-1")
+
+            # Create a slow-provisioning resource (e.g., RDS cluster)
+            Resource("cluster", {
+                "apiVersion": "rds.aws.upbound.io/v1beta2",
+                "kind": "Cluster",
+                "metadata": {"name": xr_name + "-cluster"},
+                "spec": {"forProvider": {"region": region, "engine": "aurora-postgresql"}},
+            })
+
+            # Adaptive TTL: fast polling while waiting, slow when ready
+            if not is_observed("cluster"):
+                set_response_ttl("15s")  # first reconcile -- medium poll
+                set_condition("Ready", "False", "Provisioning", "Waiting for cluster creation")
+            else:
+                cond = get_condition("cluster", "Ready")
+                if cond and cond["status"] == "True":
+                    set_response_ttl("5m")  # ready -- slow poll
+                    set_condition("Ready", "True", "Available", "Cluster ready in %s" % region)
+                else:
+                    set_response_ttl(30)  # int form: 30 seconds while provisioning
+                    set_condition("Ready", "False", "Provisioning", "Cluster provisioning in %s" % region)

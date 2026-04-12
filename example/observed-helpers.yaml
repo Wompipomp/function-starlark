@@ -1,0 +1,64 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xstacks.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XStack
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # First-reconcile safe patterns with observed helpers.
+            # Demonstrates: is_observed(), observed_body(), get_condition(), get_extra_resource()
+
+            xr_name = get(oxr, "metadata.name", "unknown")
+            region = get(oxr, "spec.region", "us-east-1")
+
+            # Read extra resource field in one call
+            cluster_version = get_extra_resource("cluster", "status.version", "1.28")
+
+            # Create the database
+            Resource("database", {
+                "apiVersion": "rds.aws.upbound.io/v1beta1",
+                "kind": "Instance",
+                "metadata": {"name": xr_name + "-db"},
+                "spec": {"forProvider": {"region": region, "engine": "postgres"}},
+            })
+
+            # Safe first-reconcile pattern: only create app after database is observed
+            if is_observed("database"):
+                db = observed_body("database", default={})
+                db_host = get(db, "status.atProvider.address", "pending")
+
+                # Check database readiness via condition
+                cond = get_condition("database", "Ready")
+                db_ready = cond and cond["status"] == "True"
+
+                if db_ready:
+                    Resource("app", {
+                        "apiVersion": "kubernetes.crossplane.io/v1alpha2",
+                        "kind": "Object",
+                        "spec": {
+                            "forProvider": {
+                                "manifest": {
+                                    "apiVersion": "apps/v1",
+                                    "kind": "Deployment",
+                                    "metadata": {"name": xr_name + "-app"},
+                                    "spec": {"template": {"spec": {"containers": [{
+                                        "name": "app",
+                                        "env": [{"name": "DB_HOST", "value": db_host}],
+                                    }]}}},
+                                },
+                            },
+                        },
+                    })
+
+            set_condition("Ready", "True", "Available", "Stack reconciled")

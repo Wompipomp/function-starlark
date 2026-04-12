@@ -1,0 +1,47 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xappconfigs.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XAppConfig
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Generate a ConfigMap with YAML-encoded application config.
+            # Demonstrates: yaml.encode()
+
+            app_name = get(oxr, "spec.appName", "myapp")
+            replicas = get(oxr, "spec.replicas", 3)
+            region = get(oxr, "spec.region", "us-east-1")
+
+            app_config = {
+                "app": {"name": app_name, "replicas": replicas},
+                "database": {"host": "%s-db.%s.rds.amazonaws.com" % (app_name, region), "port": 5432},
+                "logging": {"level": "info", "format": "json"},
+            }
+
+            Resource("app-config", {
+                "apiVersion": "kubernetes.crossplane.io/v1alpha2",
+                "kind": "Object",
+                "spec": {
+                    "forProvider": {
+                        "manifest": {
+                            "apiVersion": "v1",
+                            "kind": "ConfigMap",
+                            "metadata": {"name": app_name + "-config"},
+                            "data": {"config.yaml": yaml.encode(app_config)},
+                        },
+                    },
+                },
+            })
+
+            set_condition("Ready", "True", "Available", "Config generated for %s" % app_name)

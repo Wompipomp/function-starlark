@@ -1,0 +1,44 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbindings.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XBinding
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Extract account ID and role name from an AWS ARN.
+            # Demonstrates: regex.find_groups(), regex.match()
+
+            arn = get_observed("role", "status.atProvider.arn", "")
+
+            account_id = "unknown"
+            role_name = "unknown"
+
+            if arn and regex.match(r"arn:aws:iam::", arn):
+                groups = regex.find_groups(r"arn:aws:iam::(\d+):role/(.*)", arn)
+                if groups:
+                    account_id = groups[0]
+                    role_name = groups[1]
+
+            Resource("policy-attachment", {
+                "apiVersion": "iam.aws.upbound.io/v1beta1",
+                "kind": "RolePolicyAttachment",
+                "spec": {
+                    "forProvider": {
+                        "role": role_name,
+                        "policyArn": "arn:aws:iam::%s:policy/ReadOnly" % account_id,
+                    },
+                },
+            })
+
+            set_condition("Ready", "True", "Available", "Binding for account %s" % account_id)

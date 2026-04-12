@@ -1,0 +1,47 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xdatabases-merge.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XDatabaseMerge
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Deep-merge platform defaults with user overrides.
+            # Demonstrates: dict.deep_merge(), dict.dig()
+
+            defaults = {
+                "region": "us-east-1",
+                "instanceClass": "db.t3.micro",
+                "tags": {"managed-by": "crossplane", "env": "dev"},
+                "backup": {"retentionPeriod": 7, "preferredWindow": "03:00-04:00"},
+            }
+            user = get(oxr, "spec.parameters", {})
+            merged = dict.deep_merge(defaults, user)
+
+            # Safe nested access into merged config
+            backup_window = dict.dig(merged, "backup.preferredWindow", "03:00-04:00")
+
+            Resource("database", {
+                "apiVersion": "rds.aws.upbound.io/v1beta1",
+                "kind": "Instance",
+                "spec": {
+                    "forProvider": {
+                        "region": merged["region"],
+                        "instanceClass": merged["instanceClass"],
+                        "backupRetentionPeriod": dict.dig(merged, "backup.retentionPeriod", 7),
+                        "preferredBackupWindow": backup_window,
+                    },
+                },
+            })
+
+            set_condition("Ready", "True", "Available", "Database created in %s" % merged["region"])

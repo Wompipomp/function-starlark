@@ -1,0 +1,38 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xbuckets-crypto.example.crossplane.io
+spec:
+  compositeTypeRef:
+    apiVersion: example.crossplane.io/v1
+    kind: XBucketCrypto
+  mode: Pipeline
+  pipeline:
+    - step: run-starlark
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Deterministic naming: stable IDs replace non-deterministic randAlpha.
+            # Demonstrates: crypto.stable_id(), crypto.sha256()
+
+            xr_name = get(oxr, "metadata.name", "unknown")
+            region = get(oxr, "spec.region", "us-east-1")
+
+            # Short 8-char deterministic ID -- same every reconciliation
+            suffix = crypto.stable_id(xr_name + "-" + region)
+
+            # Full SHA-256 hash for content-based naming
+            content_hash = crypto.sha256(xr_name + region)[:12]
+
+            Resource("bucket", {
+                "apiVersion": "s3.aws.upbound.io/v1beta1",
+                "kind": "Bucket",
+                "metadata": {"name": "data-%s" % suffix},
+                "spec": {"forProvider": {"region": region}},
+            })
+
+            set_condition("Ready", "True", "Available", "Bucket created with suffix %s" % suffix)
