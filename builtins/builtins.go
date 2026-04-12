@@ -110,6 +110,7 @@ func BuildGlobals(
 		"crypto":                  CryptoModule,
 		"encoding":                EncodingModule,
 		"dict":                    DictModule,
+		"regex":                   RegexModule,
 	}, nil
 }
 
