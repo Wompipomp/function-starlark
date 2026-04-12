@@ -109,6 +109,7 @@ func BuildGlobals(
 		"json":                    starlarkjson.Module,
 		"crypto":                  CryptoModule,
 		"encoding":                EncodingModule,
+		"dict":                    DictModule,
 	}, nil
 }
 
