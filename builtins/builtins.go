@@ -108,6 +108,7 @@ func BuildGlobals(
 		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),
 		"json":                    starlarkjson.Module,
 		"crypto":                  CryptoModule,
+		"encoding":                EncodingModule,
 	}, nil
 }
 
