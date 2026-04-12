@@ -109,6 +109,15 @@ func BuildGlobals(
 		"get_extra_resources": starlark.NewBuiltin("get_extra_resources", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			return getExtraResourcesImpl(b.Name(), extraRes, args, kwargs)
 		}),
+		"is_observed": starlark.NewBuiltin("is_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return isObservedImpl(b.Name(), observed, args, kwargs)
+		}),
+		"observed_body": starlark.NewBuiltin("observed_body", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return observedBodyImpl(b.Name(), observed, args, kwargs)
+		}),
+		"get_condition": starlark.NewBuiltin("get_condition", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return getConditionImpl(b.Name(), observed, args, kwargs)
+		}),
 		"schema":                  schema.SchemaBuiltin(),
 		"field":                   schema.FieldBuiltin(),
 		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),
