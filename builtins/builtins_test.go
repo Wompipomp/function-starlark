@@ -16,7 +16,7 @@ import (
 // testBuildGlobals wraps BuildGlobals with default (empty) extended collectors
 // so that existing tests don't need to construct them.
 func testBuildGlobals(req *fnv1.RunFunctionRequest, c *Collector) (starlark.StringDict, error) {
-	return BuildGlobals(req, c, c.cc, NewConnectionCollector(), NewRequirementsCollector())
+	return BuildGlobals(req, c, c.cc, NewConnectionCollector(), NewRequirementsCollector(), NewTTLCollector())
 }
 
 func makeReq(oxrFields, dxrFields map[string]*structpb.Value, observed map[string]*fnv1.Resource) *fnv1.RunFunctionRequest {
@@ -72,6 +72,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"regex", "yaml",
 		"get_extra_resource", "get_extra_resources",
 		"is_observed", "observed_body", "get_condition",
+		"set_response_ttl",
 	}
 	if len(globals) != len(expected) {
 		t.Errorf("len(globals) = %d, want %d", len(globals), len(expected))

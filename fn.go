@@ -121,8 +121,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			req.GetObserved().GetComposite().GetResource())
 		connCollector := builtins.NewConnectionCollector()
 		reqCollector := builtins.NewRequirementsCollector()
+		ttlCollector := builtins.NewTTLCollector()
 
-		globals, err := builtins.BuildGlobals(req, collector, condCollector, connCollector, reqCollector)
+		globals, err := builtins.BuildGlobals(req, collector, condCollector, connCollector, reqCollector, ttlCollector)
 		if err != nil {
 			fatal(errors.Wrapf(err, "building Starlark globals"))
 			return rsp, nil

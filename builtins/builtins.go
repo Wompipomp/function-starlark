@@ -42,6 +42,7 @@ func BuildGlobals(
 	condCollector *ConditionCollector,
 	connCollector *ConnectionCollector,
 	reqCollector *RequirementsCollector,
+	ttlCollector *TTLCollector,
 ) (starlark.StringDict, error) {
 	// Build oxr (frozen) from observed composite.
 	oxr, err := convert.StructToStarlark(req.GetObserved().GetComposite().GetResource(), true)
@@ -127,6 +128,7 @@ func BuildGlobals(
 		"dict":                    DictModule,
 		"regex":                   RegexModule,
 		"yaml":                    YAMLModule,
+		"set_response_ttl":        ttlCollector.SetResponseTTLBuiltin(),
 	}, nil
 }
 
