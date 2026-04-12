@@ -1,4 +1,4 @@
-# Composition that exercises all 22 builtins in a single reconciliation.
+# Composition that exercises all 28 builtins in a single reconciliation.
 # Uses provider-nop NopResource for composed resources (no cloud credentials needed).
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
@@ -28,7 +28,7 @@ spec:
           source: |
             # ============================================================
             # E2E BUILTINS REGRESSION TEST
-            # Tests all 22 predeclared names in a single composition.
+            # Tests all 28 predeclared names in a single composition.
             # ============================================================
 
             # --- Test: inline module loading ---
@@ -156,11 +156,11 @@ spec:
             # --- Test: emit_event() ---
             emit_event(
                 severity="Normal",
-                message="E2E builtins test: all 22 builtins validated in %s" % region,
+                message="E2E builtins test: all 28 builtins validated in %s" % region,
             )
 
             # --- Test: set_xr_status() ---
-            set_xr_status("test.builtinsCount", 22)
+            set_xr_status("test.builtinsCount", 28)
             set_xr_status("test.region", region)
             set_xr_status("test.environment", env)
             set_xr_status("test.schemaWorked", True)
@@ -173,6 +173,50 @@ spec:
 
             # --- Test: context read/write ---
             context["e2e-test"] = "builtins-passed"
+
+            # --- Test: crypto.stable_id() ---
+            stable = crypto.stable_id("hello-world", length=8)
+            if len(stable) != 8: fatal("crypto.stable_id should return 8 hex chars")
+            # Verify determinism: same input always gives same output
+            stable2 = crypto.stable_id("hello-world", length=8)
+            if stable != stable2: fatal("crypto.stable_id must be deterministic")
+
+            # --- Test: crypto.sha256() ---
+            sha = crypto.sha256("test-data")
+            if len(sha) != 64: fatal("crypto.sha256 should return 64 hex chars")
+
+            # --- Test: regex.match() ---
+            if not regex.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", "192.168.1.1"):
+                fatal("regex.match should match valid IP")
+            if regex.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", "not-an-ip"):
+                fatal("regex.match should not match invalid IP")
+
+            # --- Test: regex.replace_all() ---
+            sanitized = regex.replace_all(r"[^a-z0-9]+", "Hello_World--Test".lower(), "-")
+            if sanitized != "hello-world-test": fatal("regex.replace_all should normalize string, got: %s" % sanitized)
+
+            # --- Test: dict.merge() ---
+            merged = dict.merge({"a": 1, "b": 2}, {"b": 3, "c": 4})
+            if merged["a"] != 1: fatal("dict.merge should preserve left keys")
+            if merged["b"] != 3: fatal("dict.merge right should win")
+            if merged["c"] != 4: fatal("dict.merge should include right keys")
+
+            # --- Test: dict.deep_merge() ---
+            deep = dict.deep_merge(
+                {"top": {"a": 1, "b": 2}},
+                {"top": {"b": 3, "c": 4}},
+            )
+            if deep["top"]["a"] != 1: fatal("dict.deep_merge should preserve nested left keys")
+            if deep["top"]["b"] != 3: fatal("dict.deep_merge right should win nested")
+            if deep["top"]["c"] != 4: fatal("dict.deep_merge should include nested right keys")
+
+            # --- Write namespace builtin results to status ---
+            set_xr_status("test.cryptoStableId", stable)
+            set_xr_status("test.cryptoSha256Len", len(sha))
+            set_xr_status("test.regexMatchWorked", True)
+            set_xr_status("test.regexReplaceResult", sanitized)
+            set_xr_status("test.dictMergeB", merged["b"])
+            set_xr_status("test.deepMergeTopB", deep["top"]["b"])
     - step: auto-ready
       functionRef:
         name: function-auto-ready
