@@ -211,6 +211,109 @@ point.x  # 1
 point.y  # 2
 ```
 
+### get_extra_resource(name, path=None, default=None)
+
+One-call extra-resource field lookup. Returns the value at path within the first matching extra resource, or default when the name is missing or path not found. When path is None, returns the full resource body.
+
+```python
+region = get_extra_resource("cluster", "spec.region", "us-west-2")
+```
+
+### get_extra_resources(name, path=None, default=[])
+
+Get all extra resources for a name as a list. Returns empty list when name not found.
+
+```python
+certs = get_extra_resources("tls-secrets")
+```
+
+### is_observed(name)
+
+Returns True iff the named composed resource exists in observed state. Use for branching without field access.
+
+```python
+if is_observed("database"):
+    db_host = get_observed("database", "status.atProvider.address", "")
+```
+
+### observed_body(name, default=None)
+
+Returns the full observed resource body dict, or default if not found.
+
+```python
+db = observed_body("database", default={})
+```
+
+### get_condition(name, type)
+
+Returns a condition dict {status, reason, message, lastTransitionTime} for the named condition type on the observed resource, or None. Always returns an unfrozen dict with exactly 4 keys; missing fields default to empty string.
+
+```python
+cond = get_condition("database", "Ready")
+if cond and cond["status"] == "True":
+    # database is ready
+```
+
+### set_response_ttl(duration)
+
+Set response TTL on RunFunctionResponse. Accepts Go duration string ("30s", "5m") or int seconds. Overrides sequencingTTL.
+
+```python
+set_response_ttl("30s")
+set_response_ttl(30)  # equivalent
+```
+
+## Namespace modules
+
+Six predeclared namespace modules. Available in every script without import.
+
+### json (from go.starlark.net/lib/json)
+- json.encode(x) -- Starlark value to JSON string
+- json.decode(x) -- JSON string to Starlark value
+- json.encode_indent(x, prefix="", indent="\t") -- pretty-print JSON
+- json.indent(s, prefix="", indent="\t") -- reformat existing JSON string
+
+### crypto
+- crypto.sha256(data) -- lowercase hex SHA-256 digest
+- crypto.sha512(data) -- lowercase hex SHA-512 digest
+- crypto.sha1(data) -- lowercase hex SHA-1 digest
+- crypto.md5(data) -- lowercase hex MD5 digest (non-cryptographic use only)
+- crypto.hmac_sha256(key, message) -- hex HMAC-SHA256 digest
+- crypto.blake3(data) -- lowercase hex BLAKE3 digest
+- crypto.stable_id(seed, length=8) -- deterministic hex ID (1-64 chars)
+
+### encoding
+- encoding.b64enc(data) / encoding.b64dec(data) -- standard base64
+- encoding.b64url_enc(data) / encoding.b64url_dec(data) -- URL-safe base64 (no padding)
+- encoding.b32enc(data) / encoding.b32dec(data) -- base32 (no padding)
+- encoding.hex_enc(data) / encoding.hex_dec(data) -- hex encoding
+
+### dict
+- dict.merge(d1, d2, ...) -- shallow right-wins merge, returns new dict
+- dict.deep_merge(d1, d2, ...) -- recursive right-wins merge, returns new dict
+- dict.pick(d, keys) -- subset for matching keys
+- dict.omit(d, keys) -- copy with keys removed
+- dict.dig(d, path, default=None) -- dotted-path lookup
+- dict.has_path(d, path) -- True iff dotted path exists
+
+### regex (Go RE2 syntax)
+- regex.match(pattern, s) -- True if pattern matches anywhere in s
+- regex.find(pattern, s) -- first match string or None
+- regex.find_all(pattern, s) -- list of all non-overlapping matches
+- regex.find_groups(pattern, s) -- list of capture group strings or None
+- regex.replace(pattern, s, replacement) -- replace first match ($1 backrefs)
+- regex.replace_all(pattern, s, replacement) -- replace all matches
+- regex.split(pattern, s) -- split on matches
+
+### yaml (via sigs.k8s.io/yaml)
+- yaml.encode(value) -- K8s-compatible YAML string (sorted keys, no trailing newline)
+- yaml.decode(s) -- single-doc YAML to Starlark value
+- yaml.decode_stream(s) -- multi-doc YAML to list of Starlark values
+
+### conditions.star (stdlib)
+- all_ready(resources=None) -- True iff all observed have Ready=True; None+0 observed=False
+- any_degraded(resources=None) -- True iff any have Ready=False or Synced=False
+
 ## Module system
 
 Load shared code via standard Starlark load():
@@ -327,6 +430,11 @@ Resource("bucket", bucket_config)
 - Put helper functions at the top of the script.
 - End scripts with emit_event("Normal", "Reconciled ...") for observability.
 - Use namespace alias imports (alias="*") when loading provider schema packages to avoid name conflicts across API groups.
+- Use get_extra_resource() for one-call extra-resource field access instead of manual extra_resources dict navigation.
+- Use is_observed()/observed_body() for existence checks and body retrieval instead of manual "if name in observed" patterns.
+- Use get_condition() for reading observed resource conditions instead of navigating status.conditions arrays.
+- Use set_response_ttl() for custom requeue intervals instead of relying on sequencingTTL.
+- Use namespace modules (json, crypto, encoding, dict, regex, yaml) directly -- no import needed.
 
 ## Schema validation
 
