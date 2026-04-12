@@ -581,12 +581,24 @@ func TestStdlibConventions(t *testing.T) {
 	mockOxr := buildMockOxr("test-xr", "", "")
 	getFn := starlark.NewBuiltin("get", mockGetImpl)
 
+	// Mock observed dict for conditions.star (all_ready/any_degraded use observed.keys()).
+	mockObserved := starlark.NewDict(0)
+	mockObserved.Freeze()
+
+	// Mock get_condition for conditions.star (all_ready/any_degraded use get_condition).
+	getConditionFn := starlark.NewBuiltin("get_condition",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+
 	fullPre := starlark.StringDict{
 		"oxr":           mockOxr,
 		"get":           getFn,
 		"set_condition": setConditionFn,
 		"emit_event":    emitEventFn,
 		"Resource":      resourceFn,
+		"observed":      mockObserved,
+		"get_condition": getConditionFn,
 	}
 
 	modules := []string{
@@ -635,6 +647,221 @@ func TestStdlibConventions(t *testing.T) {
 					t.Errorf("%s: private name %q should not be exported", mod, name)
 				}
 			}
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestStdlibConditionsAggregation
+// ---------------------------------------------------------------------------
+
+// makeCondDict creates a condition dict with {status, reason, message, lastTransitionTime}.
+func makeCondDict(status, reason, message, lastTransitionTime string) *starlark.Dict {
+	d := starlark.NewDict(4)
+	_ = d.SetKey(starlark.String("status"), starlark.String(status))
+	_ = d.SetKey(starlark.String("reason"), starlark.String(reason))
+	_ = d.SetKey(starlark.String("message"), starlark.String(message))
+	_ = d.SetKey(starlark.String("lastTransitionTime"), starlark.String(lastTransitionTime))
+	return d
+}
+
+// buildCondAggPredeclared builds predeclared globals for conditions aggregation tests.
+// condData maps resource name -> condition type -> condition dict.
+// observedKeys lists the keys to put in the observed dict.
+func buildCondAggPredeclared(
+	condData map[string]map[string]starlark.Value,
+	observedKeys []string,
+) starlark.StringDict {
+	// Build observed dict with keys matching observedKeys (values are None -- only keys() used).
+	observed := starlark.NewDict(len(observedKeys))
+	for _, k := range observedKeys {
+		_ = observed.SetKey(starlark.String(k), starlark.None)
+	}
+	observed.Freeze()
+
+	// Build mock get_condition.
+	getConditionFn := starlark.NewBuiltin("get_condition",
+		func(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			var name, condType string
+			if err := starlark.UnpackArgs("get_condition", args, kwargs,
+				"name", &name, "type", &condType); err != nil {
+				return nil, err
+			}
+			if types, ok := condData[name]; ok {
+				if cond, ok := types[condType]; ok {
+					return cond, nil
+				}
+			}
+			return starlark.None, nil
+		})
+
+	// Mock set_condition and emit_event (required by conditions.star for degraded()).
+	setConditionFn := starlark.NewBuiltin("set_condition",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+	emitEventFn := starlark.NewBuiltin("emit_event",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+
+	return starlark.StringDict{
+		"observed":      observed,
+		"get_condition": getConditionFn,
+		"set_condition": setConditionFn,
+		"emit_event":    emitEventFn,
+	}
+}
+
+func TestStdlibConditionsAggregation(t *testing.T) {
+	// --- all_ready tests ---
+
+	t.Run("all_ready_all_true", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db":    {"Ready": makeCondDict("True", "Available", "", "")},
+			"cache": {"Ready": makeCondDict("True", "Available", "", "")},
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db", "cache"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["all_ready"], nil, nil)
+		if result != starlark.True {
+			t.Errorf("all_ready() = %v, want True", result)
+		}
+	})
+
+	t.Run("all_ready_one_not_ready", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db":    {"Ready": makeCondDict("True", "Available", "", "")},
+			"cache": {"Ready": makeCondDict("False", "Initializing", "", "")},
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db", "cache"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["all_ready"], nil, nil)
+		if result != starlark.False {
+			t.Errorf("all_ready() = %v, want False", result)
+		}
+	})
+
+	t.Run("all_ready_no_conditions", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db": {}, // No conditions at all.
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["all_ready"], nil, nil)
+		if result != starlark.False {
+			t.Errorf("all_ready() with no conditions = %v, want False", result)
+		}
+	})
+
+	t.Run("all_ready_none_zero_observed", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{}
+		pre := buildCondAggPredeclared(condData, []string{}) // No observed resources.
+		exports := loadModule(t, "conditions.star", pre)
+		// Call with resources=None (default).
+		result := callStarlark(t, exports["all_ready"], nil, nil)
+		if result != starlark.False {
+			t.Errorf("all_ready(None) with zero observed = %v, want False", result)
+		}
+	})
+
+	t.Run("all_ready_explicit_empty_list", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{}
+		pre := buildCondAggPredeclared(condData, []string{})
+		exports := loadModule(t, "conditions.star", pre)
+		// Call with resources=[].
+		emptyList := starlark.NewList(nil)
+		result := callStarlark(t, exports["all_ready"], starlark.Tuple{emptyList}, nil)
+		if result != starlark.True {
+			t.Errorf("all_ready([]) = %v, want True (vacuous truth)", result)
+		}
+	})
+
+	t.Run("all_ready_named_resources", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db":    {"Ready": makeCondDict("True", "Available", "", "")},
+			"cache": {"Ready": makeCondDict("False", "Initializing", "", "")},
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db", "cache"})
+		exports := loadModule(t, "conditions.star", pre)
+		// Only check "db" which is ready -- should be True.
+		namesList := starlark.NewList([]starlark.Value{starlark.String("db")})
+		result := callStarlark(t, exports["all_ready"], starlark.Tuple{namesList}, nil)
+		if result != starlark.True {
+			t.Errorf("all_ready(['db']) = %v, want True", result)
+		}
+	})
+
+	// --- any_degraded tests ---
+
+	t.Run("any_degraded_ready_false", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db":    {"Ready": makeCondDict("True", "Available", "", ""), "Synced": makeCondDict("True", "", "", "")},
+			"cache": {"Ready": makeCondDict("False", "Failing", "", ""), "Synced": makeCondDict("True", "", "", "")},
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db", "cache"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["any_degraded"], nil, nil)
+		if result != starlark.True {
+			t.Errorf("any_degraded() with Ready=False = %v, want True", result)
+		}
+	})
+
+	t.Run("any_degraded_synced_false", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db": {"Ready": makeCondDict("True", "Available", "", ""), "Synced": makeCondDict("False", "OutOfSync", "", "")},
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["any_degraded"], nil, nil)
+		if result != starlark.True {
+			t.Errorf("any_degraded() with Synced=False = %v, want True", result)
+		}
+	})
+
+	t.Run("any_degraded_all_healthy", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db":    {"Ready": makeCondDict("True", "Available", "", ""), "Synced": makeCondDict("True", "", "", "")},
+			"cache": {"Ready": makeCondDict("True", "Available", "", ""), "Synced": makeCondDict("True", "", "", "")},
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db", "cache"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["any_degraded"], nil, nil)
+		if result != starlark.False {
+			t.Errorf("any_degraded() with all healthy = %v, want False", result)
+		}
+	})
+
+	t.Run("any_degraded_no_conditions", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{
+			"db": {}, // No conditions at all.
+		}
+		pre := buildCondAggPredeclared(condData, []string{"db"})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["any_degraded"], nil, nil)
+		if result != starlark.False {
+			t.Errorf("any_degraded() with no conditions = %v, want False (not degraded)", result)
+		}
+	})
+
+	t.Run("any_degraded_none_zero_observed", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{}
+		pre := buildCondAggPredeclared(condData, []string{})
+		exports := loadModule(t, "conditions.star", pre)
+		result := callStarlark(t, exports["any_degraded"], nil, nil)
+		if result != starlark.False {
+			t.Errorf("any_degraded(None) with zero observed = %v, want False", result)
+		}
+	})
+
+	t.Run("any_degraded_explicit_empty_list", func(t *testing.T) {
+		condData := map[string]map[string]starlark.Value{}
+		pre := buildCondAggPredeclared(condData, []string{})
+		exports := loadModule(t, "conditions.star", pre)
+		emptyList := starlark.NewList(nil)
+		result := callStarlark(t, exports["any_degraded"], starlark.Tuple{emptyList}, nil)
+		if result != starlark.False {
+			t.Errorf("any_degraded([]) = %v, want False (vacuous)", result)
 		}
 	})
 }
