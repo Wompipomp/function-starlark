@@ -103,6 +103,12 @@ func BuildGlobals(
 		}),
 		"require_extra_resource":  reqCollector.RequireExtraResourceBuiltin(),
 		"require_extra_resources": reqCollector.RequireExtraResourcesBuiltin(),
+		"get_extra_resource": starlark.NewBuiltin("get_extra_resource", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return getExtraResourceImpl(b.Name(), extraRes, args, kwargs)
+		}),
+		"get_extra_resources": starlark.NewBuiltin("get_extra_resources", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+			return getExtraResourcesImpl(b.Name(), extraRes, args, kwargs)
+		}),
 		"schema":                  schema.SchemaBuiltin(),
 		"field":                   schema.FieldBuiltin(),
 		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),

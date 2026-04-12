@@ -70,6 +70,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"get_label", "get_annotation", "set_xr_status", "get_observed",
 		"schema", "field", "struct", "json", "crypto", "encoding", "dict",
 		"regex", "yaml",
+		"get_extra_resource", "get_extra_resources",
 	}
 	if len(globals) != len(expected) {
 		t.Errorf("len(globals) = %d, want %d", len(globals), len(expected))
