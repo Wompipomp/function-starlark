@@ -154,6 +154,44 @@ func mockGetImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, k
 	return dflt, nil
 }
 
+// mockGetLabelImpl implements get_label(res, key, default=None) for tests.
+func mockGetLabelImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var res starlark.Value
+	var key string
+	var dflt starlark.Value = starlark.None
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"res", &res, "key", &key, "default?", &dflt); err != nil {
+		return nil, err
+	}
+
+	m, ok := res.(starlark.Mapping)
+	if !ok {
+		return dflt, nil
+	}
+	metadata, found, err := m.Get(starlark.String("metadata"))
+	if err != nil || !found {
+		return dflt, nil
+	}
+	mm, ok := metadata.(starlark.Mapping)
+	if !ok {
+		return dflt, nil
+	}
+	labels, found, err := mm.Get(starlark.String("labels"))
+	if err != nil || !found {
+		return dflt, nil
+	}
+	lm, ok := labels.(starlark.Mapping)
+	if !ok {
+		return dflt, nil
+	}
+	v, found, err := lm.Get(starlark.String(key))
+	if err != nil || !found {
+		return dflt, nil
+	}
+	return v, nil
+}
+
 // buildMockOxr creates a mock oxr dict for tests.
 func buildMockOxr(name, claimName, claimNamespace string) *starlark.Dict {
 	labels := starlark.NewDict(2)
@@ -179,7 +217,9 @@ func buildMockOxr(name, claimName, claimNamespace string) *starlark.Dict {
 // ---------------------------------------------------------------------------
 
 func TestStdlibNetworking(t *testing.T) {
-	exports := loadModule(t, "networking.star", starlark.StringDict{})
+	exports := loadModule(t, "networking.star", starlark.StringDict{
+		"regex": builtins.RegexModule,
+	})
 
 	ipToInt := exports["ip_to_int"]
 	intToIP := exports["int_to_ip"]
@@ -298,6 +338,34 @@ func TestStdlibNetworking(t *testing.T) {
 			starlark.Tuple{starlark.String("10.0.0.0/16"), starlark.MakeInt(8), starlark.MakeInt(256)}, nil)
 		if !strings.Contains(err.Error(), "out of range") {
 			t.Errorf("error = %q, want it to contain 'out of range'", err.Error())
+		}
+	})
+
+	t.Run("invalid_ip_regex_rejects_non_numeric", func(t *testing.T) {
+		err := callStarlarkErr(t, ipToInt, starlark.Tuple{starlark.String("abc")}, nil)
+		if !strings.Contains(err.Error(), "invalid IP") {
+			t.Errorf("error = %q, want it to contain 'invalid IP'", err.Error())
+		}
+	})
+
+	t.Run("invalid_ip_regex_rejects_too_many_octets", func(t *testing.T) {
+		err := callStarlarkErr(t, ipToInt, starlark.Tuple{starlark.String("1.2.3.4.5")}, nil)
+		if !strings.Contains(err.Error(), "invalid IP") {
+			t.Errorf("error = %q, want it to contain 'invalid IP'", err.Error())
+		}
+	})
+
+	t.Run("invalid_cidr_regex_rejects_no_prefix", func(t *testing.T) {
+		err := callStarlarkErr(t, networkAddr, starlark.Tuple{starlark.String("10.0.0.0")}, nil)
+		if !strings.Contains(err.Error(), "invalid CIDR") {
+			t.Errorf("error = %q, want it to contain 'invalid CIDR'", err.Error())
+		}
+	})
+
+	t.Run("invalid_cidr_regex_rejects_garbage", func(t *testing.T) {
+		err := callStarlarkErr(t, networkAddr, starlark.Tuple{starlark.String("not-a-cidr")}, nil)
+		if !strings.Contains(err.Error(), "invalid CIDR") {
+			t.Errorf("error = %q, want it to contain 'invalid CIDR'", err.Error())
 		}
 	})
 }
@@ -429,7 +497,13 @@ func TestStdlibNaming(t *testing.T) {
 func TestStdlibLabels(t *testing.T) {
 	mockOxr := buildMockOxr("test-composite", "my-claim", "default")
 	getFn := starlark.NewBuiltin("get", mockGetImpl)
-	pre := starlark.StringDict{"oxr": mockOxr, "get": getFn}
+	getLabelFn := starlark.NewBuiltin("get_label", mockGetLabelImpl)
+	pre := starlark.StringDict{
+		"oxr":       mockOxr,
+		"get":       getFn,
+		"dict":      builtins.DictModule,
+		"get_label": getLabelFn,
+	}
 	exports := loadModule(t, "labels.star", pre)
 
 	standardLabels := exports["standard_labels"]
@@ -607,6 +681,7 @@ func TestStdlibConventions(t *testing.T) {
 			return starlark.None, nil
 		})
 
+	getLabelFn := starlark.NewBuiltin("get_label", mockGetLabelImpl)
 	fullPre := starlark.StringDict{
 		"oxr":           mockOxr,
 		"get":           getFn,
@@ -617,6 +692,8 @@ func TestStdlibConventions(t *testing.T) {
 		"get_condition": getConditionFn,
 		"crypto":        builtins.CryptoModule,
 		"regex":         builtins.RegexModule,
+		"dict":          builtins.DictModule,
+		"get_label":     getLabelFn,
 	}
 
 	modules := []string{
