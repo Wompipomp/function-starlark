@@ -453,11 +453,141 @@ Resource("storage-account", {"spec": {"forProvider": sa}})
 For shared schemas across compositions, schema definitions can be placed in
 modules loaded via `load()`. See [module system](module-system.md) for details.
 
+## v1.8 patterns
+
+### Pattern: Deterministic resource naming with crypto
+
+Non-deterministic names (randAlpha, UUID) cause resource churn across
+reconciliation cycles. Use `crypto.stable_id()` for deterministic suffixes
+derived from composite inputs.
+
+```python
+xr_name = get(oxr, "metadata.name", "unknown")
+region = get(oxr, "spec.region", "us-east-1")
+
+# Short deterministic ID from composite inputs -- same every reconciliation
+suffix = crypto.stable_id(xr_name + "-" + region)
+Resource("bucket", {
+    "apiVersion": "s3.aws.upbound.io/v1beta1",
+    "kind": "Bucket",
+    "metadata": {"name": "data-%s" % suffix},
+    "spec": {"forProvider": {"region": region}},
+})
+```
+
+`stable_id` generates a deterministic lowercase alphanumeric ID from a seed.
+The same seed always produces the same ID. Use it wherever you need a short
+unique suffix derived from XR inputs. The `length` parameter controls output
+(1-64 chars, default 8).
+
+### Pattern: Deep-merging default configs
+
+Platform defaults must merge recursively with user overrides without mutating
+either dict. Use `dict.deep_merge()` for nested structures.
+
+```python
+defaults = {
+    "region": "us-east-1",
+    "tags": {"managed-by": "crossplane", "env": "dev"},
+    "networking": {"vpcCidr": "10.0.0.0/16", "subnetBits": 8},
+}
+user = get(oxr, "spec.parameters", {})
+merged = dict.deep_merge(defaults, user)
+# user's tags merge INTO defaults.tags -- both dicts preserved
+```
+
+`deep_merge` recursively merges nested dicts with right-wins semantics. Both
+inputs are unchanged. Use `dict.merge()` for shallow (top-level keys only)
+merge.
+
+### Pattern: Regex field extraction from ARNs and URIs
+
+Extracting account IDs, regions, or resource names from AWS ARNs, Azure
+resource IDs, or URIs requires fragile string splitting. Use
+`regex.find_groups()` for structured extraction.
+
+```python
+arn = get_observed("role", "status.atProvider.arn", "")
+groups = regex.find_groups(r"arn:aws:iam::(\d+):role/(.*)", arn)
+if groups:
+    account_id = groups[0]
+    role_name = groups[1]
+```
+
+`find_groups` returns capture group strings from the first match, or `None`
+if no match. Use `regex.match()` for boolean checks, `regex.replace_all()`
+for transformations. Patterns use Go RE2 syntax (not PCRE).
+
+### Pattern: Condition aggregation with stdlib
+
+Checking readiness across multiple composed resources requires iterating
+observed state and parsing condition arrays. The conditions stdlib simplifies
+this to a single function call.
+
+```python
+load("starlark-stdlib:v1/conditions.star", "all_ready", "any_degraded", "degraded")
+
+if any_degraded(["database", "cache"]):
+    degraded("SubsystemFailing", "One or more data stores is not healthy")
+elif all_ready():
+    set_condition("Ready", "True", "Available", "All resources ready")
+```
+
+`all_ready()` returns `True` when every listed resource (or all observed, if
+`None`) has `Ready=True`. `any_degraded()` returns `True` when any has
+`Ready=False` or `Synced=False`. With `None` argument and zero observed
+resources, `all_ready` returns `False` (first-reconcile safety).
+
+### Pattern: First-reconcile safety with observed helpers
+
+Accessing observed resources that do not exist yet (first reconciliation)
+crashes the script. Use the v1.8 observed helpers for safe access.
+
+```python
+# Branch safely on existence
+if is_observed("database"):
+    db_host = get_observed("database", "status.atProvider.address", "")
+    db_ready = get_condition("database", "Ready")
+else:
+    db_host = "pending"
+    db_ready = None
+
+# Or get the full body with a safe default
+db = observed_body("database", default={})
+```
+
+`is_observed()` checks existence without field access. `observed_body()`
+returns the full body dict or a default. `get_condition()` returns `None`
+when the resource or condition is missing. All three are safe on first
+reconciliation when observed is empty.
+
+### Pattern: Custom requeue intervals with set_response_ttl
+
+The default 10s requeue is too fast for slow-provisioning resources (RDS,
+EKS) or too slow for time-sensitive operations. Use `set_response_ttl()` to
+tune the interval based on resource state.
+
+```python
+# Fast polling while waiting for slow resource
+if not is_observed("cluster"):
+    set_response_ttl("15s")  # first reconcile -- medium poll
+elif get_condition("cluster", "Ready") and get_condition("cluster", "Ready")["status"] != "True":
+    set_response_ttl("30s")  # provisioning -- slower poll
+else:
+    set_response_ttl("5m")   # ready -- slow poll
+```
+
+`set_response_ttl()` overrides the default `sequencingTTL`. Accepts Go
+duration strings (`"30s"`, `"5m"`) or int seconds. Last call wins if called
+multiple times.
+
 ## See also
 
 - [Builtins reference](builtins-reference.md) -- complete function signatures
 - [Features guide](features.md) -- detailed coverage of depends_on, labels,
-  connection details, and metrics
+  connection details, namespace modules, and metrics
+- [Migration cheatsheet](migration-cheatsheet.md) -- Sprig/KCL to
+  function-starlark helper mapping
 - [Module system](module-system.md) -- load(), OCI modules, standard library
 - [Deployment guide](deployment-guide.md) -- cluster deployment and metrics
   setup

@@ -461,11 +461,223 @@ spec:
 For deployment and metrics collection setup, see the
 [deployment guide](deployment-guide.md).
 
+## Namespace modules
+
+function-starlark provides six namespace modules as predeclared globals --
+`json`, `crypto`, `encoding`, `dict`, `regex`, and `yaml`. They are available
+in every script without any `load()` statement.
+
+### JSON (json.*)
+
+The `json` module comes from
+[go.starlark.net/lib/json](https://pkg.go.dev/go.starlark.net/lib/json) and is
+predeclared -- no `load()` required. It encodes and decodes JSON from Starlark
+values.
+
+```python
+# Round-trip: dict -> JSON string -> dict
+data = {"apiVersion": "v1", "kind": "ConfigMap"}
+encoded = json.encode(data)       # '{"apiVersion":"v1","kind":"ConfigMap"}'
+decoded = json.decode(encoded)    # {"apiVersion": "v1", "kind": "ConfigMap"}
+
+# Pretty-printed JSON for ConfigMap data fields
+config = {"logging": {"level": "info", "format": "json"}, "replicas": 3}
+Resource("config", {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {"name": "app-config"},
+    "data": {"config.json": json.encode_indent(config)},
+})
+```
+
+The `json` module follows upstream go.starlark.net semantics exactly.
+`json.indent(s)` reformats an already-encoded JSON string without
+re-encoding.
+
+### Crypto (crypto.*)
+
+The `crypto` module provides hashing functions and deterministic ID generation.
+
+```python
+# Hash data for integrity checks or annotation values
+digest = crypto.sha256("sensitive-data")   # hex digest string
+
+# Deterministic short ID from composite inputs -- same every reconciliation
+xr_name = get(oxr, "metadata.name", "unknown")
+suffix = crypto.stable_id("bucket-" + xr_name, length=8)
+Resource("bucket", {
+    "apiVersion": "s3.aws.upbound.io/v1beta1",
+    "kind": "Bucket",
+    "metadata": {"name": "data-%s" % suffix},
+    "spec": {"forProvider": {"region": "us-east-1"}},
+})
+```
+
+`md5` is provided for non-cryptographic use only (checksums, cache keys).
+`stable_id` generates a deterministic lowercase alphanumeric string from a
+seed; the `length` parameter accepts values from 1 to 64 (default 8).
+`hmac_sha256(key, msg)` produces an HMAC-SHA256 hex digest. `blake3(data)`
+produces a BLAKE3 hex digest.
+
+### Encoding (encoding.*)
+
+The `encoding` module provides base64, base32, and hex encode/decode functions.
+
+```python
+# Base64-encode a value for Kubernetes Secret data
+secret_value = encoding.b64enc("my-database-password")
+Resource("db-secret", {
+    "apiVersion": "v1",
+    "kind": "Secret",
+    "metadata": {"name": "db-credentials"},
+    "data": {"password": secret_value},
+})
+
+# URL-safe base64 for tokens or identifiers
+token = encoding.b64url_enc("user:session:12345")
+```
+
+`b64url_enc` / `b64url_dec` use the URL-safe alphabet without padding.
+`b32enc` / `b32dec` use standard RFC 4648 encoding without padding.
+`hex_enc` / `hex_dec` convert between raw strings and hexadecimal.
+
+### Dict operations (dict.*)
+
+The `dict` module provides merge, deep-merge, pick, omit, and path-based
+lookup operations.
+
+```python
+# Deep-merge platform defaults with user overrides
+defaults = {
+    "region": "us-east-1",
+    "tags": {"managed-by": "crossplane", "env": "dev"},
+    "networking": {"vpcCidr": "10.0.0.0/16", "subnetBits": 8},
+}
+user = get(oxr, "spec.parameters", {})
+merged = dict.deep_merge(defaults, user)
+# user's tags merge INTO defaults.tags -- both dicts are unchanged
+
+# Safe nested access into Kubernetes objects
+containers = dict.dig(body, "spec.template.spec.containers", default=[])
+```
+
+`deep_merge` is recursive with right-wins semantics and returns a new dict
+without mutating either input. `merge` is shallow (top-level keys only) with
+right-wins semantics. Both require 2 or more arguments. `pick(d, keys)` and
+`omit(d, keys)` return new dicts with only the selected or excluded keys.
+`has_path(d, path)` checks whether a dotted path exists.
+
+### Regex (regex.*)
+
+The `regex` module provides RE2 regular expression operations using Go RE2
+syntax.
+
+```python
+# Extract account ID and role name from an AWS ARN
+arn = get_observed("role", "status.atProvider.arn", "")
+groups = regex.find_groups(r"^arn:aws:iam::(\d+):role/(.+)$", arn)
+if groups:
+    account_id = groups[0]
+    role_name = groups[1]
+
+# Replace version numbers in a string
+sanitized = regex.replace_all(r"\d+", version_string, "X")
+```
+
+Compiled patterns are cached with LRU eviction for performance.
+`replace` and `replace_all` support `$1`-style backreferences in the
+replacement string. `find_groups` returns capture group strings from the
+first match, or `None` if no match. `match` returns a boolean. `split`
+splits a string around pattern matches.
+
+### YAML (yaml.*)
+
+The `yaml` module provides Kubernetes-compatible YAML encode/decode via
+sigs.k8s.io/yaml.
+
+```python
+# Generate a YAML string for embedding in a ConfigMap
+config_dict = {"logging": {"level": "info"}, "replicas": 3}
+yaml_str = yaml.encode(config_dict)
+
+# Parse a multi-document YAML string into a list of dicts
+multi_doc = """
+apiVersion: v1
+kind: ConfigMap
+---
+apiVersion: v1
+kind: Secret
+"""
+docs = yaml.decode_stream(multi_doc)
+# docs is a list of two dicts
+```
+
+Type mapping matches `json.decode` for consistency (numbers become int or
+float, booleans become True/False). Keys are sorted in output. `yaml.encode`
+produces no trailing newline.
+
+### Observed and extra-resource helpers
+
+v1.8 adds `is_observed()`, `observed_body()`, `get_extra_resource()`,
+`get_extra_resources()`, and `get_condition()` as flat builtins that replace
+common multi-step patterns for accessing observed state and extra resources.
+
+```python
+# First-reconcile safety: branch on resource existence
+if is_observed("database"):
+    db_host = get_observed("database", "status.atProvider.address", "")
+else:
+    db_host = "pending"
+
+# Get the full observed body as a dict
+db = observed_body("database", default={})
+
+# Read extra resource fields in one call
+cluster_region = get_extra_resource("cluster", "spec.region", "us-west-2")
+
+# Check a condition on an observed resource
+cond = get_condition("database", "Ready")
+if cond and cond["status"] == "True":
+    # database is ready
+    pass
+```
+
+`get_condition` returns a new unfrozen dict with 4 keys (`status`, `reason`,
+`message`, `lastTransitionTime`). Missing fields default to empty string.
+Returns `None` when the resource or condition type is not found.
+
+For full signatures and parameters, see the
+[builtins reference](builtins-reference.md).
+
+### Response TTL (set_response_ttl)
+
+The `set_response_ttl()` builtin provides user-controlled requeue intervals,
+overriding the default `sequencingTTL` from the StarlarkInput spec.
+
+```python
+# Adjust polling frequency based on resource state
+if is_observed("database"):
+    cond = get_condition("database", "Ready")
+    if cond and cond["status"] == "True":
+        set_response_ttl("5m")  # slow poll when ready
+    else:
+        set_response_ttl("10s")  # fast poll while provisioning
+else:
+    set_response_ttl("10s")  # fast poll on first reconcile
+```
+
+Accepts Go duration strings (`"30s"`, `"5m"`, `"1h"`) or integer seconds.
+The last call wins if `set_response_ttl` is called multiple times. Use this
+to reduce API load for stable resources or speed up convergence during
+provisioning.
+
 ## See also
 
 - [Builtins reference](builtins-reference.md) -- complete function signatures
-  for all builtins
+  for all builtins and namespace modules
 - [Best practices](best-practices.md) -- composition patterns, label strategy,
   and testing guidance
+- [Migration cheatsheet](migration-cheatsheet.md) -- Sprig/KCL to
+  function-starlark helper mapping
 - [Deployment guide](deployment-guide.md) -- cluster deployment and metrics
   collection
