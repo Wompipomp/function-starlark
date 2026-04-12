@@ -80,6 +80,41 @@ see the [builtins reference](builtins-reference.md).
 | Module system | None (partials) | KCL import + OCI/Git | `load()` with OCI/ConfigMap/inline |
 | Type validation | Untyped strings | Schema-based types | `schema()` + `field()` builtins |
 
+## stdlib v1 to v2 migration
+
+stdlib v2 replaces hand-rolled logic in the four stdlib modules with v1.8
+namespace builtins (`crypto`, `regex`, `dict`, `get_label`). It requires
+a function-starlark v1.8+ runtime and introduces one breaking change in
+`naming.star`.
+
+### Breaking changes
+
+| Module | Change | v1 Behavior | v2 Behavior | Impact |
+|--------|--------|-------------|-------------|--------|
+| `naming.star` | `hash_suffix` algorithm | `hash()` + base-36 (0-9a-z) | `crypto.stable_id` SHA-256 hex (0-9a-f) | **Breaking**: Truncated resource names change, causing Crossplane to create new resources and orphan old ones |
+| `naming.star` | `_sanitize` implementation | Character-by-character loop | `regex.replace_all` one-liner | Non-breaking: identical output |
+| `labels.star` | `merge_labels` implementation | Manual for-loop merge | `dict.merge` builtin | Non-breaking: identical behavior |
+| `labels.star` | `crossplane_labels` label lookup | `get(oxr, ["metadata", "labels", ...])` | `get_label(oxr, "key", "")` | Non-breaking: identical result |
+| `networking.star` | IP/CIDR validation | Only validates after parsing | `regex.match` pre-validation + existing parsing | Non-breaking: catches malformed input earlier |
+| `conditions.star` | No changes | Already uses `get_condition` | Same | No migration needed |
+
+### Upgrade steps
+
+1. Upgrade function-starlark runtime to v1.8+.
+2. Change `load()` statements from `stdlib:v1/` to `stdlib:v2/` (or
+   `starlark-stdlib:v2/`).
+3. If using `hash_suffix` or `resource_name` with truncated names: expect
+   resource name changes. Plan for resource recreation or adopt the new names.
+4. Run compositions and verify no `"name not defined"` errors (confirms v1.8
+   runtime).
+
+### Runtime requirement
+
+v2 stdlib calls `crypto.stable_id`, `regex.match`, `regex.replace_all`,
+`dict.merge`, and `get_label` -- all predeclared in v1.8. Running v2 modules
+on older runtimes produces a clear `"name 'crypto' not defined"` error at load
+time.
+
 ## See also
 
 - [Builtins reference](builtins-reference.md) -- complete function signatures
