@@ -111,6 +111,7 @@ func BuildGlobals(
 		"encoding":                EncodingModule,
 		"dict":                    DictModule,
 		"regex":                   RegexModule,
+		"yaml":                    YAMLModule,
 	}, nil
 }
 
