@@ -1,10 +1,13 @@
 # Builtins reference
 
-function-starlark provides 22 predeclared names -- 6 globals and 16 functions --
-that are automatically available in every Starlark script without import. These
-are the core API for interacting with Crossplane's composite resource model.
+function-starlark provides 34 predeclared names -- 6 globals, 22 functions, and
+6 namespace modules -- that are automatically available in every Starlark script
+without import. These are the core API for interacting with Crossplane's
+composite resource model.
 
 ## Quick reference
+
+### Globals
 
 | Name | Type | Description |
 |------|------|-------------|
@@ -14,6 +17,11 @@ are the core API for interacting with Crossplane's composite resource model.
 | `context` | global | Pipeline context (read-write) |
 | `environment` | global | EnvironmentConfig data (read-only) |
 | `extra_resources` | global | Extra resources from require_extra_resource/require_extra_resources (read-only) |
+
+### Functions
+
+| Name | Type | Description |
+|------|------|-------------|
 | `Resource()` | function | Register a desired composed resource |
 | `skip_resource()` | function | Remove a resource from desired state |
 | `get()` | function | Safe nested dict access with dot-path |
@@ -30,6 +38,23 @@ are the core API for interacting with Crossplane's composite resource model.
 | `schema()` | function | Define a typed constructor with field validation |
 | `field()` | function | Define a field descriptor for schema constructors |
 | `struct()` | function | Create an immutable struct with named fields (dot-access) |
+| `get_extra_resource()` | function | One-call extra-resource field lookup with default |
+| `get_extra_resources()` | function | Get all extra resources for a name as list |
+| `is_observed()` | function | Check if a composed resource exists in observed state |
+| `observed_body()` | function | Get observed resource body with default |
+| `get_condition()` | function | Get condition dict from observed resource |
+| `set_response_ttl()` | function | Set response TTL for requeue interval |
+
+### Namespace Modules
+
+| Module | Members | Description |
+|--------|---------|-------------|
+| `json` | encode, decode, encode_indent, indent | JSON encoding/decoding (from go.starlark.net/lib/json) |
+| `crypto` | sha256, sha512, sha1, md5, hmac_sha256, blake3, stable_id | Hashing, HMAC, and deterministic IDs |
+| `encoding` | b64enc, b64dec, b64url_enc, b64url_dec, b32enc, b32dec, hex_enc, hex_dec | Base64, base32, and hex encoding |
+| `dict` | merge, deep_merge, pick, omit, dig, has_path | Dict merge, subset, and path operations |
+| `regex` | match, find, find_all, find_groups, replace, replace_all, split | RE2 regular expressions |
+| `yaml` | encode, decode, decode_stream | K8s-compatible YAML (via sigs.k8s.io/yaml) |
 
 ---
 
@@ -931,15 +956,1294 @@ h.my_function()  # h is a struct wrapping all exports from helpers.star
 
 ---
 
+### get_extra_resource
+
+```python
+get_extra_resource(name, path=None, default=None)
+```
+
+One-call extra-resource field lookup. Returns the value at `path` within the
+first matching extra resource for `name`, or `default` when the name is missing,
+the match list is empty, or the path is not found within the resource. When
+`path` is None, returns the full resource body dict.
+
+This function takes the first item (`[0]`) from the match list for the given
+name. Use `get_extra_resources()` (plural) to retrieve all matching resources.
+
+The request/get pattern is: `require_extra_resource()` requests the resource
+(first reconciliation), then `get_extra_resource()` reads the result (subsequent
+reconciliations).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Request name (key in `extra_resources`). Must not be empty. |
+| `path` | string \| None | None | Dot-separated path within the resource body. None returns the full body. |
+| `default` | any | None | Value to return when the resource, match list, or path is missing. |
+
+**Returns:** Value at the path in the first matching extra resource, or `default`.
+
+**Errors:** Fails if `name` is empty.
+
+**Example:**
+
+```python
+# Request an extra resource (first reconciliation)
+require_extra_resource("cluster", "v1", "ConfigMap", match_name="cluster-info")
+
+# Read a field from the extra resource (subsequent reconciliation)
+region = get_extra_resource("cluster", "spec.region", "us-west-2")
+
+# Get the full resource body (path=None)
+cluster_body = get_extra_resource("cluster")
+```
+
+---
+
+### get_extra_resources
+
+```python
+get_extra_resources(name, path=None, default=[])
+```
+
+Get all extra resources for a given name as a list. Unlike
+`get_extra_resource()` (singular) which returns only the first match, this
+returns ALL matching resources. When `path` is provided, traverses the dot-path
+on each resource and returns only values where the path exists. Returns `default`
+(empty list) when the name is not found or the match list is empty.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Request name (key in `extra_resources`). Must not be empty. |
+| `path` | string \| None | None | Dot-separated path within each resource body. None returns the full body dicts. |
+| `default` | any | `[]` | Value to return when the resource or match list is missing. |
+
+**Returns:** List of values (one per matching resource), or `default` if the name
+is not found.
+
+**Errors:** Fails if `name` is empty.
+
+**Example:**
+
+```python
+# Request multiple extra resources by label
+require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
+
+# Get all matching resources as a list
+certs = get_extra_resources("certs")
+for cert in certs:
+    name = get(cert, "metadata.name", "unknown")
+
+# Extract a specific field from each resource
+cert_names = get_extra_resources("certs", "metadata.name")
+```
+
+---
+
+### is_observed
+
+```python
+is_observed(name)
+```
+
+Returns True if the named composed resource exists in the observed state, False
+otherwise. Use this for branching without field access. Equivalent to
+`name in observed` but more readable and explicit about intent.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Composition resource name. Must not be empty. |
+
+**Returns:** `True` if the resource exists in observed state, `False` otherwise.
+
+**Errors:** Fails if `name` is empty.
+
+**Example:**
+
+```python
+if is_observed("database"):
+    db_host = get_observed("database", "status.atProvider.address", "")
+else:
+    db_host = "pending"
+```
+
+---
+
+### observed_body
+
+```python
+observed_body(name, default=None)
+```
+
+Returns the full observed resource body dict, or `default` if the named resource
+is not found. Combines existence check and body retrieval in one call. Equivalent
+to `observed.get(name, {}).get("resource", default)` but as a single call.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Composition resource name. Must not be empty. |
+| `default` | any | None | Value to return if the resource is not found. |
+
+**Returns:** The full observed resource body dict, or `default`.
+
+**Errors:** Fails if `name` is empty.
+
+**Example:**
+
+```python
+db = observed_body("database", default={})
+if db:
+    db_host = get(db, "status.atProvider.address", "pending")
+```
+
+---
+
+### get_condition
+
+```python
+get_condition(name, type)
+```
+
+Returns a condition dict for the named condition type on the observed resource,
+or None if the resource or condition is not found. The returned dict is always
+a **new unfrozen dict** (not a reference to frozen observed data), so you can
+safely modify it. The dict always has exactly 4 keys; missing fields default to
+empty string.
+
+The first argument is the **observed resource name** (not the resource dict
+itself).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string | required | Composition resource name. Must not be empty. |
+| `type` | string | required | Condition type to look up (e.g., `"Ready"`, `"Synced"`). Must not be empty. |
+
+**Returns:** Dict with keys `status`, `reason`, `message`, `lastTransitionTime`,
+or `None` if the resource or condition type is not found.
+
+**Errors:** Fails if `name` or `type` is empty.
+
+**Example:**
+
+```python
+cond = get_condition("database", "Ready")
+if cond and cond["status"] == "True":
+    # database is ready
+    emit_event("Normal", "Database is ready")
+else:
+    set_response_ttl("30s")
+```
+
+---
+
+### set_response_ttl
+
+```python
+set_response_ttl(duration)
+```
+
+Set the response TTL on the RunFunctionResponse. This controls how long
+Crossplane waits before re-running the pipeline (requeue interval). Accepts a
+Go duration string (`"30s"`, `"5m"`, `"1m30s"`) or an integer (seconds).
+Overrides the default `sequencingTTL` from StarlarkInput. Can be called multiple
+times; the last call wins.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `duration` | string \| int | required | Duration as Go duration string (e.g., `"30s"`) or integer seconds. Must be non-negative. |
+
+**Returns:** None.
+
+**Errors:** Fails if `duration` is not a string or int, if the string cannot be
+parsed as a Go duration, if the integer is too large, or if the duration is
+negative.
+
+**Example:**
+
+```python
+# Using a duration string
+set_response_ttl("30s")
+
+# Using integer seconds (equivalent to "30s")
+set_response_ttl(30)
+
+# Conditional requeue: poll faster when waiting for a resource
+if not is_observed("database"):
+    set_response_ttl("10s")
+else:
+    set_response_ttl("5m")
+```
+
+---
+
+## Namespace Modules
+
+Six predeclared namespace modules are available in every script without import.
+Each module groups related functions under a dot-accessible name.
+
+### json
+
+The `json` module provides JSON encoding and decoding. This is the upstream
+module from [go.starlark.net/lib/json](https://pkg.go.dev/go.starlark.net/lib/json),
+not a custom implementation.
+
+#### json.encode
+
+```python
+json.encode(x)
+```
+
+Encode a Starlark value as a JSON string. Dicts, lists, strings, ints, floats,
+bools, and None are supported. Dict keys must be strings.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `x` | any | required | Starlark value to encode. |
+
+**Returns:** JSON string.
+
+**Example:**
+
+```python
+json.encode({"key": "value", "count": 42})
+# '{"key":"value","count":42}'
+```
+
+---
+
+#### json.decode
+
+```python
+json.decode(x)
+```
+
+Decode a JSON string into a Starlark value. JSON objects become dicts, arrays
+become lists, strings become strings, numbers become ints or floats, booleans
+become bools, and null becomes None.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `x` | string | required | JSON string to decode. |
+
+**Returns:** Starlark value.
+
+**Errors:** Fails if the string is not valid JSON.
+
+**Example:**
+
+```python
+data = json.decode('{"name": "test", "count": 5}')
+data["name"]   # "test"
+data["count"]  # 5
+```
+
+---
+
+#### json.encode_indent
+
+```python
+json.encode_indent(x, prefix="", indent="\t")
+```
+
+Encode a Starlark value as a pretty-printed JSON string with indentation.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `x` | any | required | Starlark value to encode. |
+| `prefix` | string | `""` | Prefix prepended to each line. |
+| `indent` | string | `"\t"` | Indentation string for each nesting level. |
+
+**Returns:** Pretty-printed JSON string.
+
+**Example:**
+
+```python
+json.encode_indent({"key": "value"}, indent="  ")
+# '{\n  "key": "value"\n}'
+```
+
+---
+
+#### json.indent
+
+```python
+json.indent(s, prefix="", indent="\t")
+```
+
+Reformat an existing JSON string with new indentation. The input must already
+be valid JSON.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `s` | string | required | Valid JSON string to reformat. |
+| `prefix` | string | `""` | Prefix prepended to each line. |
+| `indent` | string | `"\t"` | Indentation string for each nesting level. |
+
+**Returns:** Reformatted JSON string.
+
+**Errors:** Fails if `s` is not valid JSON.
+
+**Example:**
+
+```python
+compact = '{"key":"value","count":42}'
+json.indent(compact, indent="  ")
+# '{\n  "key": "value",\n  "count": 42\n}'
+```
+
+---
+
+### crypto
+
+The `crypto` module provides deterministic hashing, HMAC, and ID generation
+functions. All hash functions accept string or bytes input and return lowercase
+hex digest strings.
+
+#### crypto.sha256
+
+```python
+crypto.sha256(data)
+```
+
+Compute the SHA-256 hash of the input data.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to hash. |
+
+**Returns:** Lowercase hex-encoded SHA-256 digest string (64 characters).
+
+**Example:**
+
+```python
+crypto.sha256("hello world")
+# "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+```
+
+---
+
+#### crypto.sha512
+
+```python
+crypto.sha512(data)
+```
+
+Compute the SHA-512 hash of the input data.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to hash. |
+
+**Returns:** Lowercase hex-encoded SHA-512 digest string (128 characters).
+
+**Example:**
+
+```python
+crypto.sha512("hello world")
+# "309ecc489c12d6eb4cc40f50c902f2b4d0ed77ee511a7c7a9bcd3ca86d4cd86f..."
+```
+
+---
+
+#### crypto.sha1
+
+```python
+crypto.sha1(data)
+```
+
+Compute the SHA-1 hash of the input data.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to hash. |
+
+**Returns:** Lowercase hex-encoded SHA-1 digest string (40 characters).
+
+**Example:**
+
+```python
+crypto.sha1("hello world")
+# "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed"
+```
+
+---
+
+#### crypto.md5
+
+```python
+crypto.md5(data)
+```
+
+Compute the MD5 hash of the input data. **Non-cryptographic use only** -- MD5 is
+cryptographically broken. Use for checksums, cache keys, or compatibility with
+legacy systems that require MD5 hashes.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to hash. |
+
+**Returns:** Lowercase hex-encoded MD5 digest string (32 characters).
+
+**Example:**
+
+```python
+crypto.md5("hello world")
+# "5eb63bbbe01eeed093cb22bb8f5acdc3"
+```
+
+---
+
+#### crypto.hmac_sha256
+
+```python
+crypto.hmac_sha256(key, message)
+```
+
+Compute an HMAC-SHA256 message authentication code.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `key` | string or bytes | required | HMAC secret key. |
+| `message` | string or bytes | required | Message to authenticate. |
+
+**Returns:** Lowercase hex-encoded HMAC-SHA256 digest string (64 characters).
+
+**Example:**
+
+```python
+crypto.hmac_sha256("secret", "hello world")
+# hex HMAC digest
+```
+
+---
+
+#### crypto.blake3
+
+```python
+crypto.blake3(data)
+```
+
+Compute the BLAKE3 hash of the input data. BLAKE3 is faster than SHA-256 on
+modern hardware while providing equivalent security.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to hash. |
+
+**Returns:** Lowercase hex-encoded BLAKE3 digest string (64 characters).
+
+**Example:**
+
+```python
+crypto.blake3("hello world")
+# "d74981efa70a0c880b8d8c1985d075dbcbf679b99a5f9914e5aaf96b831a9e24"
+```
+
+---
+
+#### crypto.stable_id
+
+```python
+crypto.stable_id(seed, length=8)
+```
+
+Generate a deterministic hex ID from a seed string. Hashes the seed with SHA-256
+and returns the first `length` hex characters. Useful for generating stable,
+reproducible short identifiers from longer strings (e.g., resource names from
+XR metadata).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `seed` | string or bytes | required | Seed value to hash. |
+| `length` | int | `8` | Number of hex characters to return. Must be between 1 and 64 (inclusive). |
+
+**Returns:** Deterministic hex ID string of the specified length.
+
+**Errors:** Fails if `length` is not between 1 and 64.
+
+**Example:**
+
+```python
+crypto.stable_id("my-xr-name")
+# "a1b2c3d4" (8 hex chars by default)
+
+crypto.stable_id("my-xr-name", length=16)
+# "a1b2c3d4e5f6g7h8" (16 hex chars)
+```
+
+---
+
+### encoding
+
+The `encoding` module provides base64, base32, and hex encoding/decoding
+functions. URL-safe base64 and base32 use no-padding convention.
+
+#### encoding.b64enc
+
+```python
+encoding.b64enc(data)
+```
+
+Encode data as a standard base64 string (with padding).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to encode. |
+
+**Returns:** Standard base64-encoded string.
+
+**Example:**
+
+```python
+encoding.b64enc("hello world")
+# "aGVsbG8gd29ybGQ="
+```
+
+---
+
+#### encoding.b64dec
+
+```python
+encoding.b64dec(data)
+```
+
+Decode a standard base64 string.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string | required | Base64-encoded string to decode. |
+
+**Returns:** Decoded string.
+
+**Errors:** Fails if the input is not valid base64.
+
+**Example:**
+
+```python
+encoding.b64dec("aGVsbG8gd29ybGQ=")
+# "hello world"
+```
+
+---
+
+#### encoding.b64url_enc
+
+```python
+encoding.b64url_enc(data)
+```
+
+Encode data as a URL-safe base64 string without padding. Uses `-` and `_`
+instead of `+` and `/`.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to encode. |
+
+**Returns:** URL-safe base64-encoded string (no padding).
+
+**Example:**
+
+```python
+encoding.b64url_enc("hello+world/test")
+# URL-safe base64 without padding characters
+```
+
+---
+
+#### encoding.b64url_dec
+
+```python
+encoding.b64url_dec(data)
+```
+
+Decode a URL-safe base64 string (without padding).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string | required | URL-safe base64-encoded string to decode. |
+
+**Returns:** Decoded string.
+
+**Errors:** Fails if the input is not valid URL-safe base64.
+
+**Example:**
+
+```python
+encoded = encoding.b64url_enc("hello world")
+encoding.b64url_dec(encoded)
+# "hello world"
+```
+
+---
+
+#### encoding.b32enc
+
+```python
+encoding.b32enc(data)
+```
+
+Encode data as a standard base32 string without padding.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to encode. |
+
+**Returns:** Base32-encoded string (no padding).
+
+**Example:**
+
+```python
+encoding.b32enc("hello")
+# "NBSWY3DP"
+```
+
+---
+
+#### encoding.b32dec
+
+```python
+encoding.b32dec(data)
+```
+
+Decode a base32 string (without padding).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string | required | Base32-encoded string to decode. |
+
+**Returns:** Decoded string.
+
+**Errors:** Fails if the input is not valid base32.
+
+**Example:**
+
+```python
+encoding.b32dec("NBSWY3DP")
+# "hello"
+```
+
+---
+
+#### encoding.hex_enc
+
+```python
+encoding.hex_enc(data)
+```
+
+Encode data as a lowercase hex string.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string or bytes | required | Data to encode. |
+
+**Returns:** Lowercase hex-encoded string.
+
+**Example:**
+
+```python
+encoding.hex_enc("hello")
+# "68656c6c6f"
+```
+
+---
+
+#### encoding.hex_dec
+
+```python
+encoding.hex_dec(data)
+```
+
+Decode a hex string.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `data` | string | required | Hex-encoded string to decode. |
+
+**Returns:** Decoded string.
+
+**Errors:** Fails if the input is not valid hex.
+
+**Example:**
+
+```python
+encoding.hex_dec("68656c6c6f")
+# "hello"
+```
+
+---
+
+### dict
+
+The `dict` module provides dict manipulation functions for safe merging,
+filtering, and nested path traversal of Kubernetes-style dictionaries. All
+functions return **new dicts** without mutating their inputs.
+
+#### dict.merge
+
+```python
+dict.merge(d1, d2, ...)
+```
+
+Shallow right-wins merge of two or more dicts. Returns a new dict where later
+arguments override earlier ones for matching keys. Does not mutate any input.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d1, d2, ...` | dict | required | Two or more dicts to merge. At least 2 arguments required. |
+
+**Returns:** New dict with all keys merged (shallow right-wins).
+
+**Errors:** Fails if fewer than 2 arguments are provided. Fails if any argument
+is not a dict.
+
+**Example:**
+
+```python
+base = {"tier": "standard", "env": "dev"}
+override = {"env": "prod", "team": "platform"}
+dict.merge(base, override)
+# {"tier": "standard", "env": "prod", "team": "platform"}
+
+# Three-way merge
+dict.merge(defaults, team_config, env_overrides)
+```
+
+---
+
+#### dict.deep_merge
+
+```python
+dict.deep_merge(d1, d2, ...)
+```
+
+Recursive right-wins merge of two or more dicts. When both sides have a dict
+value for the same key, the merge recurses into those nested dicts. Non-dict
+values and lists are treated atomically (right side replaces). Does not mutate
+any input -- creates new dicts at every recursion level.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d1, d2, ...` | dict | required | Two or more dicts to merge. At least 2 arguments required. |
+
+**Returns:** New dict with all keys deeply merged (recursive right-wins).
+
+**Errors:** Fails if fewer than 2 arguments are provided. Fails if any argument
+is not a dict.
+
+**Example:**
+
+```python
+defaults = {"spec": {"replicas": 3, "image": "nginx:latest"}}
+overrides = {"spec": {"replicas": 5, "resources": {"cpu": "100m"}}}
+dict.deep_merge(defaults, overrides)
+# {"spec": {"replicas": 5, "image": "nginx:latest", "resources": {"cpu": "100m"}}}
+```
+
+---
+
+#### dict.pick
+
+```python
+dict.pick(d, keys)
+```
+
+Return a new dict containing only the specified keys that exist in the input.
+Keys that do not exist in `d` are silently ignored.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d` | dict | required | Source dict. |
+| `keys` | list | required | List of keys to include. |
+
+**Returns:** New dict with only the matching keys.
+
+**Example:**
+
+```python
+resource = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {}, "data": {}}
+dict.pick(resource, ["apiVersion", "kind"])
+# {"apiVersion": "v1", "kind": "ConfigMap"}
+```
+
+---
+
+#### dict.omit
+
+```python
+dict.omit(d, keys)
+```
+
+Return a new dict with the specified keys removed. Keys that do not exist in `d`
+are silently ignored.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d` | dict | required | Source dict. |
+| `keys` | list | required | List of keys to exclude. |
+
+**Returns:** New dict without the specified keys.
+
+**Example:**
+
+```python
+resource = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {}, "data": {}}
+dict.omit(resource, ["metadata"])
+# {"apiVersion": "v1", "kind": "ConfigMap", "data": {}}
+```
+
+---
+
+#### dict.dig
+
+```python
+dict.dig(d, path, default=None)
+```
+
+Safe dotted-path lookup in a dict. Traverses nested dicts along a dot-separated
+path and returns the value, or `default` if any intermediate key is missing.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d` | dict | required | Dict to traverse. |
+| `path` | string | required | Dot-separated path (e.g., `"spec.forProvider.region"`). Rejects empty paths, leading/trailing dots, and consecutive dots. |
+| `default` | any | None | Value to return if the path is not found. |
+
+**Returns:** Value at the path, or `default`.
+
+**Errors:** Fails if `path` is empty or malformed (leading/trailing/consecutive
+dots).
+
+**Example:**
+
+```python
+resource = {"spec": {"forProvider": {"region": "us-east-1"}}}
+dict.dig(resource, "spec.forProvider.region")
+# "us-east-1"
+
+dict.dig(resource, "spec.forProvider.zone", "us-east-1a")
+# "us-east-1a" (not found, returns default)
+```
+
+---
+
+#### dict.has_path
+
+```python
+dict.has_path(d, path)
+```
+
+Check if a dotted path exists in a dict. Returns True if all intermediate keys
+exist and the final key is present.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d` | dict | required | Dict to check. |
+| `path` | string | required | Dot-separated path. Rejects empty paths, leading/trailing dots, and consecutive dots. |
+
+**Returns:** `True` if the path exists, `False` otherwise.
+
+**Errors:** Fails if `path` is empty or malformed.
+
+**Example:**
+
+```python
+resource = {"spec": {"forProvider": {"region": "us-east-1"}}}
+dict.has_path(resource, "spec.forProvider.region")  # True
+dict.has_path(resource, "spec.forProvider.zone")    # False
+```
+
+---
+
+### regex
+
+The `regex` module provides RE2 regular expression functions using Go's
+[regexp](https://pkg.go.dev/regexp) package (RE2 syntax). Compiled patterns are
+cached in a bounded LRU cache (capacity 64) for performance.
+
+#### regex.match
+
+```python
+regex.match(pattern, s)
+```
+
+Returns True if the pattern matches anywhere in the string `s`.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression pattern. |
+| `s` | string | required | String to search. |
+
+**Returns:** `True` if the pattern matches, `False` otherwise.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.match("[0-9]+", "abc123def")  # True
+regex.match("^[0-9]+$", "abc123")  # False
+```
+
+---
+
+#### regex.find
+
+```python
+regex.find(pattern, s)
+```
+
+Returns the first match of the pattern in the string, or None if no match is
+found.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression pattern. |
+| `s` | string | required | String to search. |
+
+**Returns:** First match string, or `None`.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.find("[0-9]+", "abc123def456")
+# "123"
+
+regex.find("[0-9]+", "abcdef")
+# None
+```
+
+---
+
+#### regex.find_all
+
+```python
+regex.find_all(pattern, s)
+```
+
+Returns a list of all non-overlapping matches of the pattern in the string.
+Returns an empty list if no matches are found.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression pattern. |
+| `s` | string | required | String to search. |
+
+**Returns:** List of match strings. Empty list if no matches.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.find_all("[0-9]+", "abc123def456ghi789")
+# ["123", "456", "789"]
+```
+
+---
+
+#### regex.find_groups
+
+```python
+regex.find_groups(pattern, s)
+```
+
+Returns the capture groups (excluding group 0 / full match) from the first
+match, or None if no match is found.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression with capture groups. |
+| `s` | string | required | String to search. |
+
+**Returns:** List of capture group strings from the first match, or `None`.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.find_groups("(\\w+)@(\\w+)", "user@host")
+# ["user", "host"]
+
+# Extract account ID and resource type from an AWS ARN
+regex.find_groups("arn:aws:[^:]+:[^:]*:(\\d+):(.+)", arn)
+# ["123456789012", "role/my-role"]
+```
+
+---
+
+#### regex.replace
+
+```python
+regex.replace(pattern, s, replacement)
+```
+
+Replace the first match of the pattern in the string with the replacement.
+Supports `$1` backreferences to capture groups in the replacement string.
+Returns the original string unchanged if no match is found.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression pattern. |
+| `s` | string | required | String to search. |
+| `replacement` | string | required | Replacement string. Supports `$1`, `$2`, etc. backreferences. |
+
+**Returns:** String with the first match replaced.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.replace("world", "hello world world", "starlark")
+# "hello starlark world"
+
+# Backreference: swap first two words
+regex.replace("(\\w+) (\\w+)", "hello world", "$2 $1")
+# "world hello"
+```
+
+---
+
+#### regex.replace_all
+
+```python
+regex.replace_all(pattern, s, replacement)
+```
+
+Replace all matches of the pattern in the string with the replacement. Supports
+`$1` backreferences to capture groups.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression pattern. |
+| `s` | string | required | String to search. |
+| `replacement` | string | required | Replacement string. Supports `$1`, `$2`, etc. backreferences. |
+
+**Returns:** String with all matches replaced.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.replace_all("[0-9]+", "a1b2c3", "X")
+# "aXbXcX"
+```
+
+---
+
+#### regex.split
+
+```python
+regex.split(pattern, s)
+```
+
+Split the string on all matches of the pattern. Returns a list of the resulting
+substrings.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `pattern` | string | required | RE2 regular expression pattern to split on. |
+| `s` | string | required | String to split. |
+
+**Returns:** List of strings.
+
+**Errors:** Fails if the pattern is not a valid RE2 expression.
+
+**Example:**
+
+```python
+regex.split("[,;]+", "a,b;;c,d")
+# ["a", "b", "c", "d"]
+```
+
+---
+
+### yaml
+
+The `yaml` module provides K8s-compatible YAML encoding and decoding using
+[sigs.k8s.io/yaml](https://pkg.go.dev/sigs.k8s.io/yaml). Encoding produces
+sorted keys and block style by default. Decoding uses a YAML-to-JSON-to-Starlark
+pipeline to guarantee identical type mapping with `json.decode`.
+
+#### yaml.encode
+
+```python
+yaml.encode(value)
+```
+
+Encode a Starlark value as a YAML string. Produces K8s-compatible output with
+sorted keys and block style. The trailing newline is trimmed for cleaner string
+comparisons.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `value` | any | required | Starlark value to encode. Dict keys must be strings. |
+
+**Returns:** YAML string (sorted keys, no trailing newline).
+
+**Errors:** Fails if the value contains unsupported types or non-string dict keys.
+
+**Example:**
+
+```python
+yaml.encode({"apiVersion": "v1", "kind": "ConfigMap", "data": {"key": "value"}})
+# "apiVersion: v1\ndata:\n  key: value\nkind: ConfigMap"
+```
+
+---
+
+#### yaml.decode
+
+```python
+yaml.decode(s)
+```
+
+Decode a single-document YAML string into a Starlark value. Uses a
+YAML-to-JSON-to-`json.decode` pipeline internally, which guarantees identical
+type mapping with `json.decode` (JSON numbers become ints or floats, etc.).
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `s` | string | required | YAML string to decode. |
+
+**Returns:** Starlark value.
+
+**Errors:** Fails if the string is not valid YAML.
+
+**Example:**
+
+```python
+data = yaml.decode("apiVersion: v1\nkind: ConfigMap\ndata:\n  key: value")
+data["kind"]         # "ConfigMap"
+data["data"]["key"]  # "value"
+```
+
+---
+
+#### yaml.decode_stream
+
+```python
+yaml.decode_stream(s)
+```
+
+Decode a multi-document YAML string (documents separated by `---`) into a list
+of Starlark values. Empty documents are skipped.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `s` | string | required | Multi-document YAML string. |
+
+**Returns:** List of Starlark values (one per YAML document).
+
+**Errors:** Fails if any document is not valid YAML.
+
+**Example:**
+
+```python
+docs = yaml.decode_stream("name: a\n---\nname: b\n---\nname: c")
+len(docs)       # 3
+docs[0]["name"]  # "a"
+docs[2]["name"]  # "c"
+```
+
+---
+
 ## See also
 
 - [Features guide](features.md) -- Detailed behavior for depends_on creation
   sequencing, labels auto-injection, connection details, skip_resource,
-  observability metrics, metadata & observed access builtins, and schema
-  validation
+  observability metrics, metadata & observed access builtins, namespace modules,
+  and schema validation
 - [Standard library reference](stdlib-reference.md) -- Additional utility
   functions for networking, naming, labels, and conditions (loaded via
   short-form `load("starlark-stdlib:v1/naming.star", ...)` when a default
-  registry is configured, or explicit `load("oci://...", ...)`)
+  registry is configured, or explicit `load("oci://...", ...")`)
 - [Migration from KCL](migration-from-kcl.md) -- Concept mapping from KCL to
   function-starlark, including side-by-side examples
+- [Migration cheatsheet](migration-cheatsheet.md) -- Sprig/KCL to
+  function-starlark helper mapping
