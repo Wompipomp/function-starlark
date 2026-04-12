@@ -346,7 +346,6 @@ func TestJSON_RoundTrip_ViaRuntime(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			src := "body = " + tc.body + "\n" +
 				"decoded = json.decode(json.encode(body))\n" +
@@ -545,7 +544,6 @@ func TestJSON_RoundTrip_ToProtobuf(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			// Seed the `body` global via protojson → json.decode in the
 			// script. This path mirrors production (a request Struct

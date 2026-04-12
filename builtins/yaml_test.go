@@ -499,7 +499,6 @@ func TestYAML_RoundTrip_Protobuf(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			// Seed body via protojson -> json.decode to get a plain *starlark.Dict,
 			// then yaml.encode -> yaml.decode round-trip.

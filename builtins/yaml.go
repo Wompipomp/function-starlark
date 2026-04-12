@@ -25,9 +25,9 @@ var YAMLModule = &starlarkstruct.Module{
 	},
 }
 
-// starlarkToGo recursively converts a Starlark value to a Go interface{}
+// starlarkToGo recursively converts a Starlark value to a Go value
 // suitable for YAML marshaling. It handles all three dict types transparently.
-func starlarkToGo(v starlark.Value) (interface{}, error) {
+func starlarkToGo(v starlark.Value) (any, error) {
 	switch v := v.(type) {
 	case starlark.NoneType:
 		return nil, nil
@@ -49,7 +49,7 @@ func starlarkToGo(v starlark.Value) (interface{}, error) {
 		return string(v), nil
 
 	case *starlark.List:
-		result := make([]interface{}, v.Len())
+		result := make([]any, v.Len())
 		for i := 0; i < v.Len(); i++ {
 			elem, err := starlarkToGo(v.Index(i))
 			if err != nil {
@@ -60,7 +60,7 @@ func starlarkToGo(v starlark.Value) (interface{}, error) {
 		return result, nil
 
 	case starlark.Tuple:
-		result := make([]interface{}, len(v))
+		result := make([]any, len(v))
 		for i, elem := range v {
 			goElem, err := starlarkToGo(elem)
 			if err != nil {
@@ -86,8 +86,8 @@ func starlarkToGo(v starlark.Value) (interface{}, error) {
 
 // dictToGoMap converts Starlark dict items ([]starlark.Tuple) to a
 // map[string]interface{} suitable for YAML marshaling.
-func dictToGoMap(items []starlark.Tuple) (map[string]interface{}, error) {
-	result := make(map[string]interface{}, len(items))
+func dictToGoMap(items []starlark.Tuple) (map[string]any, error) {
+	result := make(map[string]any, len(items))
 	for _, item := range items {
 		key, ok := item[0].(starlark.String)
 		if !ok {
@@ -190,8 +190,7 @@ func splitYAMLDocuments(s string) []string {
 	var docs []string
 	var current strings.Builder
 
-	lines := strings.Split(s, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(s, "\n") {
 		trimmed := strings.TrimRight(line, " \t")
 		if trimmed == "---" {
 			doc := current.String()
