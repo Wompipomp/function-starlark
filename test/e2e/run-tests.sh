@@ -135,10 +135,10 @@ fi
 
 # Check status fields set by set_xr_status()
 builtins_count=$(get_status_field "xtest/test-builtins" "test.builtinsCount")
-if [ "$builtins_count" = "22" ]; then
-    pass "builtins: set_xr_status() wrote builtinsCount=22"
+if [ "$builtins_count" = "28" ]; then
+    pass "builtins: set_xr_status() wrote builtinsCount=28"
 else
-    fail "builtins: set_xr_status() builtinsCount='$builtins_count' (expected 22)"
+    fail "builtins: set_xr_status() builtinsCount='$builtins_count' (expected 28)"
 fi
 
 schema_worked=$(get_status_field "xtest/test-builtins" "test.schemaWorked")
@@ -162,6 +162,49 @@ if [ "$custom_cond" = "Passed" ]; then
     pass "builtins: set_condition() set custom BuiltinsTest condition"
 else
     fail "builtins: custom condition reason='$custom_cond' (expected Passed)"
+fi
+
+# Check namespace builtins via status fields
+crypto_stable=$(get_status_field "xtest/test-builtins" "test.cryptoStableId")
+if [ -n "$crypto_stable" ] && [ ${#crypto_stable} -eq 8 ]; then
+    pass "builtins: crypto.stable_id() returned 8-char hex"
+else
+    fail "builtins: crypto.stable_id() result='$crypto_stable' (expected 8-char hex)"
+fi
+
+crypto_sha_len=$(get_status_field "xtest/test-builtins" "test.cryptoSha256Len")
+if [ "$crypto_sha_len" = "64" ]; then
+    pass "builtins: crypto.sha256() returned 64-char hex"
+else
+    fail "builtins: crypto.sha256() length='$crypto_sha_len' (expected 64)"
+fi
+
+regex_match=$(get_status_field "xtest/test-builtins" "test.regexMatchWorked")
+if [ "$regex_match" = "true" ]; then
+    pass "builtins: regex.match() pattern matching works"
+else
+    fail "builtins: regex.match() result='$regex_match' (expected true)"
+fi
+
+regex_replace=$(get_status_field "xtest/test-builtins" "test.regexReplaceResult")
+if [ "$regex_replace" = "hello-world-test" ]; then
+    pass "builtins: regex.replace_all() normalized string correctly"
+else
+    fail "builtins: regex.replace_all() result='$regex_replace' (expected hello-world-test)"
+fi
+
+dict_merge_b=$(get_status_field "xtest/test-builtins" "test.dictMergeB")
+if [ "$dict_merge_b" = "3" ]; then
+    pass "builtins: dict.merge() right-wins behavior correct"
+else
+    fail "builtins: dict.merge() b='$dict_merge_b' (expected 3)"
+fi
+
+deep_merge_b=$(get_status_field "xtest/test-builtins" "test.deepMergeTopB")
+if [ "$deep_merge_b" = "3" ]; then
+    pass "builtins: dict.deep_merge() nested right-wins behavior correct"
+else
+    fail "builtins: dict.deep_merge() top.b='$deep_merge_b' (expected 3)"
 fi
 
 # Check Usage resource exists (resource-b depends_on resource-a)
