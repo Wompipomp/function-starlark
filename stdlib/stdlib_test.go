@@ -10,6 +10,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/v2/pkg/logging"
 	"go.starlark.net/starlark"
 
+	"github.com/wompipomp/function-starlark/builtins"
 	"github.com/wompipomp/function-starlark/runtime"
 )
 
@@ -308,7 +309,12 @@ func TestStdlibNetworking(t *testing.T) {
 func TestStdlibNaming(t *testing.T) {
 	mockOxr := buildMockOxr("my-xr", "", "")
 	getFn := starlark.NewBuiltin("get", mockGetImpl)
-	pre := starlark.StringDict{"oxr": mockOxr, "get": getFn}
+	pre := starlark.StringDict{
+		"oxr":    mockOxr,
+		"get":    getFn,
+		"crypto": builtins.CryptoModule,
+		"regex":  builtins.RegexModule,
+	}
 	exports := loadModule(t, "naming.star", pre)
 
 	resourceName := exports["resource_name"]
@@ -609,6 +615,8 @@ func TestStdlibConventions(t *testing.T) {
 		"Resource":      resourceFn,
 		"observed":      mockObserved,
 		"get_condition": getConditionFn,
+		"crypto":        builtins.CryptoModule,
+		"regex":         builtins.RegexModule,
 	}
 
 	modules := []string{
