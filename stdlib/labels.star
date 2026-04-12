@@ -63,10 +63,10 @@ def crossplane_labels(composite_name = "", claim_name = "", claim_namespace = ""
     name = composite_name if composite_name else get(oxr, "metadata.name", "")
     if name:
         labels[XP_COMPOSITE] = name
-    cn = claim_name if claim_name else get(oxr, ["metadata", "labels", "crossplane.io/claim-name"], "")
+    cn = claim_name if claim_name else get_label(oxr, "crossplane.io/claim-name", "")
     if cn:
         labels[XP_CLAIM_NAME] = cn
-    cns = claim_namespace if claim_namespace else get(oxr, ["metadata", "labels", "crossplane.io/claim-namespace"], "")
+    cns = claim_namespace if claim_namespace else get_label(oxr, "crossplane.io/claim-namespace", "")
     if cns:
         labels[XP_CLAIM_NAMESPACE] = cns
     return labels
@@ -83,8 +83,11 @@ def merge_labels(*label_dicts):
     Returns:
       New merged dict of labels
     """
-    result = {}
-    for d in label_dicts:
-        for k in d:
-            result[k] = d[k]
-    return result
+    if len(label_dicts) == 0:
+        return {}
+    if len(label_dicts) == 1:
+        result = {}
+        for k in label_dicts[0]:
+            result[k] = label_dicts[0][k]
+        return result
+    return dict.merge(*label_dicts)

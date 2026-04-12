@@ -13,9 +13,9 @@ def _parse_ip(ip):
     Returns:
       List of four integer octets
     """
+    if not regex.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip):
+        fail("invalid IP address: %s" % ip)
     parts = ip.split(".")
-    if len(parts) != 4:
-        fail("invalid IP address: %s (expected 4 octets)" % ip)
     octets = []
     for p in parts:
         octet = int(p)
@@ -33,9 +33,9 @@ def _parse_cidr(cidr):
     Returns:
       Tuple of (ip_int, prefix_length)
     """
-    parts = cidr.split("/")
-    if len(parts) != 2:
+    if not regex.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$", cidr):
         fail("invalid CIDR: %s (expected ip/prefix)" % cidr)
+    parts = cidr.split("/")
     prefix = int(parts[1])
     if prefix < 0 or prefix > 32:
         fail("invalid prefix length %d in CIDR: %s" % (prefix, cidr))
