@@ -1,7 +1,7 @@
 # function-starlark
 
-> **In Development** -- This project is under active development and not yet
-> published. APIs may change without notice. Do not use in production.
+> **Alpha** -- APIs are stabilizing but may still change between releases.
+> Feedback and bug reports are welcome.
 
 Write Crossplane compositions in Starlark -- a hermetic, Python-like language
 with zero external toolchain.
@@ -23,6 +23,11 @@ with zero external toolchain.
 - **Opt-in schema validation** -- `schema()` and `field()` create typed constructors
   that catch typos, wrong types, and missing fields at construction time. Mix
   schema-validated and plain dict resources freely.
+  [Builtins reference](docs/builtins-reference.md)
+- **34 predeclared names** -- 6 globals, 22 functions, and 6 namespace modules
+  (json, crypto, encoding, dict, regex, yaml) available without imports.
+  Use `get_extra_resource()` for one-call extra-resource field access and
+  `set_response_ttl()` for custom requeue intervals.
   [Builtins reference](docs/builtins-reference.md)
 - **Namespace alias imports** -- `load("module.star", ns="*")` wraps all exports
   in a struct, solving name conflicts when loading multiple provider schema
@@ -46,7 +51,16 @@ with zero external toolchain.
 | Observability | 9 Prometheus metrics | None built-in | None built-in |
 | Metadata builtins | get_label(), get_annotation(), get_observed(), set_xr_status() | Manual via get()/set | Manual via template |
 | Sandbox | Hermetic (no I/O, no network) | KCL sandbox | Go template sandbox |
-| Standard library | networking, naming, labels, conditions | KCL module ecosystem | Sprig functions |
+| Standard library | networking, naming, labels, conditions (all_ready, any_degraded) | KCL module ecosystem | Sprig functions |
+| JSON | `json.*` predeclared (encode, decode, encode_indent, indent) | `json` module (import) | `toJson`/`fromJson` (Sprig) |
+| Crypto / Hashing | `crypto.*` (sha256, sha512, sha1, md5, hmac, blake3, stable_id) | -- | `sha256sum`, `md5sum` (Sprig) |
+| Encoding | `encoding.*` (b64, b32, hex encode/decode) | `base64` module (import) | `b64enc`/`b64dec` (Sprig) |
+| Dict operations | `dict.*` (merge, deep_merge, pick, omit, dig, has_path) | -- | `merge`, `pick`, `omit`, `dig` (Sprig) |
+| Regex | `regex.*` (match, find, groups, replace, split) | `regex` module (import) | `regexMatch`, `regexFind` (Sprig) |
+| YAML | `yaml.*` (encode, decode, decode_stream) | `yaml` module (import) | `toYaml`/`fromYaml` (Sprig) |
+| Observed helpers | `is_observed()`, `observed_body()`, `get_extra_resource()`, `get_condition()` | -- | -- |
+| Response TTL | `set_response_ttl()` | -- | -- |
+| Condition aggregation | `all_ready()`, `any_degraded()` (stdlib) | -- | -- |
 
 ## Quick start
 
@@ -251,6 +265,7 @@ spec:
 | [docs/features.md](docs/features.md) | depends_on, labels, connection details, skip_resource, metrics |
 | [docs/best-practices.md](docs/best-practices.md) | Composition patterns, label strategy, testing |
 | [docs/migration-from-kcl.md](docs/migration-from-kcl.md) | Migration guide from function-kcl |
+| [docs/migration-cheatsheet.md](docs/migration-cheatsheet.md) | Sprig/KCL to function-starlark helper mapping |
 | [docs/stdlib-reference.md](docs/stdlib-reference.md) | Standard library reference |
 | [docs/oci-module-distribution.md](docs/oci-module-distribution.md) | OCI module distribution guide |
 | [docs/library-authoring.md](docs/library-authoring.md) | Writing shared Starlark libraries |
