@@ -515,9 +515,19 @@ func TestStdlibConditions(t *testing.T) {
 			return starlark.None, nil
 		})
 
+	// Mock observed and get_condition required by all_ready/any_degraded.
+	mockObs := starlark.NewDict(0)
+	mockObs.Freeze()
+	getCondFn := starlark.NewBuiltin("get_condition",
+		func(_ *starlark.Thread, _ *starlark.Builtin, _ starlark.Tuple, _ []starlark.Tuple) (starlark.Value, error) {
+			return starlark.None, nil
+		})
+
 	pre := starlark.StringDict{
 		"set_condition": setConditionFn,
 		"emit_event":    emitEventFn,
+		"observed":      mockObs,
+		"get_condition": getCondFn,
 	}
 	exports := loadModule(t, "conditions.star", pre)
 

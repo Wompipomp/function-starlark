@@ -36,3 +36,50 @@ def degraded(reason, message = ""):
         severity = "Warning",
         message = "Degraded: %s" % (message if message else reason),
     )
+
+def all_ready(resources = None):
+    """Return True iff every resource has a Ready=True condition.
+
+    Args:
+      resources: List of resource name strings to check, or None to check all observed.
+                 An explicit empty list returns True (vacuous truth).
+                 None with zero observed returns False (first reconciliation).
+
+    Returns:
+      bool
+    """
+    if resources != None:
+        names = resources
+    else:
+        names = list(observed.keys())
+    if len(names) == 0:
+        return resources != None  # [] -> True (vacuous), None with 0 observed -> False
+    for name in names:
+        cond = get_condition(name, "Ready")
+        if cond == None or cond["status"] != "True":
+            return False
+    return True
+
+def any_degraded(resources = None):
+    """Return True iff any resource has Ready=False or Synced=False.
+
+    Args:
+      resources: List of resource name strings to check, or None to check all observed.
+                 An explicit empty list returns False.
+                 Resources with no conditions are not considered degraded.
+
+    Returns:
+      bool
+    """
+    if resources != None:
+        names = resources
+    else:
+        names = list(observed.keys())
+    for name in names:
+        ready = get_condition(name, "Ready")
+        if ready != None and ready["status"] == "False":
+            return True
+        synced = get_condition(name, "Synced")
+        if synced != None and synced["status"] == "False":
+            return True
+    return False
