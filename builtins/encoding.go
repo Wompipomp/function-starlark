@@ -52,6 +52,10 @@ func encodingB64Dec(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple
 	return starlark.String(string(decoded)), nil
 }
 
+// Note: URL-safe base64 intentionally uses RawURLEncoding (no padding) per RFC 4648 Section 5.
+// This differs from standard base64 which uses StdEncoding (with padding).
+// The asymmetry is by design -- URL-safe encoding conventionally omits padding.
+
 // encodingB64URLEnc implements encoding.b64url_enc(data) -> URL-safe base64 without padding.
 func encodingB64URLEnc(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var data starlark.Value

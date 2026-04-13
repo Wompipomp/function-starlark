@@ -8,6 +8,10 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// maxDurationSeconds is the largest integer seconds value that fits in a
+// time.Duration without overflow (math.MaxInt64 / int64(time.Second)).
+const maxDurationSeconds = int64(9223372036)
+
 // TTLCollector accumulates a user-set response TTL from Starlark scripts.
 // It follows the collector pattern: create with NewTTLCollector, register the
 // builtin via SetResponseTTLBuiltin, then read the result with TTL().
@@ -54,6 +58,9 @@ func (tc *TTLCollector) setResponseTTLFn(
 		secs, ok := v.Int64()
 		if !ok {
 			return nil, fmt.Errorf("%s: integer too large", b.Name())
+		}
+		if secs > maxDurationSeconds {
+			return nil, fmt.Errorf("%s: integer seconds %d exceeds maximum (%d ~= 292 years)", b.Name(), secs, maxDurationSeconds)
 		}
 		d = time.Duration(secs) * time.Second
 	default:

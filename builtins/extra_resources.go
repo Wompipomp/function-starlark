@@ -51,6 +51,12 @@ func getExtraResourceImpl(
 		return res, nil
 	}
 
+	// Validate path is not empty.
+	pathStr, ok := path.(starlark.String)
+	if ok && string(pathStr) == "" {
+		return nil, fmt.Errorf("%s: path must not be empty", fnName)
+	}
+
 	// Traverse the dot-path.
 	keys, err := pathToKeys(path)
 	if err != nil {
@@ -109,9 +115,13 @@ func getExtraResourcesImpl(
 		return dflt, nil
 	}
 
-	// If no path given, return the list directly (all body dicts).
+	// If no path given, return a mutable copy of the list (all body dicts).
 	if path == nil || path == starlark.None {
-		return list, nil
+		items := make([]starlark.Value, list.Len())
+		for i := 0; i < list.Len(); i++ {
+			items[i] = list.Index(i)
+		}
+		return starlark.NewList(items), nil
 	}
 
 	// Traverse the dot-path on each item, collecting values where path exists.
