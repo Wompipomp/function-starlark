@@ -257,6 +257,138 @@ func TestGetCondition_EmptyType_Errors(t *testing.T) {
 	}
 }
 
+// TestGetCondition_NoConditionsKey verifies that get_condition returns None
+// when the resource has a "status" field but no "conditions" key.
+func TestGetCondition_NoConditionsKey(t *testing.T) {
+	observed := map[string]*fnv1.Resource{
+		"db": {Resource: &structpb.Struct{Fields: map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("v1"),
+			"status": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"ready": structpb.NewBoolValue(true),
+				},
+			}),
+		}}},
+	}
+	req := makeReq(
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		observed,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_condition",
+		starlark.Tuple{starlark.String("db"), starlark.String("Ready")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != starlark.None {
+		t.Errorf("expected None when status has no conditions, got %v", got)
+	}
+}
+
+// TestGetCondition_MalformedConditions verifies that get_condition returns None
+// when the conditions field is a string (not a list).
+func TestGetCondition_MalformedConditions(t *testing.T) {
+	observed := map[string]*fnv1.Resource{
+		"db": {Resource: &structpb.Struct{Fields: map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("v1"),
+			"status": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"conditions": structpb.NewStringValue("not-a-list"),
+				},
+			}),
+		}}},
+	}
+	req := makeReq(
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		observed,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_condition",
+		starlark.Tuple{starlark.String("db"), starlark.String("Ready")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != starlark.None {
+		t.Errorf("expected None when conditions is not a list, got %v", got)
+	}
+}
+
+// TestGetCondition_NonStringType verifies that passing a non-string type
+// argument produces an error (starlark.UnpackArgs enforces string type).
+func TestGetCondition_NonStringType(t *testing.T) {
+	req := makeReq(
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		nil,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = callBuiltin(t, globals, "get_condition",
+		starlark.Tuple{starlark.String("db"), starlark.MakeInt(123)}, nil)
+	if err == nil {
+		t.Fatal("expected error for non-string type argument")
+	}
+	if !strings.Contains(err.Error(), "got int") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestGetCondition_DuplicateConditionTypes verifies that get_condition returns
+// the first condition when multiple conditions share the same type.
+func TestGetCondition_DuplicateConditionTypes(t *testing.T) {
+	observed := makeObservedWithConditions(
+		makeCondition("Ready", "True", "FirstReady", "", ""),
+		makeCondition("Ready", "False", "SecondReady", "", ""),
+	)
+	req := makeReq(
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		observed,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_condition",
+		starlark.Tuple{starlark.String("db"), starlark.String("Ready")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d, ok := got.(*starlark.Dict)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.Dict", got)
+	}
+
+	// Should return the first one (reason="FirstReady").
+	v, _, _ := d.Get(starlark.String("reason"))
+	vs, ok := v.(starlark.String)
+	if !ok {
+		t.Fatalf("reason is %T, want starlark.String", v)
+	}
+	if vs != "FirstReady" {
+		t.Errorf("reason = %v, want FirstReady (first condition should win)", vs)
+	}
+}
+
 func TestGetCondition_ReturnedDictIsMutable(t *testing.T) {
 	observed := makeObservedWithConditions(
 		makeCondition("Ready", "True", "Available", "", ""),

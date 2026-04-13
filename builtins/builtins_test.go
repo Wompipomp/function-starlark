@@ -459,6 +459,145 @@ func TestGetBuiltin_NonMapping(t *testing.T) {
 	}
 }
 
+// TestGetBuiltin_EmptyPath verifies that get() with empty string path returns default.
+func TestGetBuiltin_EmptyPath(t *testing.T) {
+	req := makeReq(
+		map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("v1"),
+		},
+		map[string]*structpb.Value{},
+		nil,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thread := new(starlark.Thread)
+	result, err := starlark.Call(thread, globals["get"], starlark.Tuple{
+		globals["oxr"],
+		starlark.String(""),
+	}, nil)
+	if err != nil {
+		t.Fatalf("get() error: %v", err)
+	}
+	// Empty string path splits to [""], which won't match any key -> returns None.
+	if result != starlark.None {
+		t.Errorf("get(oxr, '') = %v, want None", result)
+	}
+}
+
+// TestSetXRStatus_ListPath verifies that set_xr_status rejects a list path
+// (path argument is typed as string, not starlark.Value).
+func TestSetXRStatus_ListPath(t *testing.T) {
+	dxr := convert.NewStarlarkDict(0)
+	setFn := starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return setXRStatus(b.Name(), dxr, args, kwargs)
+	})
+
+	thread := new(starlark.Thread)
+	_, err := starlark.Call(thread, setFn, starlark.Tuple{
+		starlark.NewList([]starlark.Value{starlark.String("a"), starlark.String("b")}),
+		starlark.String("value"),
+	}, nil)
+	if err == nil {
+		t.Fatal("expected error for list path, got nil")
+	}
+	if !strings.Contains(err.Error(), "got list") {
+		t.Errorf("error = %q, want to contain 'got list'", err.Error())
+	}
+}
+
+// TestGetAnnotation_DefaultKwarg verifies that get_annotation returns the
+// default kwarg value when the annotation is missing.
+func TestGetAnnotation_DefaultKwarg(t *testing.T) {
+	req := makeReq(
+		map[string]*structpb.Value{
+			"metadata": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"annotations": structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{},
+					}),
+				},
+			}),
+		},
+		map[string]*structpb.Value{},
+		nil,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thread := new(starlark.Thread)
+	getAnnotationFn := starlark.NewBuiltin("get_annotation", getAnnotationImpl)
+	result, err := starlark.Call(thread, getAnnotationFn, starlark.Tuple{
+		globals["oxr"],
+		starlark.String("missing.annotation"),
+	}, []starlark.Tuple{
+		{starlark.String("default"), starlark.String("fallback")},
+	})
+	if err != nil {
+		t.Fatalf("get_annotation() error: %v", err)
+	}
+	if result != starlark.String("fallback") {
+		t.Errorf("get_annotation(oxr, 'missing.annotation', default='fallback') = %v, want 'fallback'", result)
+	}
+}
+
+// TestSkipResource_PreventsEmission verifies that skip_resource prevents a
+// resource from appearing in the desired state, even when other resources are
+// emitted in the same collector lifecycle.
+func TestSkipResource_PreventsEmission(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	thread := new(starlark.Thread)
+
+	// Skip a resource before any emit.
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("skip-me"),
+		starlark.String("not needed"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource() error: %v", err)
+	}
+
+	// Emit a different resource via Resource().
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Database"))
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("my-db"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Verify skip-me is not in collection but my-db is.
+	if _, ok := c.Resources()["skip-me"]; ok {
+		t.Error("skipped resource should not appear in Resources()")
+	}
+	if _, ok := c.Resources()["my-db"]; !ok {
+		t.Error("emitted resource 'my-db' should be in Resources()")
+	}
+
+	// Apply and verify.
+	rsp := &fnv1.RunFunctionResponse{}
+	if err := ApplyResources(rsp, c); err != nil {
+		t.Fatalf("ApplyResources error: %v", err)
+	}
+	if rsp.Desired == nil || rsp.Desired.Resources == nil {
+		t.Fatal("Desired.Resources should exist")
+	}
+	if _, ok := rsp.Desired.Resources["skip-me"]; ok {
+		t.Error("skipped resource should not appear in Desired.Resources")
+	}
+	if _, ok := rsp.Desired.Resources["my-db"]; !ok {
+		t.Error("emitted resource should appear in Desired.Resources")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ApplyResources tests
 // ---------------------------------------------------------------------------

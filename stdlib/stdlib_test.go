@@ -577,6 +577,130 @@ func TestStdlibLabels(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestStdlibNaming_HashSuffix -- direct test for hash_suffix
+// ---------------------------------------------------------------------------
+
+func TestStdlibNaming_HashSuffix(t *testing.T) {
+	mockOxr := buildMockOxr("my-xr", "", "")
+	getFn := starlark.NewBuiltin("get", mockGetImpl)
+	pre := starlark.StringDict{
+		"oxr":    mockOxr,
+		"get":    getFn,
+		"crypto": builtins.CryptoModule,
+		"regex":  builtins.RegexModule,
+	}
+	exports := loadModule(t, "naming.star", pre)
+
+	hashSuffix := exports["hash_suffix"]
+
+	t.Run("deterministic", func(t *testing.T) {
+		a := callStarlark(t, hashSuffix, starlark.Tuple{starlark.String("test-input")}, nil)
+		b := callStarlark(t, hashSuffix, starlark.Tuple{starlark.String("test-input")}, nil)
+		if a.String() != b.String() {
+			t.Errorf("hash_suffix is not deterministic: %v != %v", a, b)
+		}
+	})
+
+	t.Run("default_length_5", func(t *testing.T) {
+		result := callStarlark(t, hashSuffix, starlark.Tuple{starlark.String("my-xr")}, nil)
+		got := string(result.(starlark.String))
+		if len(got) != 5 {
+			t.Errorf("hash_suffix default length = %d, want 5", len(got))
+		}
+	})
+
+	t.Run("custom_length", func(t *testing.T) {
+		result := callStarlark(t, hashSuffix,
+			starlark.Tuple{starlark.String("my-xr")},
+			[]starlark.Tuple{{starlark.String("length"), starlark.MakeInt(10)}})
+		got := string(result.(starlark.String))
+		if len(got) != 10 {
+			t.Errorf("hash_suffix(length=10) length = %d, want 10", len(got))
+		}
+	})
+
+	t.Run("different_inputs_differ", func(t *testing.T) {
+		a := callStarlark(t, hashSuffix, starlark.Tuple{starlark.String("input-a")}, nil)
+		b := callStarlark(t, hashSuffix, starlark.Tuple{starlark.String("input-b")}, nil)
+		if a.String() == b.String() {
+			t.Errorf("hash_suffix should differ for different inputs: %v == %v", a, b)
+		}
+	})
+
+	t.Run("matches_crypto_stable_id", func(t *testing.T) {
+		// hash_suffix delegates to crypto.stable_id, so outputs must match.
+		hashResult := callStarlark(t, hashSuffix,
+			starlark.Tuple{starlark.String("check")},
+			[]starlark.Tuple{{starlark.String("length"), starlark.MakeInt(8)}})
+
+		// Call crypto.stable_id directly for comparison.
+		stableIDFn, ok := builtins.CryptoModule.Members["stable_id"]
+		if !ok {
+			t.Fatal("crypto.stable_id not found")
+		}
+		thread := &starlark.Thread{Name: "test"}
+		idResult, err := starlark.Call(thread, stableIDFn,
+			starlark.Tuple{starlark.String("check")},
+			[]starlark.Tuple{{starlark.String("length"), starlark.MakeInt(8)}})
+		if err != nil {
+			t.Fatalf("crypto.stable_id error: %v", err)
+		}
+		if hashResult.String() != idResult.String() {
+			t.Errorf("hash_suffix != crypto.stable_id: %v vs %v", hashResult, idResult)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestStdlibLabels_MergeLabelsEdgeCases -- 0-arg and 1-arg merge_labels
+// ---------------------------------------------------------------------------
+
+func TestStdlibLabels_MergeLabelsEdgeCases(t *testing.T) {
+	mockOxr := buildMockOxr("test-composite", "my-claim", "default")
+	getFn := starlark.NewBuiltin("get", mockGetImpl)
+	getLabelFn := starlark.NewBuiltin("get_label", mockGetLabelImpl)
+	pre := starlark.StringDict{
+		"oxr":       mockOxr,
+		"get":       getFn,
+		"dict":      builtins.DictModule,
+		"get_label": getLabelFn,
+	}
+	exports := loadModule(t, "labels.star", pre)
+	mergeLabels := exports["merge_labels"]
+
+	t.Run("zero_args_returns_empty_dict", func(t *testing.T) {
+		result := callStarlark(t, mergeLabels, nil, nil)
+		d, ok := result.(*starlark.Dict)
+		if !ok {
+			t.Fatalf("merge_labels() returned %T, want *starlark.Dict", result)
+		}
+		if d.Len() != 0 {
+			t.Errorf("merge_labels() len = %d, want 0", d.Len())
+		}
+	})
+
+	t.Run("one_arg_returns_copy", func(t *testing.T) {
+		d1 := starlark.NewDict(2)
+		_ = d1.SetKey(starlark.String("a"), starlark.String("1"))
+		_ = d1.SetKey(starlark.String("b"), starlark.String("2"))
+
+		result := callStarlark(t, mergeLabels, starlark.Tuple{d1}, nil)
+		d, ok := result.(*starlark.Dict)
+		if !ok {
+			t.Fatalf("merge_labels(d1) returned %T, want *starlark.Dict", result)
+		}
+		if d.Len() != 2 {
+			t.Errorf("merge_labels(d1) len = %d, want 2", d.Len())
+		}
+		// Should be a copy, not the original.
+		_ = d.SetKey(starlark.String("c"), starlark.String("3"))
+		if d1.Len() != 2 {
+			t.Error("merge_labels should return a copy, but modifying result changed original")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // TestStdlibConditions
 // ---------------------------------------------------------------------------
 

@@ -193,6 +193,32 @@ func TestTTLCollector_InvalidType(t *testing.T) {
 	}
 }
 
+func TestTTLCollector_InvalidDurationString(t *testing.T) {
+	tc := NewTTLCollector()
+	thread := &starlark.Thread{Name: "test"}
+	builtin := tc.SetResponseTTLBuiltin()
+	_, err := starlark.Call(thread, builtin, starlark.Tuple{starlark.String("not-a-duration")}, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid duration string")
+	}
+	if got := err.Error(); !contains(got, "invalid duration") {
+		t.Errorf("error = %q, want to contain 'invalid duration'", got)
+	}
+}
+
+func TestTTLCollector_FloatInput(t *testing.T) {
+	tc := NewTTLCollector()
+	thread := &starlark.Thread{Name: "test"}
+	builtin := tc.SetResponseTTLBuiltin()
+	_, err := starlark.Call(thread, builtin, starlark.Tuple{starlark.Float(1.5)}, nil)
+	if err == nil {
+		t.Fatal("expected error for float input")
+	}
+	if got := err.Error(); !contains(got, "got float, want string or int") {
+		t.Errorf("error = %q, want to contain 'got float, want string or int'", got)
+	}
+}
+
 func TestTTLCollector_LastWriteWins(t *testing.T) {
 	tc := NewTTLCollector()
 	thread := &starlark.Thread{Name: "test"}

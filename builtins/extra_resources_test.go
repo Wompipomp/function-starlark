@@ -385,6 +385,151 @@ func TestGetExtraResource_EmptyPath_Errors(t *testing.T) {
 	}
 }
 
+// TestGetExtraResources_PartialPathCollection verifies that get_extra_resources
+// with a path only collects items where the path exists, skipping those where
+// it doesn't.
+func TestGetExtraResources_PartialPathCollection(t *testing.T) {
+	// Resource with the path
+	res1 := &fnv1.Resource{
+		Resource: &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"spec": structpb.NewStructValue(&structpb.Struct{
+					Fields: map[string]*structpb.Value{
+						"region": structpb.NewStringValue("us-west-2"),
+					},
+				}),
+			},
+		},
+	}
+	// Resource WITHOUT the path (no spec.region)
+	res2 := &fnv1.Resource{
+		Resource: &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"metadata": structpb.NewStructValue(&structpb.Struct{
+					Fields: map[string]*structpb.Value{
+						"name": structpb.NewStringValue("cluster-2"),
+					},
+				}),
+			},
+		},
+	}
+	// Resource with the path
+	res3 := &fnv1.Resource{
+		Resource: &structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"spec": structpb.NewStructValue(&structpb.Struct{
+					Fields: map[string]*structpb.Value{
+						"region": structpb.NewStringValue("eu-central-1"),
+					},
+				}),
+			},
+		},
+	}
+	extras := map[string]*fnv1.Resources{
+		"clusters": {Items: []*fnv1.Resource{res1, res2, res3}},
+	}
+	req := makeReqWithExtras(extras)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_extra_resources",
+		starlark.Tuple{starlark.String("clusters"), starlark.String("spec.region")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := got.(*starlark.List)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.List", got)
+	}
+	// Only 2 of 3 items have spec.region
+	if list.Len() != 2 {
+		t.Fatalf("len = %d, want 2 (only items with spec.region)", list.Len())
+	}
+	v0, ok := list.Index(0).(starlark.String)
+	if !ok {
+		t.Fatalf("[0] is %T, want starlark.String", list.Index(0))
+	}
+	if v0 != "us-west-2" {
+		t.Errorf("[0] = %v, want us-west-2", v0)
+	}
+	v1, ok := list.Index(1).(starlark.String)
+	if !ok {
+		t.Fatalf("[1] is %T, want starlark.String", list.Index(1))
+	}
+	if v1 != "eu-central-1" {
+		t.Errorf("[1] = %v, want eu-central-1", v1)
+	}
+}
+
+// TestGetExtraResource_CustomDefault verifies the default kwarg is returned
+// when the extra resource is missing.
+func TestGetExtraResource_CustomDefault(t *testing.T) {
+	req := makeReqWithExtras(nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_extra_resource",
+		starlark.Tuple{starlark.String("missing")},
+		[]starlark.Tuple{{starlark.String("default"), starlark.String("custom")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotStr, ok := got.(starlark.String)
+	if !ok {
+		t.Fatalf("result is %T, want starlark.String", got)
+	}
+	if gotStr != "custom" {
+		t.Errorf("got %v, want custom", gotStr)
+	}
+}
+
+// TestGetExtraResources_ReturnedListIsMutable verifies the FIX-08 fix:
+// get_extra_resources returns a mutable list that can be appended to.
+func TestGetExtraResources_ReturnedListIsMutable_PathMode(t *testing.T) {
+	mkRes := func(region string) *fnv1.Resource {
+		return &fnv1.Resource{
+			Resource: &structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"spec": structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"region": structpb.NewStringValue(region),
+						},
+					}),
+				},
+			},
+		}
+	}
+	extras := map[string]*fnv1.Resources{
+		"clusters": {Items: []*fnv1.Resource{mkRes("us-west-2")}},
+	}
+	req := makeReqWithExtras(extras)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_extra_resources",
+		starlark.Tuple{starlark.String("clusters"), starlark.String("spec.region")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := got.(*starlark.List)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.List", got)
+	}
+	// The returned list must be mutable (not frozen) so users can append.
+	if err := list.Append(starlark.String("extra")); err != nil {
+		t.Errorf("returned list from path mode should be mutable (append failed): %v", err)
+	}
+}
+
 func TestGetExtraResources_EmptyMatch_ReturnsDefault(t *testing.T) {
 	extras := map[string]*fnv1.Resources{
 		"empty-match": {Items: nil},
