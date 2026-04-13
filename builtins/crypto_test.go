@@ -394,7 +394,7 @@ id_len = len(id)
 		t.Fatalf(`out["id"] is %T, want starlark.String`, out["id"])
 	}
 	c := string(id)[0]
-	if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+	if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 		t.Errorf("stable_id(length=1) = %q, want hex digit [0-9a-f]", string(id))
 	}
 }

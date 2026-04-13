@@ -2,8 +2,8 @@ package builtins
 
 import (
 	"crypto/hmac"
-	"crypto/md5"
-	"crypto/sha1"
+	"crypto/md5"  //nolint:gosec // md5 intentionally exposed as Starlark builtin
+	"crypto/sha1" //nolint:gosec // sha1 intentionally exposed as Starlark builtin
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
@@ -79,7 +79,7 @@ func cryptoSHA1(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kw
 	if err != nil {
 		return nil, err
 	}
-	sum := sha1.Sum(raw)
+	sum := sha1.Sum(raw) //nolint:gosec // intentional
 	return starlark.String(hex.EncodeToString(sum[:])), nil
 }
 
@@ -93,7 +93,7 @@ func cryptoMD5(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwa
 	if err != nil {
 		return nil, err
 	}
-	sum := md5.Sum(raw)
+	sum := md5.Sum(raw) //nolint:gosec // intentional
 	return starlark.String(hex.EncodeToString(sum[:])), nil
 }
 

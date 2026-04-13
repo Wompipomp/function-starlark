@@ -119,16 +119,16 @@ func BuildGlobals(
 		"get_condition": starlark.NewBuiltin("get_condition", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			return getConditionImpl(b.Name(), observed, args, kwargs)
 		}),
-		"schema":                  schema.SchemaBuiltin(),
-		"field":                   schema.FieldBuiltin(),
-		"struct":                  starlark.NewBuiltin("struct", starlarkstruct.Make),
-		"json":                    starlarkjson.Module,
-		"crypto":                  CryptoModule,
-		"encoding":                EncodingModule,
-		"dict":                    DictModule,
-		"regex":                   RegexModule,
-		"yaml":                    YAMLModule,
-		"set_response_ttl":        ttlCollector.SetResponseTTLBuiltin(),
+		"schema":           schema.SchemaBuiltin(),
+		"field":            schema.FieldBuiltin(),
+		"struct":           starlark.NewBuiltin("struct", starlarkstruct.Make),
+		"json":             starlarkjson.Module,
+		"crypto":           CryptoModule,
+		"encoding":         EncodingModule,
+		"dict":             DictModule,
+		"regex":            RegexModule,
+		"yaml":             YAMLModule,
+		"set_response_ttl": ttlCollector.SetResponseTTLBuiltin(),
 	}, nil
 }
 
