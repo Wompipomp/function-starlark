@@ -292,6 +292,75 @@ func TestGetExtraResources_Missing_ReturnsEmptyList(t *testing.T) {
 	}
 }
 
+func TestGetExtraResources_NoPath_ReturnsMutableList(t *testing.T) {
+	mkRes := func(region string) *fnv1.Resource {
+		return &fnv1.Resource{
+			Resource: &structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"spec": structpb.NewStructValue(&structpb.Struct{
+						Fields: map[string]*structpb.Value{
+							"region": structpb.NewStringValue(region),
+						},
+					}),
+				},
+			},
+		}
+	}
+	extras := map[string]*fnv1.Resources{
+		"clusters": {Items: []*fnv1.Resource{mkRes("us-west-2"), mkRes("eu-central-1")}},
+	}
+	req := makeReqWithExtras(extras)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := callBuiltin(t, globals, "get_extra_resources",
+		starlark.Tuple{starlark.String("clusters")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, ok := got.(*starlark.List)
+	if !ok {
+		t.Fatalf("got %T, want *starlark.List", got)
+	}
+	// The returned list must be mutable (not frozen) so users can append.
+	if err := list.Append(starlark.String("extra")); err != nil {
+		t.Errorf("returned list should be mutable (append failed): %v", err)
+	}
+}
+
+func TestGetExtraResource_EmptyPath_Errors(t *testing.T) {
+	res := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"spec": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"region": structpb.NewStringValue("us-west-2"),
+				},
+			}),
+		},
+	}
+	extras := map[string]*fnv1.Resources{
+		"cluster": {Items: []*fnv1.Resource{{Resource: res}}},
+	}
+	req := makeReqWithExtras(extras)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = callBuiltin(t, globals, "get_extra_resource",
+		starlark.Tuple{starlark.String("cluster"), starlark.String("")}, nil)
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+	if !strings.Contains(err.Error(), "path must not be empty") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestGetExtraResources_EmptyMatch_ReturnsDefault(t *testing.T) {
 	extras := map[string]*fnv1.Resources{
 		"empty-match": {Items: nil},

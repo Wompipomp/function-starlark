@@ -138,6 +138,35 @@ func TestTTLCollector_Negative(t *testing.T) {
 	}
 }
 
+func TestTTLCollector_IntegerOverflow(t *testing.T) {
+	// 9223372037 seconds exceeds math.MaxInt64 nanoseconds when multiplied by time.Second.
+	tc := NewTTLCollector()
+	thread := &starlark.Thread{Name: "test"}
+	builtin := tc.SetResponseTTLBuiltin()
+	_, err := starlark.Call(thread, builtin, starlark.Tuple{starlark.MakeInt(9223372037)}, nil)
+	if err == nil {
+		t.Fatal("expected error for integer that would overflow time.Duration")
+	}
+	if got := err.Error(); !contains(got, "exceeds maximum") {
+		t.Errorf("error = %q, want to contain 'exceeds maximum'", got)
+	}
+
+	// 100 seconds should still work fine.
+	tc2 := NewTTLCollector()
+	builtin2 := tc2.SetResponseTTLBuiltin()
+	_, err = starlark.Call(thread, builtin2, starlark.Tuple{starlark.MakeInt(100)}, nil)
+	if err != nil {
+		t.Fatalf("set_response_ttl(100) should work: %v", err)
+	}
+	got := tc2.TTL()
+	if got == nil {
+		t.Fatal("TTL() = nil, want 100s")
+	}
+	if *got != 100*time.Second {
+		t.Errorf("TTL() = %v, want %v", *got, 100*time.Second)
+	}
+}
+
 func TestTTLCollector_InvalidType(t *testing.T) {
 	tests := []struct {
 		name  string
