@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.10.0](https://github.com/Wompipomp/function-starlark/compare/v0.9.0...v0.10.0) (2026-04-13)
+
+
+### Features
+
+* **29-01:** register json module in BuildGlobals predeclared globals ([428c024](https://github.com/Wompipomp/function-starlark/commit/428c024c9b814570b94e32819c02de6c04c1fe53))
+* **30-01:** implement crypto module with 7 functions + register in BuildGlobals ([a7b3289](https://github.com/Wompipomp/function-starlark/commit/a7b328955d4dec693056878e5b0281c06b19cf62))
+* **30-02:** implement encoding module with 8 functions + register in BuildGlobals ([d390c21](https://github.com/Wompipomp/function-starlark/commit/d390c21dd2d9f84f6d08b27312e957c82c102193))
+* **30-03:** implement dict module with 6 functions and register in BuildGlobals ([b5aa369](https://github.com/Wompipomp/function-starlark/commit/b5aa3697ae16a58cce6ffec2d9fe8bf5ff480577))
+* **31-01:** implement regex module with 7 functions and LRU cache ([032e730](https://github.com/Wompipomp/function-starlark/commit/032e73077e7e47e2c6b216a1c80d2b2214349584))
+* **31-02:** implement yaml module with 3 functions and register in BuildGlobals ([fa8abc0](https://github.com/Wompipomp/function-starlark/commit/fa8abc0e70b8904fba5e2bcc1a56e65a770b3ff3))
+* **32-01:** implement get_extra_resource and get_extra_resources builtins ([186b280](https://github.com/Wompipomp/function-starlark/commit/186b2803e1a43a765252864f1a877ff462b292e2))
+* **32-01:** implement is_observed, observed_body, and get_condition builtins ([aac1ebb](https://github.com/Wompipomp/function-starlark/commit/aac1ebb7b740a994361c18c8589bf248954a78a5))
+* **32-02:** implement TTLCollector and set_response_ttl builtin ([9adb884](https://github.com/Wompipomp/function-starlark/commit/9adb884e21d15aa4a96cb318e3c1e10e7ca77f85))
+* **32-02:** integrate user TTL override in fn.go ([b2a1ddf](https://github.com/Wompipomp/function-starlark/commit/b2a1ddf80e28c3c8912fbb0572966a483156a7a0))
+* **32-03:** implement all_ready and any_degraded in conditions.star ([fdeff1d](https://github.com/Wompipomp/function-starlark/commit/fdeff1d8bce1f0f3dd47e0359ea1fa68727b5381))
+* **33-01:** update builtins-reference.md with all v1.8 additions ([5b1299f](https://github.com/Wompipomp/function-starlark/commit/5b1299ff97d0edfb9d19e0e3b5b3b4cb8162eb27))
+* **33-01:** update starlark-primer.md and llms.txt with v1.8 predeclared names ([83b07e1](https://github.com/Wompipomp/function-starlark/commit/83b07e16fcac7950de937816d83c30ac1fc8b47c))
+* **33-02:** create migration-cheatsheet.md with Sprig+KCL mapping ([1802542](https://github.com/Wompipomp/function-starlark/commit/180254244a5a0a96f1a43d2a9e34a95854c074cb))
+* **33-02:** update features.md and best-practices.md with v1.8 content ([ea65c10](https://github.com/Wompipomp/function-starlark/commit/ea65c108bc958365797cbc0f540c384691a45470))
+* **33-03:** add 7 example compositions for v1.8 namespaces ([1ef1c2e](https://github.com/Wompipomp/function-starlark/commit/1ef1c2ef474f49a03a494229e2dfe527b39b34a9))
+* **33-03:** refresh README with comparison table, alpha disclaimer, and 34-name count ([7553608](https://github.com/Wompipomp/function-starlark/commit/75536089fef2667f4bf23bca1e1ecca9471d65bb))
+* **34-01:** add crypto and regex modules to naming test predeclared dicts ([ac7681d](https://github.com/Wompipomp/function-starlark/commit/ac7681d6d9fd48d9337bdfb90efbdda48001174e))
+* **34-01:** replace hand-rolled hash and sanitize with crypto/regex builtins ([1bf2f8a](https://github.com/Wompipomp/function-starlark/commit/1bf2f8a8ca902b593acf328b7fca0b8150785a2b))
+* **34-02:** harden labels.star and networking.star with v1.8 builtins ([8215146](https://github.com/Wompipomp/function-starlark/commit/82151465a21648aee08b6a77140bfca63773601a))
+* **34-03:** add v1-to-v2 stdlib migration section to cheatsheet ([5e2c787](https://github.com/Wompipomp/function-starlark/commit/5e2c787adb7c867712528bb19a03164ca6b71567))
+* **34-03:** use version-neutral artifact type in stdlib CI workflow ([19f3cef](https://github.com/Wompipomp/function-starlark/commit/19f3cef837686940080295f5a7a4e1fed35bde9c))
+* **34-04:** add namespace builtin assertions to e2e test runner ([4ba1547](https://github.com/Wompipomp/function-starlark/commit/4ba15476ed38fda0ace2012c6a6b750289c70ef7))
+* **34-04:** add namespace builtin tests to e2e composition ([c174739](https://github.com/Wompipomp/function-starlark/commit/c174739f6151dadb9fa47363d0171179dfe95e9a))
+* **35-01:** fix regex empty-match, YAML stream limit, deep_merge depth, CI artifact type ([c513b2a](https://github.com/Wompipomp/function-starlark/commit/c513b2a7eb497aa008482d7f8b05dec186ed4a8c))
+* **35-02:** fix API consistency in extra_resources, ttl, and encoding ([ce605be](https://github.com/Wompipomp/function-starlark/commit/ce605be3483659bc29ddde90613e712af807c74f))
+* **quick-10-01:** add gRPC credential support for OCI registry authentication ([60d1330](https://github.com/Wompipomp/function-starlark/commit/60d133057151a278426ff9e54c4a9a02fa986a72))
+
+
+### Bug Fixes
+
+* **35-01:** update e2e counts to 34, fix test numbering, add dict.pick key validation ([09b0e9d](https://github.com/Wompipomp/function-starlark/commit/09b0e9d7cc90f028622a666ba0d1487d5dc2c2b9))
+* **35-02:** safe type assertions in tests and blake3 reference digest ([cc99bfa](https://github.com/Wompipomp/function-starlark/commit/cc99bfa58875ca9966f4ab9c7c0dd13b276b0bc3))
+* add gosec lint suppressions to crypto builtins, simplify hex validation logic, and reformat builtin map alignment ([c720e54](https://github.com/Wompipomp/function-starlark/commit/c720e540104693ff2efd8e444fa9cefa8a76a616))
+
 ## [0.9.0](https://github.com/Wompipomp/function-starlark/compare/v0.8.1...v0.9.0) (2026-04-04)
 
 
