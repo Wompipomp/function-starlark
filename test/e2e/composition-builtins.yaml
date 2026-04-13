@@ -1,4 +1,4 @@
-# Composition that exercises all 28 builtins in a single reconciliation.
+# Composition that exercises all 34 builtins in a single reconciliation.
 # Uses provider-nop NopResource for composed resources (no cloud credentials needed).
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
@@ -28,7 +28,7 @@ spec:
           source: |
             # ============================================================
             # E2E BUILTINS REGRESSION TEST
-            # Tests all 28 predeclared names in a single composition.
+            # Tests all 34 predeclared names in a single composition.
             # ============================================================
 
             # --- Test: inline module loading ---
@@ -156,11 +156,11 @@ spec:
             # --- Test: emit_event() ---
             emit_event(
                 severity="Normal",
-                message="E2E builtins test: all 28 builtins validated in %s" % region,
+                message="E2E builtins test: all 34 builtins validated in %s" % region,
             )
 
             # --- Test: set_xr_status() ---
-            set_xr_status("test.builtinsCount", 28)
+            set_xr_status("test.builtinsCount", 34)
             set_xr_status("test.region", region)
             set_xr_status("test.environment", env)
             set_xr_status("test.schemaWorked", True)

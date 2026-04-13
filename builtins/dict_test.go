@@ -427,6 +427,12 @@ func TestDict_NegativeCases(t *testing.T) {
 		`x = dict.deep_merge({})`,
 		"requires at least 2 arguments",
 	)
+
+	// pick with non-string keys.
+	runDictScriptExpectError(t,
+		`x = dict.pick({"a": 1}, [42])`,
+		"key list element is int, want string",
+	)
 }
 
 // TestDict_CrossType verifies that dict functions work on frozen

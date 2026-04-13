@@ -53,7 +53,7 @@ wait_for_deletion() {
     local resource="$1" timeout="${2:-120}"
     local end=$((SECONDS + timeout))
     while [ $SECONDS -lt $end ]; do
-        if ! kubectl get "$resource" &>/dev/null 2>&1; then
+        if ! kubectl get "$resource" &>/dev/null; then
             return 0
         fi
         sleep 3
@@ -135,10 +135,10 @@ fi
 
 # Check status fields set by set_xr_status()
 builtins_count=$(get_status_field "xtest/test-builtins" "test.builtinsCount")
-if [ "$builtins_count" = "28" ]; then
-    pass "builtins: set_xr_status() wrote builtinsCount=28"
+if [ "$builtins_count" = "34" ]; then
+    pass "builtins: set_xr_status() wrote builtinsCount=34"
 else
-    fail "builtins: set_xr_status() builtinsCount='$builtins_count' (expected 28)"
+    fail "builtins: set_xr_status() builtinsCount='$builtins_count' (expected 34)"
 fi
 
 schema_worked=$(get_status_field "xtest/test-builtins" "test.schemaWorked")
@@ -340,7 +340,7 @@ fi
 # TEST 5: DEPENDS_ON (CREATION SEQUENCING)
 # ============================================================
 log ""
-log "===== TEST 4: DEPENDS_ON (CREATION SEQUENCING) ====="
+log "===== TEST 5: DEPENDS_ON (CREATION SEQUENCING) ====="
 
 log "Creating XR for depends_on test"
 kubectl apply -f "$SCRIPT_DIR/xr-depends-on.yaml"

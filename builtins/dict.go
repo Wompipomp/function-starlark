@@ -187,12 +187,16 @@ func dictPickImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, 
 	defer iter.Done()
 	var k starlark.Value
 	for iter.Next(&k) {
-		v, found, err := mapping.Get(k)
+		s, ok := k.(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("%s: key list element is %s, want string", b.Name(), k.Type())
+		}
+		v, found, err := mapping.Get(s)
 		if err != nil {
 			return nil, err
 		}
 		if found {
-			if err := result.SetKey(k, v); err != nil {
+			if err := result.SetKey(s, v); err != nil {
 				return nil, err
 			}
 		}
