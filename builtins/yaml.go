@@ -13,6 +13,9 @@ import (
 	"github.com/wompipomp/function-starlark/schema"
 )
 
+// maxYAMLDocuments is the maximum number of YAML documents allowed in a stream.
+const maxYAMLDocuments = 256
+
 // YAMLModule is the predeclared "yaml" namespace module.
 // It provides YAML encoding/decoding functions using sigs.k8s.io/yaml
 // for K8s-compatible output with block style and sorted keys.
@@ -166,6 +169,10 @@ func yamlDecodeStream(thread *starlark.Thread, b *starlark.Builtin, args starlar
 
 	// Split input into documents by scanning lines for "---" boundaries.
 	docs := splitYAMLDocuments(s)
+
+	if len(docs) > maxYAMLDocuments {
+		return nil, fmt.Errorf("%s: input contains %d documents, maximum is %d", b.Name(), len(docs), maxYAMLDocuments)
+	}
 
 	var results []starlark.Value
 	for _, doc := range docs {

@@ -11,6 +11,9 @@ import (
 	"github.com/wompipomp/function-starlark/schema"
 )
 
+// maxMergeDepth is the maximum recursion depth for dict.deep_merge.
+const maxMergeDepth = 32
+
 // DictModule is the predeclared "dict" namespace module.
 // It provides dict manipulation functions for safe merging, filtering,
 // and nested path traversal of Kubernetes-style dictionaries.
@@ -105,7 +108,7 @@ func dictDeepMergeImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tu
 	accumulated := args[0]
 	for i := 1; i < len(args); i++ {
 		var err error
-		accumulated, err = deepMergeTwo(b.Name(), accumulated, args[i])
+		accumulated, err = deepMergeTwo(b.Name(), accumulated, args[i], 0)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +118,11 @@ func dictDeepMergeImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tu
 
 // deepMergeTwo recursively merges two dicts, creating new dicts at each level.
 // Never mutates either input.
-func deepMergeTwo(fnName string, base, override starlark.Value) (starlark.Value, error) {
+func deepMergeTwo(fnName string, base, override starlark.Value, depth int) (starlark.Value, error) {
+	if depth > maxMergeDepth {
+		return nil, fmt.Errorf("%s: recursion depth exceeds maximum (%d)", fnName, maxMergeDepth)
+	}
+
 	baseItems, err := dictItems(fnName, base)
 	if err != nil {
 		return nil, err
@@ -144,7 +151,7 @@ func deepMergeTwo(fnName string, base, override starlark.Value) (starlark.Value,
 
 		if found && isDict(existing) && isDict(val) {
 			// Both are dicts: recurse.
-			merged, err := deepMergeTwo(fnName, existing, val)
+			merged, err := deepMergeTwo(fnName, existing, val, depth+1)
 			if err != nil {
 				return nil, err
 			}

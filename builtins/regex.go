@@ -125,11 +125,11 @@ func regexFind(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwa
 	if err != nil {
 		return nil, err
 	}
-	result := re.FindString(s)
-	if result == "" {
+	loc := re.FindStringIndex(s)
+	if loc == nil {
 		return starlark.None, nil
 	}
-	return starlark.String(result), nil
+	return starlark.String(s[loc[0]:loc[1]]), nil
 }
 
 // regexFindAll implements regex.find_all(pattern, s) -> list[string].

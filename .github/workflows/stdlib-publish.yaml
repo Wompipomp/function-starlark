@@ -29,6 +29,6 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/stdlib/}
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
           oras push ghcr.io/wompipomp/starlark-stdlib:${VERSION} \
-            --artifact-type application/vnd.fn-starlark.modules+tar \
+            --artifact-type application/vnd.fn-starlark.modules.v1+tar \
             networking.star naming.star labels.star conditions.star
           oras tag ghcr.io/wompipomp/starlark-stdlib:${VERSION} ${MAJOR}
