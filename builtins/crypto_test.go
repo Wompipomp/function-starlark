@@ -335,6 +335,70 @@ prefix_match = (full_id[:8] == default_id)
 	}
 }
 
+// TestCrypto_BytesInput verifies that passing starlark.Bytes produces the same
+// digest as passing the equivalent string for all hash functions.
+func TestCrypto_BytesInput(t *testing.T) {
+	out := runCryptoScript(t, `
+sha256_str = crypto.sha256("foo")
+sha256_bytes = crypto.sha256(b"foo")
+sha256_match = (sha256_str == sha256_bytes)
+
+sha512_str = crypto.sha512("foo")
+sha512_bytes = crypto.sha512(b"foo")
+sha512_match = (sha512_str == sha512_bytes)
+
+sha1_str = crypto.sha1("foo")
+sha1_bytes = crypto.sha1(b"foo")
+sha1_match = (sha1_str == sha1_bytes)
+
+md5_str = crypto.md5("foo")
+md5_bytes = crypto.md5(b"foo")
+md5_match = (md5_str == md5_bytes)
+
+blake3_str = crypto.blake3("foo")
+blake3_bytes = crypto.blake3(b"foo")
+blake3_match = (blake3_str == blake3_bytes)
+`)
+	assertBool(t, out, "sha256_match", true)
+	assertBool(t, out, "sha512_match", true)
+	assertBool(t, out, "sha1_match", true)
+	assertBool(t, out, "md5_match", true)
+	assertBool(t, out, "blake3_match", true)
+}
+
+// TestCrypto_WrongArity verifies that hash functions reject 0 or 2+ positional args.
+func TestCrypto_WrongArity(t *testing.T) {
+	// 0 args
+	runCryptoScriptExpectError(t,
+		`x = crypto.sha256()`,
+		"missing argument",
+	)
+	// 2 args
+	runCryptoScriptExpectError(t,
+		`x = crypto.sha256("a", "b")`,
+		"got 2 arguments",
+	)
+}
+
+// TestCrypto_StableID_Length1 verifies that stable_id with length=1 returns a single hex character.
+func TestCrypto_StableID_Length1(t *testing.T) {
+	out := runCryptoScript(t, `
+id = crypto.stable_id("test", length=1)
+id_len = len(id)
+`)
+	assertInt(t, out, "id_len", 1)
+
+	// Verify the single character is a valid hex digit.
+	id, ok := out["id"].(starlark.String)
+	if !ok {
+		t.Fatalf(`out["id"] is %T, want starlark.String`, out["id"])
+	}
+	c := string(id)[0]
+	if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		t.Errorf("stable_id(length=1) = %q, want hex digit [0-9a-f]", string(id))
+	}
+}
+
 // TestCrypto_NegativeCases asserts that bad inputs fail with expected errors.
 func TestCrypto_NegativeCases(t *testing.T) {
 	// Type error: int instead of string or bytes

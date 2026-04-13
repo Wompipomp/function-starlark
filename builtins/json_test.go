@@ -391,6 +391,57 @@ func formatInt64(n int64) string {
 	return string(buf[i:])
 }
 
+// TestJSON_DeepNesting verifies json.decode handles deeply nested objects.
+func TestJSON_DeepNesting(t *testing.T) {
+	// Build a 100-level nested JSON string: {"a":{"a":...{"a":1}...}}
+	// Use a recursive function to traverse since Starlark does not allow
+	// reassignment of global variables inside a for loop.
+	out := runJSONScript(t, `
+s = '{"a":' * 100 + '1' + '}' * 100
+decoded = json.decode(s)
+
+def dig(d, depth):
+    for _ in range(depth):
+        d = d["a"]
+    return d
+
+leaf = dig(decoded, 100)
+`)
+	assertInt(t, out, "leaf", 1)
+}
+
+// TestJSON_NaN verifies that json.encode rejects NaN (JSON spec disallows it).
+func TestJSON_NaN(t *testing.T) {
+	runJSONScriptExpectError(t,
+		`x = json.encode(float("nan"))`,
+		"finite",
+	)
+}
+
+// TestJSON_DecodeEmptyString verifies that json.decode("") produces an error.
+func TestJSON_DecodeEmptyString(t *testing.T) {
+	runJSONScriptExpectError(t,
+		`x = json.decode("")`,
+		"json",
+	)
+}
+
+// TestJSON_TrailingGarbage verifies that json.decode rejects trailing content.
+func TestJSON_TrailingGarbage(t *testing.T) {
+	runJSONScriptExpectError(t,
+		`x = json.decode('{"a":1}extra')`,
+		"json",
+	)
+}
+
+// TestJSON_IndentEmptyString verifies that json.indent("") produces an error.
+func TestJSON_IndentEmptyString(t *testing.T) {
+	runJSONScriptExpectError(t,
+		`x = json.indent("")`,
+		"json",
+	)
+}
+
 // TestJSON_NegativeCases asserts that bad inputs fail with expected errors.
 func TestJSON_NegativeCases(t *testing.T) {
 	// Non-string dict key — json.encode should reject.

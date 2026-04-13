@@ -364,6 +364,85 @@ result = yaml.decode_stream(docs_257)`,
 	)
 }
 
+// TestYAML_IntFloatAmbiguity verifies yaml.decode type mapping for numeric values.
+// The YAML->JSON->json.decode pipeline means that YAML 1.0 may become JSON 1
+// (integer) since YAMLToJSON normalizes numeric representation. Non-whole
+// floats like 1.5 remain as floats through the pipeline.
+func TestYAML_IntFloatAmbiguity(t *testing.T) {
+	// Non-whole float survives the pipeline as starlark.Float.
+	out := runYAMLScript(t, `
+decoded = yaml.decode("value: 1.5")
+val = decoded["value"]
+is_float = type(val) == "float"
+`)
+	assertBool(t, out, "is_float", true)
+
+	// Integer value is preserved as starlark.Int.
+	out = runYAMLScript(t, `
+decoded = yaml.decode("value: 42")
+val = decoded["value"]
+is_int = type(val) == "int"
+`)
+	assertBool(t, out, "is_int", true)
+
+	// Negative float preserved.
+	out = runYAMLScript(t, `
+decoded = yaml.decode("value: -3.14")
+val = decoded["value"]
+is_float = type(val) == "float"
+`)
+	assertBool(t, out, "is_float", true)
+}
+
+// TestYAML_BlockScalar verifies that YAML block scalars preserve newlines.
+func TestYAML_BlockScalar(t *testing.T) {
+	out := runYAMLScript(t, `
+decoded = yaml.decode("data: |\n  line1\n  line2\n")
+val = decoded["data"]
+has_newline = "\n" in val
+has_line1 = "line1" in val
+has_line2 = "line2" in val
+`)
+	assertBool(t, out, "has_newline", true)
+	assertBool(t, out, "has_line1", true)
+	assertBool(t, out, "has_line2", true)
+}
+
+// TestYAML_Anchors verifies that YAML anchors and aliases are resolved.
+func TestYAML_Anchors(t *testing.T) {
+	out := runYAMLScript(t, `
+decoded = yaml.decode("anchor: &a foo\nref: *a")
+anchor_val = decoded["anchor"]
+ref_val = decoded["ref"]
+match = (anchor_val == ref_val)
+`)
+	assertString(t, out, "anchor_val", "foo")
+	assertString(t, out, "ref_val", "foo")
+	assertBool(t, out, "match", true)
+}
+
+// TestYAML_DecodeStreamSingleDoc verifies decode_stream with a single document.
+func TestYAML_DecodeStreamSingleDoc(t *testing.T) {
+	out := runYAMLScript(t, `
+docs = yaml.decode_stream("key: value")
+count = len(docs)
+val = docs[0]["key"]
+`)
+	assertInt(t, out, "count", 1)
+	assertString(t, out, "val", "value")
+}
+
+// TestYAML_EncodeNone verifies yaml.encode(None) produces "null".
+func TestYAML_EncodeNone(t *testing.T) {
+	out := runYAMLScript(t, `
+result = yaml.encode(None)
+`)
+	got := mustStarlarkString(t, out["result"], `out["result"]`)
+	if got != "null" {
+		t.Errorf("yaml.encode(None) = %q, want %q", got, "null")
+	}
+}
+
 // TestYAML_NegativeCases asserts that bad inputs fail with expected errors.
 func TestYAML_NegativeCases(t *testing.T) {
 	// Invalid YAML decode

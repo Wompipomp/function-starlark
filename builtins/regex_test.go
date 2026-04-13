@@ -237,6 +237,54 @@ normal = regex.find(r"a+", "baaab")
 	assertString(t, out, "normal", "aaa")
 }
 
+// TestRegex_EmptyStringInputs verifies behavior of all regex functions with empty-string input.
+func TestRegex_EmptyStringInputs(t *testing.T) {
+	out := runRegexScript(t, `
+# match: "a*" matches empty string (zero a's)
+match_empty = regex.match(r"a*", "")
+
+# find: "a*" on empty string matches the empty string (not None)
+find_empty = regex.find(r"a*", "")
+find_is_str = type(find_empty) == "string"
+
+# find_all: "a*" on empty string returns list with one empty string match
+find_all_empty = regex.find_all(r"a*", "")
+
+# split: splitting empty string by comma yields [""]
+split_empty = regex.split(r",", "")
+`)
+	assertBool(t, out, "match_empty", true)
+	assertString(t, out, "find_empty", "")
+	assertBool(t, out, "find_is_str", true)
+	assertStringList(t, out, "find_all_empty", []string{""})
+	assertStringList(t, out, "split_empty", []string{""})
+}
+
+// TestRegex_FindGroupsZeroGroups verifies find_groups with no capturing groups.
+// When the pattern has no capturing groups, match[1:] is empty, so find_groups
+// returns an empty list (the full match is group 0, which is excluded).
+func TestRegex_FindGroupsZeroGroups(t *testing.T) {
+	out := runRegexScript(t, `
+# Pattern "abc" has no capturing groups -- returns empty list
+groups = regex.find_groups(r"abc", "abc")
+count = len(groups)
+`)
+	assertInt(t, out, "count", 0)
+}
+
+// TestRegex_ReplaceEmptyReplacement verifies replace and replace_all with empty replacement string.
+func TestRegex_ReplaceEmptyReplacement(t *testing.T) {
+	out := runRegexScript(t, `
+# replace first "a" with "" in "aaa" -> "aa"
+first = regex.replace(r"a", "aaa", "")
+
+# replace_all "a" with "" in "aaa" -> ""
+all = regex.replace_all(r"a", "aaa", "")
+`)
+	assertString(t, out, "first", "aa")
+	assertString(t, out, "all", "")
+}
+
 // TestRegex_NegativeCases asserts that bad inputs fail with expected errors.
 func TestRegex_NegativeCases(t *testing.T) {
 	// Invalid pattern

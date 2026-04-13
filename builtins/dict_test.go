@@ -352,6 +352,69 @@ single = dict.has_path({"a": 1}, "a")
 	assertBool(t, out, "single", true)
 }
 
+// TestDict_MergeWithStarlarkDict verifies that dict.merge works with the
+// *convert.StarlarkDict type returned by protobuf conversion (e.g., oxr).
+func TestDict_MergeWithStarlarkDict(t *testing.T) {
+	req := makeReq(
+		map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("v1"),
+			"kind":       structpb.NewStringValue("XR"),
+		},
+		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
+		nil,
+	)
+	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatalf("testBuildGlobals error: %v", err)
+	}
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+
+	// dict.merge with oxr (frozen *convert.StarlarkDict) + plain dict.
+	out, err := rt.Execute(`
+merged = dict.merge(oxr, {"extra": "value"})
+has_api = merged["apiVersion"] == "v1"
+has_kind = merged["kind"] == "XR"
+has_extra = merged["extra"] == "value"
+count = len(merged)
+`, globals, "test.star", nil)
+	if err != nil {
+		t.Fatalf("rt.Execute error: %v", err)
+	}
+	assertBool(t, out, "has_api", true)
+	assertBool(t, out, "has_kind", true)
+	assertBool(t, out, "has_extra", true)
+	assertInt(t, out, "count", 3)
+}
+
+// TestDict_DigNonDictIntermediate verifies that dig returns default when a
+// non-dict value is encountered at an intermediate path segment.
+func TestDict_DigNonDictIntermediate(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.dig({"a": "string_value"}, "a.b", default="nope")
+`)
+	assertString(t, out, "result", "nope")
+
+	out = runDictScript(t, `
+result = dict.dig({"a": 42}, "a.b.c")
+is_none = result == None
+`)
+	assertBool(t, out, "is_none", true)
+}
+
+// TestDict_DeepMergeEmptyDicts verifies that deep_merge of two empty dicts
+// produces an empty dict.
+func TestDict_DeepMergeEmptyDicts(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.deep_merge({}, {})
+count = len(result)
+is_dict = type(result) == "dict"
+`)
+	assertInt(t, out, "count", 0)
+	assertBool(t, out, "is_dict", true)
+}
+
 // TestDict_DeepMergeDepthLimit verifies the recursion depth limit (32).
 func TestDict_DeepMergeDepthLimit(t *testing.T) {
 	// Build a deeply nested dict that exceeds 32 levels.
