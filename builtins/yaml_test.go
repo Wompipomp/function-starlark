@@ -117,6 +117,17 @@ func TestBuildGlobals_YAMLModule(t *testing.T) {
 	}
 }
 
+// mustStarlarkString safely extracts a starlark.String from a starlark.Value,
+// calling t.Fatalf if the type assertion fails.
+func mustStarlarkString(t *testing.T, v starlark.Value, label string) string {
+	t.Helper()
+	s, ok := v.(starlark.String)
+	if !ok {
+		t.Fatalf("%s is %T, want starlark.String", label, v)
+	}
+	return string(s)
+}
+
 // ---------------------------------------------------------------------------
 // Layer 2 — in-process tests via Runtime.Execute
 // ---------------------------------------------------------------------------
@@ -127,7 +138,7 @@ func TestYAML_Encode(t *testing.T) {
 	out := runYAMLScript(t, `
 result = yaml.encode({"kind": "ConfigMap", "apiVersion": "v1"})
 `)
-	got := string(out["result"].(starlark.String))
+	got := mustStarlarkString(t, out["result"], `out["result"]`)
 	// apiVersion should come before kind (alphabetical sort).
 	apiIdx := strings.Index(got, "apiVersion")
 	kindIdx := strings.Index(got, "kind")
@@ -139,7 +150,7 @@ result = yaml.encode({"kind": "ConfigMap", "apiVersion": "v1"})
 	out = runYAMLScript(t, `
 result = yaml.encode({"metadata": {"name": "test", "labels": {"app": "web"}}})
 `)
-	nested := string(out["result"].(starlark.String))
+	nested := mustStarlarkString(t, out["result"], `out["result"]`)
 	if !strings.Contains(nested, "metadata:") {
 		t.Errorf("yaml.encode nested dict missing block style:\n%s", nested)
 	}
@@ -149,50 +160,50 @@ result = yaml.encode({"metadata": {"name": "test", "labels": {"app": "web"}}})
 
 	// None -> null
 	out = runYAMLScript(t, `result = yaml.encode(None)`)
-	if string(out["result"].(starlark.String)) != "null" {
+	if mustStarlarkString(t, out["result"], `out["result"]`) != "null" {
 		t.Errorf("yaml.encode(None) = %q, want %q", out["result"], "null")
 	}
 
 	// Bool -> true/false
 	out = runYAMLScript(t, `result = yaml.encode(True)`)
-	if string(out["result"].(starlark.String)) != "true" {
+	if mustStarlarkString(t, out["result"], `out["result"]`) != "true" {
 		t.Errorf("yaml.encode(True) = %q, want %q", out["result"], "true")
 	}
 
 	out = runYAMLScript(t, `result = yaml.encode(False)`)
-	if string(out["result"].(starlark.String)) != "false" {
+	if mustStarlarkString(t, out["result"], `out["result"]`) != "false" {
 		t.Errorf("yaml.encode(False) = %q, want %q", out["result"], "false")
 	}
 
 	// Int
 	out = runYAMLScript(t, `result = yaml.encode(42)`)
-	if string(out["result"].(starlark.String)) != "42" {
+	if mustStarlarkString(t, out["result"], `out["result"]`) != "42" {
 		t.Errorf("yaml.encode(42) = %q, want %q", out["result"], "42")
 	}
 
 	// Float
 	out = runYAMLScript(t, `result = yaml.encode(3.14)`)
-	if string(out["result"].(starlark.String)) != "3.14" {
+	if mustStarlarkString(t, out["result"], `out["result"]`) != "3.14" {
 		t.Errorf("yaml.encode(3.14) = %q, want %q", out["result"], "3.14")
 	}
 
 	// List
 	out = runYAMLScript(t, `result = yaml.encode([1, 2, 3])`)
-	listYAML := string(out["result"].(starlark.String))
+	listYAML := mustStarlarkString(t, out["result"], `out["result"]`)
 	if !strings.Contains(listYAML, "- 1") {
 		t.Errorf("yaml.encode([1,2,3]) missing sequence items:\n%s", listYAML)
 	}
 
 	// Tuple -> sequence (YAML has no tuple concept)
 	out = runYAMLScript(t, `result = yaml.encode((1, 2, 3))`)
-	tupleYAML := string(out["result"].(starlark.String))
+	tupleYAML := mustStarlarkString(t, out["result"], `out["result"]`)
 	if !strings.Contains(tupleYAML, "- 1") {
 		t.Errorf("yaml.encode((1,2,3)) missing sequence items:\n%s", tupleYAML)
 	}
 
 	// Empty dict
 	out = runYAMLScript(t, `result = yaml.encode({})`)
-	if string(out["result"].(starlark.String)) != "{}" {
+	if mustStarlarkString(t, out["result"], `out["result"]`) != "{}" {
 		t.Errorf("yaml.encode({}) = %q, want %q", out["result"], "{}")
 	}
 }
@@ -242,8 +253,8 @@ match = (sd_yaml == plain_yaml)
 
 	match, ok := out["match"].(starlark.Bool)
 	if !ok || !bool(match) {
-		sdYAML := string(out["sd_yaml"].(starlark.String))
-		plainYAML := string(out["plain_yaml"].(starlark.String))
+		sdYAML := mustStarlarkString(t, out["sd_yaml"], `out["sd_yaml"]`)
+		plainYAML := mustStarlarkString(t, out["plain_yaml"], `out["plain_yaml"]`)
 		t.Errorf("StarlarkDict and plain dict yaml.encode mismatch:\nStarlarkDict:\n%s\nPlain:\n%s", sdYAML, plainYAML)
 	}
 }

@@ -79,20 +79,36 @@ func TestGetCondition_Found(t *testing.T) {
 
 	// Verify specific values.
 	v, _, _ := d.Get(starlark.String("status"))
-	if v.(starlark.String) != "True" {
-		t.Errorf("status = %v, want True", v)
+	vs, ok := v.(starlark.String)
+	if !ok {
+		t.Fatalf("status is %T, want starlark.String", v)
+	}
+	if vs != "True" {
+		t.Errorf("status = %v, want True", vs)
 	}
 	v, _, _ = d.Get(starlark.String("reason"))
-	if v.(starlark.String) != "Available" {
-		t.Errorf("reason = %v, want Available", v)
+	vs, ok = v.(starlark.String)
+	if !ok {
+		t.Fatalf("reason is %T, want starlark.String", v)
+	}
+	if vs != "Available" {
+		t.Errorf("reason = %v, want Available", vs)
 	}
 	v, _, _ = d.Get(starlark.String("message"))
-	if v.(starlark.String) != "Resource is ready" {
-		t.Errorf("message = %v, want 'Resource is ready'", v)
+	vs, ok = v.(starlark.String)
+	if !ok {
+		t.Fatalf("message is %T, want starlark.String", v)
+	}
+	if vs != "Resource is ready" {
+		t.Errorf("message = %v, want 'Resource is ready'", vs)
 	}
 	v, _, _ = d.Get(starlark.String("lastTransitionTime"))
-	if v.(starlark.String) != "2024-01-01T00:00:00Z" {
-		t.Errorf("lastTransitionTime = %v, want 2024-01-01T00:00:00Z", v)
+	vs, ok = v.(starlark.String)
+	if !ok {
+		t.Fatalf("lastTransitionTime is %T, want starlark.String", v)
+	}
+	if vs != "2024-01-01T00:00:00Z" {
+		t.Errorf("lastTransitionTime = %v, want 2024-01-01T00:00:00Z", vs)
 	}
 }
 
@@ -172,8 +188,12 @@ func TestGetCondition_PartialFields_DefaultToEmptyString(t *testing.T) {
 
 	// status should be "False".
 	v, _, _ := d.Get(starlark.String("status"))
-	if v.(starlark.String) != "False" {
-		t.Errorf("status = %v, want False", v)
+	vs, ok := v.(starlark.String)
+	if !ok {
+		t.Fatalf("status is %T, want starlark.String", v)
+	}
+	if vs != "False" {
+		t.Errorf("status = %v, want False", vs)
 	}
 
 	// reason, message, lastTransitionTime should be "".
@@ -183,8 +203,12 @@ func TestGetCondition_PartialFields_DefaultToEmptyString(t *testing.T) {
 			t.Errorf("missing key %q", key)
 			continue
 		}
-		if v.(starlark.String) != "" {
-			t.Errorf("%s = %v, want empty string", key, v)
+		vs, ok := v.(starlark.String)
+		if !ok {
+			t.Fatalf("%s is %T, want starlark.String", key, v)
+		}
+		if vs != "" {
+			t.Errorf("%s = %v, want empty string", key, vs)
 		}
 	}
 }

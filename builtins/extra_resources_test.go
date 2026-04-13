@@ -60,8 +60,12 @@ func TestGetExtraResource_PathLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.(starlark.String) != "us-west-2" {
-		t.Errorf("got %v, want us-west-2", got)
+	gotStr, ok := got.(starlark.String)
+	if !ok {
+		t.Fatalf("result is %T, want starlark.String", got)
+	}
+	if gotStr != "us-west-2" {
+		t.Errorf("got %v, want us-west-2", gotStr)
 	}
 }
 
@@ -114,8 +118,12 @@ func TestGetExtraResource_Missing_ReturnsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.(starlark.String) != "fallback" {
-		t.Errorf("got %v, want fallback", got)
+	gotStr, ok := got.(starlark.String)
+	if !ok {
+		t.Fatalf("result is %T, want starlark.String", got)
+	}
+	if gotStr != "fallback" {
+		t.Errorf("got %v, want fallback", gotStr)
 	}
 }
 
@@ -136,8 +144,12 @@ func TestGetExtraResource_EmptyMatch_ReturnsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.(starlark.String) != "d" {
-		t.Errorf("got %v, want d", got)
+	gotStr, ok := got.(starlark.String)
+	if !ok {
+		t.Fatalf("result is %T, want starlark.String", got)
+	}
+	if gotStr != "d" {
+		t.Errorf("got %v, want d", gotStr)
 	}
 }
 
@@ -165,8 +177,12 @@ func TestGetExtraResource_MissingPathSegment_ReturnsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.(starlark.String) != "x" {
-		t.Errorf("got %v, want x", got)
+	gotStr, ok := got.(starlark.String)
+	if !ok {
+		t.Fatalf("result is %T, want starlark.String", got)
+	}
+	if gotStr != "x" {
+		t.Errorf("got %v, want x", gotStr)
 	}
 }
 
@@ -224,11 +240,19 @@ func TestGetExtraResources_PathLookup(t *testing.T) {
 	if list.Len() != 2 {
 		t.Fatalf("len = %d, want 2", list.Len())
 	}
-	if list.Index(0).(starlark.String) != "us-west-2" {
-		t.Errorf("[0] = %v, want us-west-2", list.Index(0))
+	v0, ok := list.Index(0).(starlark.String)
+	if !ok {
+		t.Fatalf("[0] is %T, want starlark.String", list.Index(0))
 	}
-	if list.Index(1).(starlark.String) != "eu-central-1" {
-		t.Errorf("[1] = %v, want eu-central-1", list.Index(1))
+	if v0 != "us-west-2" {
+		t.Errorf("[0] = %v, want us-west-2", v0)
+	}
+	v1, ok := list.Index(1).(starlark.String)
+	if !ok {
+		t.Fatalf("[1] is %T, want starlark.String", list.Index(1))
+	}
+	if v1 != "eu-central-1" {
+		t.Errorf("[1] = %v, want eu-central-1", v1)
 	}
 }
 

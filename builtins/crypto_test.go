@@ -253,6 +253,12 @@ deterministic = (a == b)
 	if !ok || !bool(det) {
 		t.Error("crypto.blake3 is not deterministic: two calls returned different results")
 	}
+
+	// Assert against known reference digest (computed with github.com/zeebo/blake3).
+	expected := "04e0bb39f30b1a3feb89f536c93be15055482df748674b00d26e5a75777702e9"
+	if string(got) != expected {
+		t.Errorf("blake3('foo') = %s, want %s", string(got), expected)
+	}
 }
 
 // TestCrypto_StableID covers CRY-06.
