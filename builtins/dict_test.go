@@ -352,6 +352,39 @@ single = dict.has_path({"a": 1}, "a")
 	assertBool(t, out, "single", true)
 }
 
+// TestDict_DeepMergeDepthLimit verifies the recursion depth limit (32).
+func TestDict_DeepMergeDepthLimit(t *testing.T) {
+	// Build a deeply nested dict that exceeds 32 levels.
+	// Each level nests one deeper: {"a": {"a": {"a": ...}}}
+	runDictScriptExpectError(t, `
+def make_nested(depth):
+    d = {"leaf": True}
+    for _ in range(depth):
+        d = {"a": d}
+    return d
+
+# depth 33 should exceed the limit when merging
+base = make_nested(33)
+over = make_nested(33)
+result = dict.deep_merge(base, over)
+`, "recursion depth exceeds maximum")
+
+	// depth 32 should succeed
+	out := runDictScript(t, `
+def make_nested(depth):
+    d = {"leaf": True}
+    for _ in range(depth):
+        d = {"a": d}
+    return d
+
+base = make_nested(32)
+over = make_nested(32)
+result = dict.deep_merge(base, over)
+ok = True
+`)
+	assertBool(t, out, "ok", true)
+}
+
 func TestDict_NegativeCases(t *testing.T) {
 	// Malformed paths for dig.
 	runDictScriptExpectError(t,

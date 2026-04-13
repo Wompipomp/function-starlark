@@ -335,6 +335,24 @@ count = len(docs)
 	assertInt(t, out, "count", 1)
 }
 
+// TestYAML_DecodeStreamBounded verifies the 256-document limit.
+func TestYAML_DecodeStreamBounded(t *testing.T) {
+	// 256 documents should succeed.
+	out := runYAMLScript(t, `
+docs_256 = "---\na: 1\n" * 256
+result = yaml.decode_stream(docs_256)
+count = len(result)
+`)
+	assertInt(t, out, "count", 256)
+
+	// 257 documents should fail.
+	runYAMLScriptExpectError(t,
+		`docs_257 = "---\na: 1\n" * 257
+result = yaml.decode_stream(docs_257)`,
+		"maximum is 256",
+	)
+}
+
 // TestYAML_NegativeCases asserts that bad inputs fail with expected errors.
 func TestYAML_NegativeCases(t *testing.T) {
 	// Invalid YAML decode

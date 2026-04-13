@@ -215,6 +215,28 @@ trailing = regex.split(r",", "a,b,")
 	assertStringList(t, out, "trailing", []string{"a", "b", ""})
 }
 
+// TestRegex_FindEmptyMatch verifies that regex.find distinguishes an empty match from no match.
+// An empty match (e.g., "a*" matching zero "a"s) must return "" not None.
+func TestRegex_FindEmptyMatch(t *testing.T) {
+	out := runRegexScript(t, `
+# a* matches zero a's at position 0 -> empty string, not None
+empty_match = regex.find(r"a*", "bbb")
+is_string = type(empty_match) == "string"
+is_empty = empty_match == ""
+
+# No match at all -> None
+no_match = regex.find(r"xyz", "abc")
+
+# Normal match still works
+normal = regex.find(r"a+", "baaab")
+`)
+	assertString(t, out, "empty_match", "")
+	assertBool(t, out, "is_string", true)
+	assertBool(t, out, "is_empty", true)
+	assertNone(t, out, "no_match")
+	assertString(t, out, "normal", "aaa")
+}
+
 // TestRegex_NegativeCases asserts that bad inputs fail with expected errors.
 func TestRegex_NegativeCases(t *testing.T) {
 	// Invalid pattern
