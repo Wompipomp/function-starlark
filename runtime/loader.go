@@ -104,9 +104,33 @@ func (m *ModuleLoader) resolve(module string) (string, error) {
 
 // load implements the Thread.Load callback. It uses the sequential loader
 // pattern from starlark-go's example_test.go with nil-sentinel cycle detection.
-func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringDict, error) {
-	// Expand short-form OCI targets before existing routing.
-	if oci.IsDefaultRegistryTarget(module) {
+func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.StringDict, error) {
+	// Package-local ./file.star: expand against the caller's OCI parent.
+	// The parent is the thread's Name (set when a module thread is created
+	// in this method for loaded modules). Main-script threads have names
+	// like "composition.star" and cannot use package-local loads.
+	if oci.IsPackageLocalTarget(module) {
+		parent := ""
+		if thread != nil {
+			parent = thread.Name
+		}
+		if !strings.HasPrefix(parent, "oci://") {
+			return nil, fmt.Errorf(
+				"package-local load %q is only valid from OCI modules; caller %q is not an OCI module",
+				module, parent,
+			)
+		}
+		pt, err := oci.ParseOCILoadTarget(parent)
+		if err != nil {
+			return nil, fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parent, module, err)
+		}
+		expanded, err := oci.ExpandPackageLocal(module, pt.RefStr)
+		if err != nil {
+			return nil, err
+		}
+		module = expanded
+	} else if oci.IsDefaultRegistryTarget(module) {
+		// Expand short-form OCI targets before existing routing.
 		expanded, err := oci.ExpandDefaultRegistry(module, m.defaultRegistry)
 		if err != nil {
 			return nil, err
@@ -170,22 +194,22 @@ func (m *ModuleLoader) load(_ *starlark.Thread, module string) (starlark.StringD
 	}
 
 	// Create a new thread for this module with its own step counter.
-	thread := &starlark.Thread{
+	modThread := &starlark.Thread{
 		Name: module,
 		Load: m.load, // recursive: modules can load other modules
 		Print: func(_ *starlark.Thread, msg string) {
 			m.rt.log.Debug("starlark print", "module", module, "msg", msg)
 		},
 	}
-	thread.SetMaxExecutionSteps(maxSteps)
+	modThread.SetMaxExecutionSteps(maxSteps)
 
 	// Execute the module.
-	globals, err := prog.Init(thread, m.predeclared)
+	globals, err := prog.Init(modThread, m.predeclared)
 	if err != nil {
 		// Wrap EvalError to include backtrace with module filename,
 		// mirroring Runtime.Execute error handling.
 		var wrappedErr error
-		if thread.ExecutionSteps() >= maxSteps {
+		if modThread.ExecutionSteps() >= maxSteps {
 			wrappedErr = fmt.Errorf(
 				"module %s exceeded execution limit (%d steps): possible infinite loop",
 				module, maxSteps,
@@ -286,8 +310,26 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 		sl := starLoads[i]
 		mod := sl.stmt.ModuleName()
 
-		// Expand short-form OCI targets before routing.
-		if oci.IsDefaultRegistryTarget(mod) {
+		// Package-local ./file.star: expand against the caller's OCI parent
+		// (filename). Only valid when the caller is an OCI module.
+		if oci.IsPackageLocalTarget(mod) {
+			if !strings.HasPrefix(filename, "oci://") {
+				return "", fmt.Errorf(
+					"package-local load %q is only valid from OCI modules; caller %q is not an OCI module",
+					mod, filename,
+				)
+			}
+			pt, err := oci.ParseOCILoadTarget(filename)
+			if err != nil {
+				return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", filename, mod, err)
+			}
+			expanded, err := oci.ExpandPackageLocal(mod, pt.RefStr)
+			if err != nil {
+				return "", fmt.Errorf("resolving star import from %q: %w", mod, err)
+			}
+			mod = expanded
+		} else if oci.IsDefaultRegistryTarget(mod) {
+			// Expand short-form OCI targets before routing.
 			expanded, err := oci.ExpandDefaultRegistry(mod, m.defaultRegistry)
 			if err != nil {
 				return "", fmt.Errorf("resolving star import from %q: %w", mod, err)

@@ -687,6 +687,42 @@ func TestExtractNestedPathTraversal(t *testing.T) {
 	}
 }
 
+func TestResolveTransitivePackageLocal(t *testing.T) {
+	c := NewCache(5 * time.Minute)
+
+	// Single artifact with two files. a.star loads its sibling via ./b.star.
+	img := buildTestImage(t, map[string]string{
+		"a.star": `load("./b.star", "x")
+value = x`,
+		"b.star": `x = 1`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/mod:v1": img,
+	}}
+	// defaultRegistry deliberately EMPTY — package-local must not require it.
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/mod:v1/a.star")
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Both files should be in the result map, keyed by full OCI URL.
+	if _, ok := result["oci://ghcr.io/org/mod:v1/a.star"]; !ok {
+		t.Error("expected a.star in result")
+	}
+	if _, ok := result["oci://ghcr.io/org/mod:v1/b.star"]; !ok {
+		t.Error("expected b.star (package-local sibling) in result")
+	}
+
+	// CRITICAL: only ONE fetch call — siblings come from the same artifact.
+	if f.calls != 1 {
+		t.Errorf("expected 1 fetch call (same-artifact dedup), got %d", f.calls)
+	}
+}
+
 func TestResolveTransitiveShortForm(t *testing.T) {
 	c := NewCache(5 * time.Minute)
 

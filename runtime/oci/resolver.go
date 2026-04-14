@@ -155,6 +155,25 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 				continue
 			}
 			for _, t := range transitive {
+				// Same-artifact reference (package-local ./file.star expansion,
+				// or an explicit self-referential oci:// URL): the file is
+				// already in the current `files` map. Map it into result
+				// directly — no second fetch, no cycle.
+				if t.RefStr == refStr {
+					src, ok := files[t.File]
+					if !ok {
+						available := make([]string, 0, len(files))
+						for k := range files {
+							available = append(available, k)
+						}
+						return nil, fmt.Errorf(
+							"package-local file %q not found in OCI artifact %s; available files: %s",
+							t.File, refStr, strings.Join(available, ", "),
+						)
+					}
+					result[t.RawURL] = src
+					continue
+				}
 				if visited[t.RefStr] {
 					return nil, fmt.Errorf("OCI dependency cycle detected: %s -> %s", refStr, t.RefStr)
 				}

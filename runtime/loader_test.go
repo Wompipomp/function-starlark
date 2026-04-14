@@ -1406,3 +1406,132 @@ result = ns.a + ns.b`
 		t.Errorf("result = %d, want 30 (a+b)", result)
 	}
 }
+
+// ========================
+// Package-Local OCI Load Tests
+// ========================
+
+func TestLoad_PackageLocal_FromOCICaller_Tag(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	// Pre-populate inline modules as resolver would after pulling the artifact.
+	inline := map[string]string{
+		"oci://ghcr.io/org/mod:v1/caller.star": `load("./dep.star", "x")
+from_caller = x`,
+		"oci://ghcr.io/org/mod:v1/dep.star": `x = "dep-value"`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	loaded, err := thread.Load(thread, "oci://ghcr.io/org/mod:v1/caller.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok := loaded["from_caller"]
+	if !ok {
+		t.Fatal("expected 'from_caller' in loaded globals")
+	}
+	if v.(starlark.String) != "dep-value" {
+		t.Errorf("from_caller = %v, want 'dep-value'", v)
+	}
+}
+
+func TestLoad_PackageLocal_FromOCICaller_Digest(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	const digestRef = "oci://ghcr.io/org/mod@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	inline := map[string]string{
+		digestRef + "/caller.star": `load("./dep.star", "y")
+from_caller = y`,
+		digestRef + "/dep.star": `y = "dep-digest"`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	loaded, err := thread.Load(thread, digestRef+"/caller.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	v, ok := loaded["from_caller"]
+	if !ok {
+		t.Fatal("expected 'from_caller' in loaded globals")
+	}
+	if v.(starlark.String) != "dep-digest" {
+		t.Errorf("from_caller = %v, want 'dep-digest'", v)
+	}
+}
+
+func TestLoad_PackageLocal_FromNonOCICaller_Error(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "composition.star", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "./dep.star")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "./dep.star") {
+		t.Errorf("error = %q, want it to contain './dep.star'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "composition.star") {
+		t.Errorf("error = %q, want it to contain 'composition.star'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "not an OCI module") {
+		t.Errorf("error = %q, want it to contain 'not an OCI module'", err.Error())
+	}
+}
+
+func TestResolveStarImports_PackageLocal_OCICaller_Rewrites(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"oci://ghcr.io/org/mod:v1/caller.star": `load("./dep.star", "*")`,
+		"oci://ghcr.io/org/mod:v1/dep.star": `x = 1
+y = 2`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+
+	src := `load("./dep.star", "*")
+result_x = x
+result_y = y`
+	rewritten, err := loader.ResolveStarImports(src, "oci://ghcr.io/org/mod:v1/caller.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+	if !strings.Contains(rewritten, `"oci://ghcr.io/org/mod:v1/dep.star"`) {
+		t.Errorf("rewritten source missing expanded oci:// URL: %s", rewritten)
+	}
+	if strings.Contains(rewritten, `"*"`) {
+		t.Errorf("rewritten source still contains star import: %s", rewritten)
+	}
+}
+
+func TestResolveStarImports_PackageLocal_NonOCICaller_Error(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+
+	src := `load("./dep.star", "*")`
+	_, err := loader.ResolveStarImports(src, "composition.star")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "./dep.star") {
+		t.Errorf("error = %q, want it to contain './dep.star'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "composition.star") {
+		t.Errorf("error = %q, want it to contain 'composition.star'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "not an OCI module") {
+		t.Errorf("error = %q, want it to contain 'not an OCI module'", err.Error())
+	}
+}
