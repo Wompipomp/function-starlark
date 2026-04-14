@@ -172,15 +172,16 @@ func ExpandPackageLocal(target, parentRefStr string) (string, error) {
 
 	// Validate the parent reference as either a tag or digest ref
 	// (defense-in-depth; scanner/loader should have canonical refs already).
-	if strings.Contains(parentRefStr, "@sha256:") {
+	switch {
+	case strings.Contains(parentRefStr, "@sha256:"):
 		if _, err := name.NewDigest(parentRefStr, name.StrictValidation); err != nil {
 			return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parentRefStr, target, err)
 		}
-	} else if strings.Contains(parentRefStr, ":") {
+	case strings.Contains(parentRefStr, ":"):
 		if _, err := name.NewTag(parentRefStr, name.StrictValidation); err != nil {
 			return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parentRefStr, target, err)
 		}
-	} else {
+	default:
 		return "", fmt.Errorf(
 			"OCI parent %q for package-local load %q: tag or digest required; "+
 				"use explicit :tag or @sha256:digest (implicit :latest is not supported)",
