@@ -325,6 +325,9 @@ load("function-starlark-stdlib:v1/naming.star", "resource_name")
 # Explicit full OCI URL (always works)
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
 
+# Package-local (inside a published OCI module, load a sibling in the SAME artifact)
+load("./sibling.star", "helper")  # OCI callers only; flat paths only
+
 # From inline modules defined in StarlarkInput spec.modules
 load("helpers.star", "make_tags")
 
@@ -337,9 +340,10 @@ load("shared/utils.star", "validate")
 Pattern: `load("package:tag/file.star", "name")` -- the colon (`:`) or `@sha256:` in the target triggers default registry expansion.
 
 Detection rules (in order):
-1. Starts with `oci://` -- explicit full OCI URL (used as-is)
-2. Contains `:` or `@sha256:` -- short-form, expanded via default registry
-3. Otherwise -- local module (inline or filesystem)
+1. Starts with `./` and ends with `.star` (flat, no subdirs) -- package-local, expanded against the caller's OCI artifact (OCI callers only)
+2. Starts with `oci://` -- explicit full OCI URL (used as-is)
+3. Contains `:` or `@sha256:` -- short-form, expanded via default registry
+4. Otherwise -- local module (inline or filesystem)
 
 Configuration (spec fields override env vars):
 - `spec.ociDefaultRegistry` / `STARLARK_OCI_DEFAULT_REGISTRY` env var

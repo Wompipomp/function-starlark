@@ -26,12 +26,20 @@ spec:
             # ============================================================
             # E2E OCI MODULE LOADING TEST
             # Loads stdlib modules from local registry and validates them.
+            # Also exercises the package-local (./file.star) scheme via a
+            # fixture artifact whose main module loads sibling files with ./
             # ============================================================
 
             # --- Test: load from OCI using short-form + namespace alias ---
             load("starlark-stdlib:v1/naming.star", naming="*")
             load("starlark-stdlib:v1/labels.star", labels_mod="*")
             load("starlark-stdlib:v1/networking.star", net="*")
+
+            # --- Test: load a package whose main module uses ./sibling loads ---
+            # main.star does: load("./helper.star", ...) and load("./values.star", ...)
+            # both resolve inside the SAME pkg-local-demo:v1 artifact — no
+            # second artifact pull, no ociDefaultRegistry needed for the siblings.
+            load("pkg-local-demo:v1/main.star", pkgdemo="*")
 
             # --- Test: use loaded functions via namespace ---
             region = get(oxr, "spec.region", "us-east-1")
@@ -89,9 +97,12 @@ spec:
 
             set_xr_status("test.ociLoaded", True)
             set_xr_status("test.subnet", subnet)
+            # Proves package-local loads resolved inside the same artifact:
+            # main.star imported greeting + helper via ./values.star / ./helper.star
+            set_xr_status("test.packageLocalMessage", pkgdemo.message)
 
             emit_event(severity="Normal",
-                message="E2E OCI test: loaded naming, labels, networking from local registry")
+                message="E2E OCI test: loaded naming, labels, networking and package-local siblings from local registry")
     - step: auto-ready
       functionRef:
         name: function-auto-ready

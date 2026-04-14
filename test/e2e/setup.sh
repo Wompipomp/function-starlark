@@ -166,6 +166,13 @@ oras push "localhost:${REGISTRY_PORT}/schemas-azure:v2.5.0" \
     --artifact-type "application/vnd.fn-starlark.modules.v1+tar" \
     storage/v1.star cosmosdb/v1.star
 
+# --- Push package-local fixture bundle (for ./sibling.star load scheme) ---
+echo "==> Pushing package-local fixture bundle to local registry"
+cd "$SCRIPT_DIR/fixtures/package-local"
+oras push "localhost:${REGISTRY_PORT}/pkg-local-demo:v1" \
+    --artifact-type "application/vnd.fn-starlark.modules.v1+tar" \
+    main.star helper.star values.star
+
 # --- Patch OCI compositions with in-cluster registry address ---
 echo "==> Patching OCI compositions with in-cluster registry address"
 sed "s|localhost:${REGISTRY_PORT}|${INCLUSTER_REGISTRY}|g" \

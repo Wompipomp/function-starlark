@@ -253,6 +253,13 @@ else
     fail "oci: subnet_cidr() produced empty result"
 fi
 
+pkglocal_msg=$(get_status_field "xtest/test-oci" "test.packageLocalMessage")
+if [ "$pkglocal_msg" = "hello, package-local" ]; then
+    pass "oci: package-local ./sibling.star loads resolved inside same artifact ('$pkglocal_msg')"
+else
+    fail "oci: package-local message='$pkglocal_msg' (expected 'hello, package-local')"
+fi
+
 # ============================================================
 # TEST 3: SCHEMA PACKAGE LOADING
 # ============================================================

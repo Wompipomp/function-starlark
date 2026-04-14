@@ -42,6 +42,43 @@ Short-form references are expanded using the default registry. For example,
 with registry `ghcr.io/my-org`, `my-org-starlark-lib:v1/helpers.star` becomes
 `oci://ghcr.io/my-org/my-org-starlark-lib:v1/helpers.star`.
 
+### Package-local loads
+
+Inside a module that was pulled from an OCI artifact, use `./sibling.star` to
+load another file in the **same artifact** (same registry, repo, and tag or
+digest). Package-local loads are the recommended way for a published package
+to reference its own siblings.
+
+```python
+# main.star — published inside ghcr.io/my-org/platform-lib:v1 alongside
+# helper.star and values.star.
+load("./helper.star", "helper")
+load("./values.star", "greeting")
+
+message = greeting + ", " + helper
+```
+
+Key properties:
+
+- Resolves to the same `registry/repo:tag-or-digest` the caller was pulled
+  from — no second fetch, no `ociDefaultRegistry` required for the sibling.
+- Valid **only** from OCI callers. Using `./sibling.star` from a main
+  composition, inline module, or filesystem module produces:
+
+  ```
+  package-local load "./sibling.star" is only valid from OCI modules;
+  caller "composition.star" is not an OCI module
+  ```
+
+- Flat paths only: `./foo.star` is accepted; `./sub/foo.star`, `../foo.star`,
+  and `./` are rejected at scan time.
+- Works with both tag-pinned and digest-pinned callers — the sibling inherits
+  whichever reference form the caller arrived with.
+
+Use package-local loads in published packages instead of short-form cross-
+package references: consumers no longer need to configure `ociDefaultRegistry`
+to resolve your internal dependencies, and the artifact is pulled once.
+
 ### Explicit full URL
 
 Use the `oci://` prefix for full control over the registry path, or when no
@@ -652,6 +689,39 @@ function-starlark will:
 
 **Circular dependencies are detected and produce a clear error.** If module A
 loads module B which loads module A, resolution fails before execution.
+
+### Intra-package references: prefer `./sibling.star`
+
+Published packages **should** use [package-local loads](#package-local-loads)
+(`./sibling.star`) for references inside the same artifact, rather than a
+short-form cross-package reference like `my-lib:v1/other.star`.
+
+Why:
+
+- **No consumer configuration.** A consumer can load your package without
+  setting `ociDefaultRegistry` just for your internal helpers.
+- **No double-pull.** Short-form intra-package refs go through the transitive
+  resolver and can pull the package again (sometimes a different version if
+  the consumer's default registry resolves to a different org), wasting time
+  and potentially mixing versions. Package-local refs resolve inside the
+  already-pulled artifact.
+- **Version coherence.** A sibling referenced via `./` always matches the
+  caller's tag or digest, so there's no risk of a module calling a stale
+  copy of its own package.
+
+Before (drags in a second copy of the package through the default registry):
+
+```python
+# platform.star — published as ghcr.io/my-org/lib:v1
+load("lib:v1/naming.star", "resource_name")  # short-form cross-package
+```
+
+After (resolves inside the same artifact, no registry config needed):
+
+```python
+# platform.star — published as ghcr.io/my-org/lib:v1
+load("./naming.star", "resource_name")  # package-local
+```
 
 ## Complete example
 
