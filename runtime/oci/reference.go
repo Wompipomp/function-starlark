@@ -122,6 +122,75 @@ func ExpandDefaultRegistry(target, registry string) (string, error) {
 	return "oci://" + registry + "/" + target, nil
 }
 
+// IsPackageLocalTarget returns true if the module string is a package-local
+// load target of the form "./file.star" — a flat sibling reference inside the
+// caller's OCI artifact. Only flat paths are accepted (no subdirectories, no
+// parent references).
+//
+// Detection rules:
+//  1. must start with "./"
+//  2. must end with ".star"
+//  3. must NOT contain "/" after the "./" prefix (flat only; "./sub/x.star" is false)
+//
+// Note: "./" alone returns false because it lacks the .star suffix.
+func IsPackageLocalTarget(module string) bool {
+	if !strings.HasPrefix(module, "./") {
+		return false
+	}
+	if !strings.HasSuffix(module, ".star") {
+		return false
+	}
+	return !strings.Contains(module[2:], "/")
+}
+
+// ExpandPackageLocal expands a package-local target like "./file.star" to a
+// full oci:// URL rooted at the caller's OCI artifact reference.
+//
+// parentRefStr is the OCI reference portion (e.g. "ghcr.io/org/mod:v1" or
+// "ghcr.io/org/mod@sha256:..."). It must be non-empty and parseable as either
+// a tag or digest reference (strict validation).
+//
+// Returns e.g. "oci://ghcr.io/org/mod:v1/file.star".
+func ExpandPackageLocal(target, parentRefStr string) (string, error) {
+	if parentRefStr == "" {
+		return "", fmt.Errorf(
+			"package-local load %q requires an OCI parent; "+
+				"package-local loads are only valid from OCI modules",
+			target,
+		)
+	}
+	if !strings.HasPrefix(target, "./") {
+		return "", fmt.Errorf("package-local load %q must start with \"./\"", target)
+	}
+	inner := strings.TrimPrefix(target, "./")
+	if strings.Contains(inner, "/") {
+		return "", fmt.Errorf("package-local load %q must be flat (no subdirectories)", target)
+	}
+	if !strings.HasSuffix(inner, ".star") {
+		return "", fmt.Errorf("package-local load %q must end with .star", target)
+	}
+
+	// Validate the parent reference as either a tag or digest ref
+	// (defense-in-depth; scanner/loader should have canonical refs already).
+	if strings.Contains(parentRefStr, "@sha256:") {
+		if _, err := name.NewDigest(parentRefStr, name.StrictValidation); err != nil {
+			return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parentRefStr, target, err)
+		}
+	} else if strings.Contains(parentRefStr, ":") {
+		if _, err := name.NewTag(parentRefStr, name.StrictValidation); err != nil {
+			return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parentRefStr, target, err)
+		}
+	} else {
+		return "", fmt.Errorf(
+			"OCI parent %q for package-local load %q: tag or digest required; "+
+				"use explicit :tag or @sha256:digest (implicit :latest is not supported)",
+			parentRefStr, target,
+		)
+	}
+
+	return "oci://" + parentRefStr + "/" + inner, nil
+}
+
 // NormalizeRegistry cleans a registry value by stripping oci:// prefix and trailing slashes.
 func NormalizeRegistry(registry string) string {
 	r := strings.TrimPrefix(registry, "oci://")

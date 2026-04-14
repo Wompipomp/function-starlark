@@ -326,6 +326,102 @@ func TestValidateRegistry(t *testing.T) {
 	}
 }
 
+func TestIsPackageLocalTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		module string
+		want   bool
+	}{
+		{"flat sibling star file", "./foo.star", true},
+		{"plain filename returns false", "foo.star", false},
+		{"nested subdirectory returns false", "./sub/foo.star", false},
+		{"non-star suffix returns false", "./foo.txt", false},
+		{"bare ./ returns false", "./", false},
+		{"parent reference returns false", "../foo.star", false},
+		{"explicit oci URL returns false", "oci://reg/r:v1/foo.star", false},
+		{"short-form pkg target returns false", "pkg:v1/foo.star", false},
+		{"empty string returns false", "", false},
+		{"./ without star suffix returns false", "./foo", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsPackageLocalTarget(tt.module)
+			if got != tt.want {
+				t.Errorf("IsPackageLocalTarget(%q) = %v, want %v", tt.module, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExpandPackageLocal(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		parentRef string
+		want      string
+		wantErr   string
+	}{
+		{
+			name:      "tag parent expands to oci URL",
+			target:    "./foo.star",
+			parentRef: "ghcr.io/org/mod:v1",
+			want:      "oci://ghcr.io/org/mod:v1/foo.star",
+		},
+		{
+			name:      "digest parent expands to oci URL",
+			target:    "./foo.star",
+			parentRef: "ghcr.io/org/mod@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			want:      "oci://ghcr.io/org/mod@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855/foo.star",
+		},
+		{
+			name:      "empty parent returns error",
+			target:    "./foo.star",
+			parentRef: "",
+			wantErr:   "requires an OCI parent",
+		},
+		{
+			name:      "malformed parent returns error",
+			target:    "./foo.star",
+			parentRef: "BAD HOST:v1",
+			wantErr:   "parsing OCI parent",
+		},
+		{
+			name:      "nested path rejected",
+			target:    "./sub/foo.star",
+			parentRef: "ghcr.io/org/mod:v1",
+			wantErr:   "must be flat",
+		},
+		{
+			name:      "parent without tag or digest rejected",
+			target:    "./foo.star",
+			parentRef: "ghcr.io/org/mod",
+			wantErr:   "tag or digest",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExpandPackageLocal(tt.target, tt.parentRef)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+				}
+				if !containsSubstring(err.Error(), tt.wantErr) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("ExpandPackageLocal(%q, %q) = %q, want %q", tt.target, tt.parentRef, got, tt.want)
+			}
+		})
+	}
+}
+
 func containsSubstring(s, substr string) bool {
 	return len(s) >= len(substr) && searchSubstring(s, substr)
 }

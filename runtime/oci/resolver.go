@@ -143,8 +143,10 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 		}
 
 		// Scan extracted files for transitive OCI loads.
+		// Pass refStr as the parentRef so package-local "./file.star" targets
+		// resolve within the SAME artifact (no double-pull).
 		for _, src := range files {
-			transitive, err := ScanForOCILoads(src, nil, r.defaultRegistry)
+			transitive, err := ScanForOCILoads(src, nil, r.defaultRegistry, refStr)
 			if err != nil {
 				// Non-fatal: if scanning fails (e.g., invalid Starlark syntax
 				// in a module that won't be loaded), we skip it. The actual

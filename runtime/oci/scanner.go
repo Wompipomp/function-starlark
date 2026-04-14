@@ -13,11 +13,17 @@ import (
 // reference appears at most once, even if multiple files are loaded from it.
 // When defaultRegistry is non-empty, short-form targets (containing ":" but not
 // starting with "oci://") are expanded to full oci:// URLs.
-func ScanForOCILoads(source string, inlineModules map[string]string, defaultRegistry string) ([]*OCILoadTarget, error) {
+//
+// parentRef, when non-empty, is the OCI reference (e.g. "ghcr.io/org/mod:v1")
+// of the caller artifact; package-local load targets ("./file.star") are
+// expanded against this reference. When parentRef is empty (top-level scan of
+// the main script / user-supplied inline modules) a package-local target is an
+// error because such callers have no OCI parent.
+func ScanForOCILoads(source string, inlineModules map[string]string, defaultRegistry, parentRef string) ([]*OCILoadTarget, error) {
 	var targets []*OCILoadTarget
 
 	// Scan main script.
-	found, err := scanSource(source, "composition.star", defaultRegistry)
+	found, err := scanSource(source, "composition.star", defaultRegistry, parentRef)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +37,7 @@ func ScanForOCILoads(source string, inlineModules map[string]string, defaultRegi
 	sort.Strings(names)
 
 	for _, name := range names {
-		found, err := scanSource(inlineModules[name], name, defaultRegistry)
+		found, err := scanSource(inlineModules[name], name, defaultRegistry, parentRef)
 		if err != nil {
 			return nil, err
 		}
@@ -42,7 +48,9 @@ func ScanForOCILoads(source string, inlineModules map[string]string, defaultRegi
 }
 
 // scanSource parses a single Starlark source string and extracts oci:// load targets.
-func scanSource(source, filename, defaultRegistry string) ([]*OCILoadTarget, error) {
+// parentRef is used to expand package-local ("./file.star") targets; empty means
+// the caller has no OCI parent and package-local targets are rejected.
+func scanSource(source, filename, defaultRegistry, parentRef string) ([]*OCILoadTarget, error) {
 	opts := &syntax.FileOptions{
 		TopLevelControl: true,
 		Set:             true,
@@ -60,7 +68,16 @@ func scanSource(source, filename, defaultRegistry string) ([]*OCILoadTarget, err
 			continue
 		}
 		mod := load.ModuleName()
-		if IsDefaultRegistryTarget(mod) {
+		// Package-local ./file.star is same-artifact; expand against parentRef
+		// BEFORE short-form detection so it never gets mistaken for a
+		// short-form default-registry target.
+		if IsPackageLocalTarget(mod) {
+			expanded, err := ExpandPackageLocal(mod, parentRef)
+			if err != nil {
+				return nil, fmt.Errorf("scanning %s: %w", filename, err)
+			}
+			mod = expanded
+		} else if IsDefaultRegistryTarget(mod) {
 			expanded, err := ExpandDefaultRegistry(mod, defaultRegistry)
 			if err != nil {
 				return nil, err

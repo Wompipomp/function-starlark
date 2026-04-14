@@ -157,7 +157,8 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		// Parse errors are non-fatal here: if the script has syntax errors,
 		// it will fail later during compilation with a more appropriate message.
 		// However, default-registry config errors are fatal (user must fix config).
-		ociTargets, scanErr := oci.ScanForOCILoads(source, inlineModules, defaultRegistry)
+		// parentRef="" — main script / user-supplied inline modules have no OCI parent.
+		ociTargets, scanErr := oci.ScanForOCILoads(source, inlineModules, defaultRegistry, "")
 		if scanErr != nil {
 			if strings.Contains(scanErr.Error(), "requires a default OCI registry") {
 				fatal(errors.Wrapf(scanErr, "scanning for OCI load targets"))

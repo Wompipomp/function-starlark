@@ -10,6 +10,7 @@ func TestScanForOCILoads(t *testing.T) {
 		source          string
 		inlineModules   map[string]string
 		defaultRegistry string
+		parentRef       string
 		wantCount       int
 		wantRefs        []string // expected RefStr values
 		wantErr         string
@@ -112,11 +113,57 @@ load("oci://ghcr.io/org/lib:v1/h.star", "fn")`,
 			wantCount:       2,
 			wantRefs:        []string{"ghcr.io/wompipomp/function-starlark-stdlib:v1", "ghcr.io/org/lib:v1"},
 		},
+		// --- Package-local load test cases ---
+		{
+			name:      "package-local load with OCI parent",
+			source:    `load("./b.star", "x")`,
+			parentRef: "ghcr.io/org/mod:v1",
+			wantCount: 1,
+			wantRefs:  []string{"ghcr.io/org/mod:v1"},
+		},
+		{
+			name:      "package-local load with digest parent",
+			source:    `load("./b.star", "x")`,
+			parentRef: "ghcr.io/org/mod@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			wantCount: 1,
+			wantRefs:  []string{"ghcr.io/org/mod@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+		},
+		{
+			name:      "package-local load without parent errors",
+			source:    `load("./b.star", "x")`,
+			parentRef: "",
+			wantErr:   "./b.star",
+		},
+		{
+			name:      "package-local load error mentions caller filename",
+			source:    `load("./b.star", "x")`,
+			parentRef: "",
+			wantErr:   "composition.star",
+		},
+		{
+			name: "mixed package-local, short-form, explicit oci",
+			source: `load("./b.star", "x")
+load("pkg:v1/c.star", "y")
+load("oci://ghcr.io/org/mod:v1/d.star", "z")`,
+			defaultRegistry: "ghcr.io/org",
+			parentRef:       "ghcr.io/org/caller:v1",
+			wantCount:       3,
+			wantRefs:        []string{"ghcr.io/org/caller:v1", "ghcr.io/org/pkg:v1", "ghcr.io/org/mod:v1"},
+		},
+		{
+			name:      "package-local load in inline module uses parentRef",
+			parentRef: "ghcr.io/org/mod:v1",
+			inlineModules: map[string]string{
+				"helper.star": `load("./b.star", "x")`,
+			},
+			wantCount: 1,
+			wantRefs:  []string{"ghcr.io/org/mod:v1"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ScanForOCILoads(tt.source, tt.inlineModules, tt.defaultRegistry)
+			got, err := ScanForOCILoads(tt.source, tt.inlineModules, tt.defaultRegistry, tt.parentRef)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
