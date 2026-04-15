@@ -24,6 +24,7 @@ var DictModule = &starlarkstruct.Module{
 		"deep_merge": starlark.NewBuiltin("dict.deep_merge", dictDeepMergeImpl),
 		"pick":       starlark.NewBuiltin("dict.pick", dictPickImpl),
 		"omit":       starlark.NewBuiltin("dict.omit", dictOmitImpl),
+		"compact":    starlark.NewBuiltin("dict.compact", dictCompactImpl),
 		"dig":        starlark.NewBuiltin("dict.dig", dictDigImpl),
 		"has_path":   starlark.NewBuiltin("dict.has_path", dictHasPathImpl),
 	},
@@ -240,6 +241,41 @@ func dictOmitImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, 
 			if err := result.SetKey(item[0], item[1]); err != nil {
 				return nil, err
 			}
+		}
+	}
+	return result, nil
+}
+
+// dictCompactImpl implements dict.compact(d) -> new dict with entries whose
+// value is None removed. Empty string, [], and {} are preserved because they
+// can be semantically meaningful in K8s-style manifests (e.g. `spec: {}` is
+// not the same as omitting spec).
+//
+// Intended for declaratively building manifests with optional fields:
+//
+//	body = dict.compact({
+//	    "displayName": name,
+//	    "administrativeUnitIds": [au_id] if au_id else None,
+//	    "owners": owners if owners else None,
+//	})
+func dictCompactImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var d starlark.Value
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "d", &d); err != nil {
+		return nil, err
+	}
+
+	items, err := dictItems(b.Name(), d)
+	if err != nil {
+		return nil, err
+	}
+
+	result := new(starlark.Dict)
+	for _, item := range items {
+		if item[1] == starlark.None {
+			continue
+		}
+		if err := result.SetKey(item[0], item[1]); err != nil {
+			return nil, err
 		}
 	}
 	return result, nil

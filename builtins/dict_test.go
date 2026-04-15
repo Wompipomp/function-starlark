@@ -105,7 +105,7 @@ func TestBuildGlobals_DictModule(t *testing.T) {
 		t.Errorf("mod.Name = %q, want %q", mod.Name, "dict")
 	}
 
-	wantMembers := []string{"merge", "deep_merge", "pick", "omit", "dig", "has_path"}
+	wantMembers := []string{"merge", "deep_merge", "pick", "omit", "compact", "dig", "has_path"}
 	for _, name := range wantMembers {
 		if _, ok := mod.Members[name]; !ok {
 			t.Errorf(`dict.Members missing %q`, name)
@@ -310,6 +310,64 @@ has_a = result["a"] == 1
 `)
 	assertInt(t, out, "count", 1)
 	assertBool(t, out, "has_a", true)
+}
+
+func TestDict_Compact(t *testing.T) {
+	// Drops None-valued entries.
+	out := runDictScript(t, `
+result = dict.compact({"a": "keep", "b": None, "c": 42, "d": None})
+count = len(result)
+has_a = result["a"] == "keep"
+has_c = result["c"] == 42
+has_b = "b" in result
+has_d = "d" in result
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_c", true)
+	assertBool(t, out, "has_b", false)
+	assertBool(t, out, "has_d", false)
+
+	// Empty string, empty list, empty dict are preserved — K8s-meaningful.
+	out = runDictScript(t, `
+result = dict.compact({"s": "", "l": [], "d": {}})
+count = len(result)
+`)
+	assertInt(t, out, "count", 3)
+
+	// All-None input yields empty dict.
+	out = runDictScript(t, `
+result = dict.compact({"a": None, "b": None})
+count = len(result)
+`)
+	assertInt(t, out, "count", 0)
+
+	// Empty input yields empty dict.
+	out = runDictScript(t, `
+result = dict.compact({})
+count = len(result)
+`)
+	assertInt(t, out, "count", 0)
+
+	// Declarative manifest pattern: ternary against None, one compact() call
+	// to drop the absent keys.
+	out = runDictScript(t, `
+au_id = ""
+owners = ["o1"]
+result = dict.compact({
+    "displayName": "the-group",
+    "administrativeUnitIds": [au_id] if au_id else None,
+    "owners": owners if owners else None,
+})
+count = len(result)
+has_name = result["displayName"] == "the-group"
+has_owners = "owners" in result
+has_au = "administrativeUnitIds" in result
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_name", true)
+	assertBool(t, out, "has_owners", true)
+	assertBool(t, out, "has_au", false)
 }
 
 func TestDict_Dig(t *testing.T) {
