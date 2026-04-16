@@ -117,6 +117,49 @@ func (c *Collector) SkipResourceBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("skip_resource", c.skipResourceFn)
 }
 
+// lookupObservedBody looks up a resource by name in the observed composed
+// resources dict and converts it from *convert.StarlarkDict to *structpb.Struct.
+// Returns (nil, false, nil) when the resource is not found or c.observed is nil.
+func (c *Collector) lookupObservedBody(name string) (*structpb.Struct, bool, error) {
+	if c.observed == nil {
+		return nil, false, nil
+	}
+	val, found, err := c.observed.Get(starlark.String(name))
+	if err != nil {
+		return nil, false, fmt.Errorf("observed lookup %q: %w", name, err)
+	}
+	if !found || val == starlark.None {
+		return nil, false, nil
+	}
+	obsDict, ok := val.(*convert.StarlarkDict)
+	if !ok {
+		return nil, false, fmt.Errorf("observed %q: expected *convert.StarlarkDict, got %T", name, val)
+	}
+	s, err := convert.StarlarkToStruct(obsDict)
+	if err != nil {
+		return nil, false, fmt.Errorf("observed %q: %w", name, err)
+	}
+	return s, true, nil
+}
+
+// recordPreserve stores the observed body directly and emits a Warning event.
+// The caller must NOT hold c.mu (lock ordering: c.mu before cc.mu).
+func (c *Collector) recordPreserve(name string, body *structpb.Struct, message string) {
+	c.mu.Lock()
+	c.resources[name] = CollectedResource{
+		Name:  name,
+		Body:  body,
+		Ready: resource.ReadyUnspecified,
+	}
+	c.mu.Unlock()
+
+	c.cc.AddEvent(CollectedEvent{
+		Severity: "Warning",
+		Message:  fmt.Sprintf("Preserving resource %q: %s", name, message),
+		Target:   "Composite",
+	})
+}
+
 // recordSkip handles skip registration, Warning event emission, and metric
 // increment. It is a no-op if name was already skipped. The caller must NOT
 // hold c.mu when calling recordSkip (lock ordering: c.mu before cc.mu).
@@ -280,9 +323,23 @@ func (c *Collector) resourceFn(
 		return starlark.None, nil
 	}
 
-	// when=False + preserve_observed=True: TODO — preserve path handled in Plan 02.
+	// when=False + preserve_observed=True: cliff guard — emit observed body if found.
 	if whenFalse && preserveActive {
-		return nil, fmt.Errorf("Resource(%q): when=False with preserve_observed=True is not yet implemented", name)
+		s, found, err := c.lookupObservedBody(name)
+		if err != nil {
+			return nil, fmt.Errorf("Resource(%q): %w", name, err)
+		}
+		if found {
+			c.recordPreserve(name, s, "observed body emitted, gated by when=False")
+			return &ResourceRef{name: name}, nil
+		}
+		// Not found in observed — skip.
+		reason := "gated by when=False, not found in observed state (preserve_observed=True)"
+		if skipReason != "" {
+			reason = skipReason
+		}
+		c.recordSkip(name, reason)
+		return starlark.None, nil
 	}
 
 	// GATE-05: body=None without preserve -> warn and skip.
@@ -291,9 +348,18 @@ func (c *Collector) resourceFn(
 		return starlark.None, nil
 	}
 
-	// body=None + preserve_observed=True: TODO — preserve path handled in Plan 02.
+	// body=None + preserve_observed=True: emit observed body if found, skip otherwise.
 	if bodyVal == starlark.None && preserveActive {
-		return nil, fmt.Errorf("Resource(%q): body=None with preserve_observed=True is not yet implemented", name)
+		s, found, err := c.lookupObservedBody(name)
+		if err != nil {
+			return nil, fmt.Errorf("Resource(%q): %w", name, err)
+		}
+		if found {
+			c.recordPreserve(name, s, "body=None, emitting observed body")
+			return &ResourceRef{name: name}, nil
+		}
+		c.recordSkip(name, "not found in observed state")
+		return starlark.None, nil
 	}
 
 	// --- Normal body processing path (when=True or when omitted, body is dict) ---
