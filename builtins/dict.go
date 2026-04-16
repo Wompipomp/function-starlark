@@ -246,10 +246,89 @@ func dictOmitImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, 
 	return result, nil
 }
 
-// dictCompactImpl implements dict.compact(d) -> new dict with entries whose
-// value is None removed. Empty string, [], and {} are preserved because they
-// can be semantically meaningful in K8s-style manifests (e.g. `spec: {}` is
-// not the same as omitting spec).
+// compactValue recursively compacts a Starlark value:
+//   - Dicts: prunes None-valued entries and recurses into remaining values.
+//   - Lists: recurses into elements (never removes elements).
+//   - Everything else (tuples, scalars, None): returned unchanged.
+//
+// Returns (compacted value, whether anything changed, error).
+func compactValue(fnName string, v starlark.Value, depth int) (starlark.Value, bool, error) {
+	if depth > maxMergeDepth {
+		return nil, false, fmt.Errorf("%s: recursion depth exceeds maximum (%d)", fnName, maxMergeDepth)
+	}
+
+	switch {
+	case isDict(v):
+		return compactDict(fnName, v, depth)
+	default:
+		if l, ok := v.(*starlark.List); ok {
+			return compactList(fnName, l, depth)
+		}
+		return v, false, nil
+	}
+}
+
+// compactDict prunes None-valued entries from a dict (any supported dict type)
+// and recurses into remaining values. Always returns a new *starlark.Dict.
+func compactDict(fnName string, v starlark.Value, depth int) (starlark.Value, bool, error) {
+	items, err := dictItems(fnName, v)
+	if err != nil {
+		return nil, false, err
+	}
+
+	result := new(starlark.Dict)
+	changed := false
+	for _, item := range items {
+		if item[1] == starlark.None {
+			changed = true
+			continue
+		}
+		val, childChanged, err := compactValue(fnName, item[1], depth+1)
+		if err != nil {
+			return nil, false, err
+		}
+		if childChanged {
+			changed = true
+		}
+		if err := result.SetKey(item[0], val); err != nil {
+			return nil, false, err
+		}
+	}
+	return result, changed, nil
+}
+
+// compactList recurses into list elements to compact any dicts found inside.
+// Never removes elements — None elements in lists pass through unchanged.
+// Uses copy-on-change: if no element changed, returns the original list.
+func compactList(fnName string, l *starlark.List, depth int) (starlark.Value, bool, error) {
+	n := l.Len()
+	elems := make([]starlark.Value, n)
+	changed := false
+	for i := 0; i < n; i++ {
+		elem := l.Index(i)
+		compacted, elemChanged, err := compactValue(fnName, elem, depth+1)
+		if err != nil {
+			return nil, false, err
+		}
+		elems[i] = compacted
+		if elemChanged {
+			changed = true
+		}
+	}
+	if !changed {
+		return l, false, nil
+	}
+	return starlark.NewList(elems), true, nil
+}
+
+// dictCompactImpl implements dict.compact(d) -> new dict with None-valued
+// entries removed recursively at any nesting depth. Recurses into nested
+// dicts and lists. Tuples pass through untouched (immutable). Empty strings,
+// empty lists, and empty dicts are preserved because they can be semantically
+// meaningful in K8s-style manifests (e.g. `spec: {}` is not the same as
+// omitting spec).
+//
+// Raises an error if recursion depth exceeds maxMergeDepth (32).
 //
 // Intended for declaratively building manifests with optional fields:
 //
@@ -274,7 +353,11 @@ func dictCompactImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tupl
 		if item[1] == starlark.None {
 			continue
 		}
-		if err := result.SetKey(item[0], item[1]); err != nil {
+		val, _, err := compactValue(b.Name(), item[1], 0)
+		if err != nil {
+			return nil, err
+		}
+		if err := result.SetKey(item[0], val); err != nil {
 			return nil, err
 		}
 	}
