@@ -117,6 +117,27 @@ func (c *Collector) SkipResourceBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("skip_resource", c.skipResourceFn)
 }
 
+// recordSkip handles skip registration, Warning event emission, and metric
+// increment. It is a no-op if name was already skipped. The caller must NOT
+// hold c.mu when calling recordSkip (lock ordering: c.mu before cc.mu).
+func (c *Collector) recordSkip(name, reason string) {
+	c.mu.Lock()
+	if c.skipped[name] {
+		c.mu.Unlock()
+		return
+	}
+	c.skipped[name] = true
+	c.mu.Unlock()
+
+	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName).Inc()
+
+	c.cc.AddEvent(CollectedEvent{
+		Severity: "Warning",
+		Message:  fmt.Sprintf("Skipping resource %q: %s", name, reason),
+		Target:   "Composite",
+	})
+}
+
 // skipResourceFn implements skip_resource(name, reason). It records the skip,
 // emits a Warning event on first call for a given name, and errors if the
 // resource was already emitted via Resource().
@@ -132,31 +153,16 @@ func (c *Collector) skipResourceFn(
 		return nil, err
 	}
 
+	// Conflict check: error if already emitted via Resource().
 	c.mu.Lock()
-	// Error if already emitted via Resource().
 	if _, exists := c.resources[name]; exists {
 		c.mu.Unlock()
 		return nil, fmt.Errorf("resource %q already emitted, cannot skip", name)
 	}
-	// Deduplicate: only first skip emits warning.
-	if c.skipped[name] {
-		c.mu.Unlock()
-		return starlark.None, nil
-	}
-	c.skipped[name] = true
 	c.mu.Unlock()
 
-	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName).Inc()
-
-	// Emit Warning event. Release c.mu before acquiring cc.mu to avoid
-	// lock ordering issues (Pitfall 4 from RESEARCH.md).
-	msg := fmt.Sprintf("Skipping resource %q: %s", name, reason)
-	c.cc.mu.Lock()
-	c.cc.events = append(c.cc.events, CollectedEvent{
-		Severity: "Warning", Message: msg, Target: "Composite",
-	})
-	c.cc.mu.Unlock()
-
+	// Delegate to shared skip path (handles dedup, metric, Warning event).
+	c.recordSkip(name, reason)
 	return starlark.None, nil
 }
 
