@@ -20,7 +20,7 @@ func TestIsObserved_Exists(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func TestIsObserved_Missing(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestIsObserved_EmptyName_Errors(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestObservedBody_Exists(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestObservedBody_Missing_ReturnsNone(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestObservedBody_Missing_ReturnsCustomDefault(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestObservedBody_FrozenBody(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestObservedBody_ContentVerification(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +261,7 @@ func TestObservedBody_EmptyName_Errors(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)

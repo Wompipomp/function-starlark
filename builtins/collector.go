@@ -83,21 +83,24 @@ type Collector struct {
 	dependencies []DependencyPair
 	cc           *ConditionCollector
 	scriptName   string
-	oxr          *structpb.Struct // frozen observed XR, for label extraction
+	oxr          *structpb.Struct      // frozen observed XR, for label extraction
+	observed     *convert.StarlarkDict // frozen observed composed resources; may be nil
 }
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
 // emit Warning events when the external_name or labels kwarg conflicts with
 // existing values. The scriptName is recorded for use in metric labels. The
 // oxr is the observed composite resource struct used for auto-injecting
-// crossplane traceability labels.
-func NewCollector(cc *ConditionCollector, scriptName string, oxr *structpb.Struct) *Collector {
+// crossplane traceability labels. The observed dict holds the frozen Starlark
+// representation of observed composed resources; it may be nil.
+func NewCollector(cc *ConditionCollector, scriptName string, oxr *structpb.Struct, observed *convert.StarlarkDict) *Collector {
 	return &Collector{
 		resources:  make(map[string]CollectedResource),
 		skipped:    make(map[string]bool),
 		cc:         cc,
 		scriptName: scriptName,
 		oxr:        oxr,
+		observed:   observed,
 	}
 }
 

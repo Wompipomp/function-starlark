@@ -42,7 +42,7 @@ import (
 func runYAMLScript(t *testing.T, src string) starlark.StringDict {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -62,7 +62,7 @@ func runYAMLScript(t *testing.T, src string) starlark.StringDict {
 func runYAMLScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -83,7 +83,7 @@ func runYAMLScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 
 func TestBuildGlobals_YAMLModule(t *testing.T) {
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -227,7 +227,7 @@ func TestYAML_Encode_AllDictTypes(t *testing.T) {
 	}
 
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals: %v", err)
@@ -616,7 +616,7 @@ func TestYAML_RoundTrip_Protobuf(t *testing.T) {
 			}
 
 			req := makeReq(nil, nil, nil)
-			c := NewCollector(NewConditionCollector(), "test.star", nil)
+			c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 			globals, err := testBuildGlobals(req, c)
 			if err != nil {
 				t.Fatalf("testBuildGlobals: %v", err)

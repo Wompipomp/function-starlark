@@ -589,7 +589,7 @@ func TestSequencer(t *testing.T) {
 
 func TestRemoveResources(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star", nil)
+	c := NewCollector(cc, "test.star", nil, nil)
 
 	// Add some resources manually via internal map (simulate Resource() calls).
 	c.mu.Lock()
@@ -627,7 +627,7 @@ func TestRemoveResources(t *testing.T) {
 
 func TestRemoveResourcesNonExistent(t *testing.T) {
 	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star", nil)
+	c := NewCollector(cc, "test.star", nil, nil)
 
 	c.mu.Lock()
 	c.resources["app"] = CollectedResource{

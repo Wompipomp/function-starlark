@@ -117,13 +117,18 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 		// Create all collectors for this execution.
 		condCollector := builtins.NewConditionCollector()
+		observed, err := builtins.BuildObservedDict(req)
+		if err != nil {
+			fatal(errors.Wrapf(err, "building observed dict"))
+			return rsp, nil
+		}
 		collector := builtins.NewCollector(condCollector, filename,
-			req.GetObserved().GetComposite().GetResource())
+			req.GetObserved().GetComposite().GetResource(), observed)
 		connCollector := builtins.NewConnectionCollector()
 		reqCollector := builtins.NewRequirementsCollector()
 		ttlCollector := builtins.NewTTLCollector()
 
-		globals, err := builtins.BuildGlobals(req, collector, condCollector, connCollector, reqCollector, ttlCollector)
+		globals, err := builtins.BuildGlobals(req, collector, condCollector, connCollector, reqCollector, ttlCollector, observed)
 		if err != nil {
 			fatal(errors.Wrapf(err, "building Starlark globals"))
 			return rsp, nil

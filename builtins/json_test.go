@@ -45,7 +45,7 @@ import (
 func runJSONScript(t *testing.T, src string) starlark.StringDict {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -65,7 +65,7 @@ func runJSONScript(t *testing.T, src string) starlark.StringDict {
 func runJSONScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -86,7 +86,7 @@ func runJSONScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 
 func TestBuildGlobals_JSONModule(t *testing.T) {
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -609,7 +609,7 @@ func TestJSON_RoundTrip_ToProtobuf(t *testing.T) {
 			}
 
 			req := makeReq(nil, nil, nil)
-			c := NewCollector(NewConditionCollector(), "test.star", nil)
+			c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 			globals, err := testBuildGlobals(req, c)
 			if err != nil {
 				t.Fatalf("testBuildGlobals: %v", err)

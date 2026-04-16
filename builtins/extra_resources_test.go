@@ -49,7 +49,7 @@ func TestGetExtraResource_PathLookup(t *testing.T) {
 		"cluster": {Items: []*fnv1.Resource{{Resource: res}}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestGetExtraResource_NoPath_FullBody(t *testing.T) {
 		"cluster": {Items: []*fnv1.Resource{{Resource: res}}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestGetExtraResource_NoPath_FullBody(t *testing.T) {
 
 func TestGetExtraResource_Missing_ReturnsDefault(t *testing.T) {
 	req := makeReqWithExtras(nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestGetExtraResource_EmptyMatch_ReturnsDefault(t *testing.T) {
 		"empty-match": {Items: nil}, // empty items -> None in dict
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestGetExtraResource_MissingPathSegment_ReturnsDefault(t *testing.T) {
 		"cluster": {Items: []*fnv1.Resource{{Resource: res}}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestGetExtraResource_MissingPathSegment_ReturnsDefault(t *testing.T) {
 
 func TestGetExtraResource_EmptyName_Errors(t *testing.T) {
 	req := makeReqWithExtras(nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -222,7 +222,7 @@ func TestGetExtraResources_PathLookup(t *testing.T) {
 		"clusters": {Items: []*fnv1.Resource{mkRes("us-west-2"), mkRes("eu-central-1")}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +274,7 @@ func TestGetExtraResources_NoPath_FullBodies(t *testing.T) {
 		"clusters": {Items: []*fnv1.Resource{mkRes("us-west-2"), mkRes("eu-central-1")}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +296,7 @@ func TestGetExtraResources_NoPath_FullBodies(t *testing.T) {
 
 func TestGetExtraResources_Missing_ReturnsEmptyList(t *testing.T) {
 	req := makeReqWithExtras(nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +334,7 @@ func TestGetExtraResources_NoPath_ReturnsMutableList(t *testing.T) {
 		"clusters": {Items: []*fnv1.Resource{mkRes("us-west-2"), mkRes("eu-central-1")}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -369,7 +369,7 @@ func TestGetExtraResource_EmptyPath_Errors(t *testing.T) {
 		"cluster": {Items: []*fnv1.Resource{{Resource: res}}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -429,7 +429,7 @@ func TestGetExtraResources_PartialPathCollection(t *testing.T) {
 		"clusters": {Items: []*fnv1.Resource{res1, res2, res3}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -468,7 +468,7 @@ func TestGetExtraResources_PartialPathCollection(t *testing.T) {
 // when the extra resource is missing.
 func TestGetExtraResource_CustomDefault(t *testing.T) {
 	req := makeReqWithExtras(nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -509,7 +509,7 @@ func TestGetExtraResources_ReturnedListIsMutable_PathMode(t *testing.T) {
 		"clusters": {Items: []*fnv1.Resource{mkRes("us-west-2")}},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -535,7 +535,7 @@ func TestGetExtraResources_EmptyMatch_ReturnsDefault(t *testing.T) {
 		"empty-match": {Items: nil},
 	}
 	req := makeReqWithExtras(extras)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)

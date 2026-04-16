@@ -42,7 +42,7 @@ import (
 func runRegexScript(t *testing.T, src string) starlark.StringDict {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -62,7 +62,7 @@ func runRegexScript(t *testing.T, src string) starlark.StringDict {
 func runRegexScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -83,7 +83,7 @@ func runRegexScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 
 func TestBuildGlobals_RegexModule(t *testing.T) {
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {

@@ -50,7 +50,7 @@ func TestGetCondition_Found(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +121,7 @@ func TestGetCondition_TypeNotFound(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestGetCondition_ResourceNotFound(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestGetCondition_PartialFields_DefaultToEmptyString(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestGetCondition_EmptyName_Errors(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +241,7 @@ func TestGetCondition_EmptyType_Errors(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestGetCondition_NoConditionsKey(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +309,7 @@ func TestGetCondition_MalformedConditions(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func TestGetCondition_NonStringType(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -361,7 +361,7 @@ func TestGetCondition_DuplicateConditionTypes(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)
@@ -398,7 +398,7 @@ func TestGetCondition_ReturnedDictIsMutable(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		observed,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatal(err)

@@ -43,6 +43,7 @@ func BuildGlobals(
 	connCollector *ConnectionCollector,
 	reqCollector *RequirementsCollector,
 	ttlCollector *TTLCollector,
+	observed *convert.StarlarkDict,
 ) (starlark.StringDict, error) {
 	// Build oxr (frozen) from observed composite.
 	oxr, err := convert.StructToStarlark(req.GetObserved().GetComposite().GetResource(), true)
@@ -54,12 +55,6 @@ func BuildGlobals(
 	dxr, err := convert.StructToStarlark(req.GetDesired().GetComposite().GetResource(), false)
 	if err != nil {
 		return nil, fmt.Errorf("building dxr: %w", err)
-	}
-
-	// Build observed composed resources dict (frozen).
-	observed, err := buildObservedDict(req)
-	if err != nil {
-		return nil, fmt.Errorf("building observed: %w", err)
 	}
 
 	// Build pipeline context (mutable plain dict).
@@ -132,9 +127,9 @@ func BuildGlobals(
 	}, nil
 }
 
-// buildObservedDict creates a frozen StarlarkDict of frozen StarlarkDicts
+// BuildObservedDict creates a frozen StarlarkDict of frozen StarlarkDicts
 // from the observed composed resources in the request.
-func buildObservedDict(req *fnv1.RunFunctionRequest) (*convert.StarlarkDict, error) {
+func BuildObservedDict(req *fnv1.RunFunctionRequest) (*convert.StarlarkDict, error) {
 	resources := req.GetObserved().GetResources()
 	observed := convert.NewStarlarkDict(len(resources))
 	for name, r := range resources {

@@ -43,7 +43,7 @@ import (
 func runDictScript(t *testing.T, src string) starlark.StringDict {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -63,7 +63,7 @@ func runDictScript(t *testing.T, src string) starlark.StringDict {
 func runDictScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 	t.Helper()
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -84,7 +84,7 @@ func runDictScriptExpectError(t *testing.T, src string, wantErrSubstr string) {
 
 func TestBuildGlobals_DictModule(t *testing.T) {
 	req := makeReq(nil, nil, nil)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestDict_MergeWithStarlarkDict(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
@@ -571,7 +571,7 @@ func TestDict_CrossType(t *testing.T) {
 		map[string]*structpb.Value{"apiVersion": structpb.NewStringValue("v1")},
 		nil,
 	)
-	c := NewCollector(NewConditionCollector(), "test.star", nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	globals, err := testBuildGlobals(req, c)
 	if err != nil {
 		t.Fatalf("testBuildGlobals error: %v", err)
