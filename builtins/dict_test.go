@@ -630,6 +630,167 @@ has_kind = "kind" in omitted
 }
 
 // ---------------------------------------------------------------------------
+// Phase 36 Plan 01 — Recursive dict.compact tests
+// ---------------------------------------------------------------------------
+
+// TestDict_CompactRecursive tests DICT-01: recursive None pruning at any depth.
+func TestDict_CompactRecursive(t *testing.T) {
+	// Nested dict with None at depth 2.
+	out := runDictScript(t, `
+result = dict.compact({"a": {"b": None, "c": 1}})
+c_val = result["a"]["c"]
+has_b = "b" in result["a"]
+`)
+	assertInt(t, out, "c_val", 1)
+	assertBool(t, out, "has_b", false)
+
+	// Depth-3 pruning.
+	out = runDictScript(t, `
+result = dict.compact({"a": {"b": {"c": None, "d": 2}}})
+d_val = result["a"]["b"]["d"]
+has_c = "c" in result["a"]["b"]
+`)
+	assertInt(t, out, "d_val", 2)
+	assertBool(t, out, "has_c", false)
+
+	// Dict inside a list has its None entries pruned.
+	out = runDictScript(t, `
+result = dict.compact({"a": [{"b": None, "c": 1}]})
+c_val = result["a"][0]["c"]
+has_b = "b" in result["a"][0]
+`)
+	assertInt(t, out, "c_val", 1)
+	assertBool(t, out, "has_b", false)
+
+	// Dict inside nested lists (list of lists) has its None entries pruned.
+	out = runDictScript(t, `
+result = dict.compact({"a": [[{"b": None, "c": 1}]]})
+c_val = result["a"][0][0]["c"]
+has_b = "b" in result["a"][0][0]
+`)
+	assertInt(t, out, "c_val", 1)
+	assertBool(t, out, "has_b", false)
+
+	// None elements inside lists are NOT removed (index safety).
+	out = runDictScript(t, `
+result = dict.compact({"a": [None, 1, None, 2]})
+length = len(result["a"])
+first_none = result["a"][0] == None
+second_val = result["a"][1]
+third_none = result["a"][2] == None
+fourth_val = result["a"][3]
+`)
+	assertInt(t, out, "length", 4)
+	assertBool(t, out, "first_none", true)
+	assertInt(t, out, "second_val", 1)
+	assertBool(t, out, "third_none", true)
+	assertInt(t, out, "fourth_val", 2)
+
+	// Tuple containing a dict with None passes through untouched (immutable).
+	out = runDictScript(t, `
+result = dict.compact({"a": ({"b": None},)})
+inner = result["a"][0]
+has_b = "b" in inner
+`)
+	assertBool(t, out, "has_b", true)
+
+	// Input dict is not mutated (copy semantics).
+	out = runDictScript(t, `
+original = {"a": {"b": None, "c": 1}}
+result = dict.compact(original)
+orig_has_b = "b" in original["a"]
+result_has_b = "b" in result["a"]
+`)
+	assertBool(t, out, "orig_has_b", true)
+	assertBool(t, out, "result_has_b", false)
+}
+
+// TestDict_CompactPreservesEmpties tests DICT-02: K8s-meaningful empties preserved.
+func TestDict_CompactPreservesEmpties(t *testing.T) {
+	// Empty string, empty list, empty dict at depth 2 survive compaction.
+	out := runDictScript(t, `
+result = dict.compact({"a": {"s": "", "l": [], "d": {}}})
+has_s = "s" in result["a"]
+has_l = "l" in result["a"]
+has_d = "d" in result["a"]
+count = len(result["a"])
+`)
+	assertBool(t, out, "has_s", true)
+	assertBool(t, out, "has_l", true)
+	assertBool(t, out, "has_d", true)
+	assertInt(t, out, "count", 3)
+
+	// Dict that becomes {} after all None values removed is preserved (post-compaction empty).
+	out = runDictScript(t, `
+result = dict.compact({"a": {"b": None, "c": None}})
+has_a = "a" in result
+inner_count = len(result["a"])
+`)
+	assertBool(t, out, "has_a", true)
+	assertInt(t, out, "inner_count", 0)
+
+	// List of dicts that become empty after compaction: [{}, {}].
+	out = runDictScript(t, `
+result = dict.compact({"a": [{"b": None}, {}]})
+length = len(result["a"])
+first_count = len(result["a"][0])
+second_count = len(result["a"][1])
+`)
+	assertInt(t, out, "length", 2)
+	assertInt(t, out, "first_count", 0)
+	assertInt(t, out, "second_count", 0)
+
+	// Deep empties at depth 3 survive.
+	out = runDictScript(t, `
+result = dict.compact({"a": {"b": {"s": "", "l": [], "d": {}}}})
+inner = result["a"]["b"]
+count = len(inner)
+`)
+	assertInt(t, out, "count", 3)
+}
+
+// TestDict_CompactDepthLimit tests DICT-03: recursion depth guard.
+func TestDict_CompactDepthLimit(t *testing.T) {
+	// Dict nested 33 levels deep raises "recursion depth exceeds maximum (32)".
+	runDictScriptExpectError(t, `
+def make_nested(depth):
+    d = {"leaf": True}
+    for _ in range(depth):
+        d = {"a": d}
+    return d
+
+result = dict.compact(make_nested(33))
+`, "recursion depth exceeds maximum")
+
+	// Dict nested 32 levels deep succeeds.
+	out := runDictScript(t, `
+def make_nested(depth):
+    d = {"leaf": True}
+    for _ in range(depth):
+        d = {"a": d}
+    return d
+
+result = dict.compact(make_nested(32))
+ok = True
+`)
+	assertBool(t, out, "ok", true)
+
+	// Alternating dict/list nesting counts toward depth — 33+ levels raises error.
+	runDictScriptExpectError(t, `
+def make_alternating(depth):
+    d = {"leaf": True}
+    for i in range(depth):
+        if i % 2 == 0:
+            d = [d]
+        else:
+            d = {"a": d}
+    return {"root": d}
+
+result = dict.compact(make_alternating(33))
+`, "recursion depth exceeds maximum")
+}
+
+// ---------------------------------------------------------------------------
 // Test assertion helpers
 // ---------------------------------------------------------------------------
 
