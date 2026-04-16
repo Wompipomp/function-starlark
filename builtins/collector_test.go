@@ -2161,3 +2161,305 @@ func TestCollector_RecordSkip_Concurrent(t *testing.T) {
 		t.Errorf("metric delta = %v, want 1", delta)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GATE-01: Resource(when=False, skip_reason="reason") skips resource
+// ---------------------------------------------------------------------------
+
+func TestCollector_WhenFalse_SkipsResource(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate01.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("skip_reason"), starlark.String("not needed")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be None (not ResourceRef).
+	if val != starlark.None {
+		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	}
+
+	// Resource must NOT appear in collected resources.
+	res := c.Resources()
+	if _, ok := res["db"]; ok {
+		t.Error("skipped resource should not appear in Resources()")
+	}
+
+	// recordSkip must have been called — check Warning event.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Skipping resource "db": not needed`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	}
+}
+
+func TestCollector_WhenFalse_SkipsResource_Metrics(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate01-metrics.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	label := "gate01-metrics.star"
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("skip_reason"), starlark.String("disabled")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	if delta != 1 {
+		t.Errorf("metric delta = %v, want 1", delta)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-02: Resource(when=False) without skip_reason -> error
+// ---------------------------------------------------------------------------
+
+func TestCollector_WhenFalse_NoSkipReason_Errors(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+	})
+	if err == nil {
+		t.Fatal("expected error for when=False without skip_reason")
+	}
+	if !strings.Contains(err.Error(), "skip_reason is required when when=False") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason is required when when=False")
+	}
+}
+
+func TestCollector_SkipReason_WithoutWhenFalse_Errors(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("skip_reason"), starlark.String("some reason")},
+	})
+	if err == nil {
+		t.Fatal("expected error for skip_reason without when=False")
+	}
+	if !strings.Contains(err.Error(), "skip_reason requires when=False") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason requires when=False")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-05: Resource(body=None) without preserve_observed -> Warning + skip
+// ---------------------------------------------------------------------------
+
+func TestCollector_BodyNone_NoPreserve_WarnsAndSkips(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be None.
+	if val != starlark.None {
+		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	}
+
+	// Resource must NOT appear in collected resources.
+	res := c.Resources()
+	if _, ok := res["db"]; ok {
+		t.Error("body=None resource should not appear in Resources()")
+	}
+
+	// Warning event must mention body=None risk.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Skipping resource "db": body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-07: when kwarg rejects non-bool values
+// ---------------------------------------------------------------------------
+
+func TestCollector_WhenKwarg_StrictBool_Int(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.MakeInt(1)},
+	})
+	if err == nil {
+		t.Fatal("expected error for when=1 (non-bool)")
+	}
+	if !strings.Contains(err.Error(), "when must be bool, got int") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "when must be bool, got int")
+	}
+}
+
+func TestCollector_WhenKwarg_StrictBool_String(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.String("true")},
+	})
+	if err == nil {
+		t.Fatal("expected error for when=\"true\" (non-bool)")
+	}
+	if !strings.Contains(err.Error(), "when must be bool, got string") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "when must be bool, got string")
+	}
+}
+
+func TestCollector_PreserveObserved_StrictBool_Int(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.MakeInt(1)},
+	})
+	if err == nil {
+		t.Fatal("expected error for preserve_observed=1 (non-bool)")
+	}
+	if !strings.Contains(err.Error(), "preserve_observed must be bool, got int") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "preserve_observed must be bool, got int")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Normal paths: when=True and when omitted must work as before
+// ---------------------------------------------------------------------------
+
+func TestCollector_WhenTrue_NormalPath(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be ResourceRef.
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "bucket" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "bucket")
+	}
+
+	// Resource must appear in collected resources.
+	res := c.Resources()
+	if _, ok := res["bucket"]; !ok {
+		t.Error("when=True resource should appear in Resources()")
+	}
+}
+
+func TestCollector_WhenOmitted_NormalPath(t *testing.T) {
+	// This is implicitly tested by all existing tests but we add an explicit
+	// one for the gate-logic matrix.
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "item" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "item")
+	}
+}
