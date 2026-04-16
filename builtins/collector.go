@@ -208,7 +208,22 @@ func (c *Collector) addDependency(dependent, dependency string, isRef bool, fiel
 	})
 }
 
-// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None) Starlark builtin.
+// validateBoolKwarg validates that a starlark.Value is either nil (omitted) or
+// a starlark.Bool. Returns (isFalse, wasProvided, error). When val is nil
+// (kwarg omitted), returns (false, false, nil).
+func validateBoolKwarg(val starlark.Value, paramName, resourceName string) (bool, bool, error) {
+	if val == nil {
+		return false, false, nil
+	}
+	b, ok := val.(starlark.Bool)
+	if !ok {
+		return false, true, fmt.Errorf("Resource(%q): %s must be bool, got %s",
+			resourceName, paramName, val.Type())
+	}
+	return !bool(b), true, nil
+}
+
+// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None, skip_reason="", preserve_observed=None) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -222,15 +237,66 @@ func (c *Collector) resourceFn(
 	var readyVal starlark.Value = starlark.None
 	var labelsVal starlark.Value
 	var externalNameVal starlark.Value
+	var whenVal starlark.Value
+	var skipReason string
+	var preserveVal starlark.Value
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"name", &name, "body", &bodyVal, "ready?", &readyVal,
 		"labels?", &labelsVal,
 		"connection_details??", &connDetails,
 		"depends_on??", &dependsOn,
-		"external_name??", &externalNameVal); err != nil {
+		"external_name??", &externalNameVal,
+		"when?", &whenVal,
+		"skip_reason?", &skipReason,
+		"preserve_observed?", &preserveVal); err != nil {
 		return nil, err
 	}
+
+	// --- Gate logic: evaluate when, preserve_observed, skip_reason BEFORE body type-switch ---
+
+	whenFalse, _, err := validateBoolKwarg(whenVal, "when", name)
+	if err != nil {
+		return nil, err
+	}
+
+	_, preserveProvided, err := validateBoolKwarg(preserveVal, "preserve_observed", name)
+	if err != nil {
+		return nil, err
+	}
+	preserveActive := preserveProvided && preserveVal == starlark.True
+
+	// Validate skip_reason constraints.
+	if skipReason != "" && !whenFalse {
+		return nil, fmt.Errorf("Resource(%q): skip_reason requires when=False", name)
+	}
+	if whenFalse && !preserveActive && skipReason == "" {
+		return nil, fmt.Errorf("Resource(%q): skip_reason is required when when=False", name)
+	}
+
+	// GATE-01: when=False without preserve -> skip.
+	if whenFalse && !preserveActive {
+		c.recordSkip(name, skipReason)
+		return starlark.None, nil
+	}
+
+	// when=False + preserve_observed=True: TODO — preserve path handled in Plan 02.
+	if whenFalse && preserveActive {
+		return nil, fmt.Errorf("Resource(%q): when=False with preserve_observed=True is not yet implemented", name)
+	}
+
+	// GATE-05: body=None without preserve -> warn and skip.
+	if bodyVal == starlark.None && !preserveActive {
+		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.")
+		return starlark.None, nil
+	}
+
+	// body=None + preserve_observed=True: TODO — preserve path handled in Plan 02.
+	if bodyVal == starlark.None && preserveActive {
+		return nil, fmt.Errorf("Resource(%q): body=None with preserve_observed=True is not yet implemented", name)
+	}
+
+	// --- Normal body processing path (when=True or when omitted, body is dict) ---
 
 	var body *starlark.Dict
 	switch v := bodyVal.(type) {
