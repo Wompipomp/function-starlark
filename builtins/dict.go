@@ -304,7 +304,7 @@ func compactList(fnName string, l *starlark.List, depth int) (starlark.Value, bo
 	n := l.Len()
 	elems := make([]starlark.Value, n)
 	changed := false
-	for i := 0; i < n; i++ {
+	for i := range n {
 		elem := l.Index(i)
 		compacted, elemChanged, err := compactValue(fnName, elem, depth+1)
 		if err != nil {
