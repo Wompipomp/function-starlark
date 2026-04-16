@@ -2463,3 +2463,617 @@ func TestCollector_WhenOmitted_NormalPath(t *testing.T) {
 		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "item")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// makeObservedDict builds a frozen *convert.StarlarkDict containing the named
+// resources. Each entry maps name -> *convert.StarlarkDict with the given
+// key/value pairs. This mirrors how the runtime presents observed composed
+// resources.
+// ---------------------------------------------------------------------------
+
+func makeObservedDict(t *testing.T, entries map[string]map[string]string) *convert.StarlarkDict {
+	t.Helper()
+	obs := convert.NewStarlarkDict(len(entries))
+	for name, fields := range entries {
+		inner := convert.NewStarlarkDict(len(fields))
+		for k, v := range fields {
+			if err := inner.SetKey(starlark.String(k), starlark.String(v)); err != nil {
+				t.Fatalf("inner.SetKey(%q): %v", k, err)
+			}
+		}
+		inner.Freeze()
+		if err := obs.SetKey(starlark.String(name), inner); err != nil {
+			t.Fatalf("obs.SetKey(%q): %v", name, err)
+		}
+	}
+	obs.Freeze()
+	return obs
+}
+
+// ---------------------------------------------------------------------------
+// GATE-03: Resource(body=None, preserve_observed=True) with resource in
+// observed state -> emits observed body verbatim.
+// ---------------------------------------------------------------------------
+
+func TestCollector_PreserveObserved_BodyNone_Found(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"db": {"apiVersion": "v1", "kind": "Database"},
+	})
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate03.star", nil, observed)
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be ResourceRef.
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "db" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "db")
+	}
+
+	// Resource must appear in collected resources with observed body.
+	res := c.Resources()
+	cr, ok := res["db"]
+	if !ok {
+		t.Fatal("preserved resource should appear in Resources()")
+	}
+	if cr.Body == nil {
+		t.Fatal("preserved resource body is nil")
+	}
+	if got := cr.Body.GetFields()["apiVersion"].GetStringValue(); got != "v1" {
+		t.Errorf("body.apiVersion = %q, want %q", got, "v1")
+	}
+	if got := cr.Body.GetFields()["kind"].GetStringValue(); got != "Database" {
+		t.Errorf("body.kind = %q, want %q", got, "Database")
+	}
+
+	// Ready must be ReadyUnspecified.
+	if cr.Ready != resource.ReadyUnspecified {
+		t.Errorf("Ready = %v, want ReadyUnspecified", cr.Ready)
+	}
+
+	// Warning event must use exact preserve message.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Preserving resource "db": body=None, emitting observed body`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-04: Resource(body=None, preserve_observed=True) with resource NOT in
+// observed state -> skip with Warning.
+// ---------------------------------------------------------------------------
+
+func TestCollector_PreserveObserved_BodyNone_NotFound(t *testing.T) {
+	// Observed dict exists but does NOT contain "db".
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"other": {"kind": "Bucket"},
+	})
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate04.star", nil, observed)
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be None (not ResourceRef).
+	if val != starlark.None {
+		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	}
+
+	// Resource must NOT appear in collected resources.
+	res := c.Resources()
+	if _, ok := res["db"]; ok {
+		t.Error("not-found preserve resource should not appear in Resources()")
+	}
+
+	// Warning event must use "not found in observed state" message.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Skipping resource "db": not found in observed state`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+// GATE-04 (nil observed): Resource(body=None, preserve_observed=True) with
+// c.observed == nil -> same as not-found.
+func TestCollector_PreserveObserved_BodyNone_NilObserved(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate04-nil.star", nil, nil) // nil observed
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	if val != starlark.None {
+		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	}
+
+	res := c.Resources()
+	if _, ok := res["db"]; ok {
+		t.Error("nil-observed preserve resource should not appear in Resources()")
+	}
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Skipping resource "db": not found in observed state`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-06: Resource(body=dict, preserve_observed=True) -> normal path
+// (preserve_observed is dormant, body processed normally with injection).
+// ---------------------------------------------------------------------------
+
+func TestCollector_PreserveObserved_Dormant_BodyProvided(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"db": {"apiVersion": "observed-v1"},
+	})
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate06.star", nil, observed)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be ResourceRef (normal path).
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "db" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "db")
+	}
+
+	// Resource must have the dict body (NOT observed body).
+	res := c.Resources()
+	cr, ok := res["db"]
+	if !ok {
+		t.Fatal("dormant preserve resource should appear in Resources()")
+	}
+	if got := cr.Body.GetFields()["apiVersion"].GetStringValue(); got != "v1" {
+		t.Errorf("body.apiVersion = %q, want %q (should be dict body, not observed)", got, "v1")
+	}
+
+	// ResourceNameLabel must be injected (normal path).
+	md := cr.Body.GetFields()["metadata"]
+	if md == nil {
+		t.Fatal("metadata should be present on normal path")
+	}
+	labels := md.GetStructValue().GetFields()["labels"]
+	if labels == nil {
+		t.Fatal("metadata.labels should be present on normal path")
+	}
+	if got := labels.GetStructValue().GetFields()[ResourceNameLabel].GetStringValue(); got != "db" {
+		t.Errorf("ResourceNameLabel = %q, want %q", got, "db")
+	}
+
+	// No preservation Warning events expected (dormant preserve).
+	events := cc.Events()
+	if len(events) != 0 {
+		t.Errorf("Events() len = %d, want 0 (dormant preserve should emit no warnings)", len(events))
+	}
+}
+
+// GATE-06 (when=False dormant): Resource(body=dict, when=True, preserve_observed=True) -> normal path.
+func TestCollector_PreserveObserved_Dormant_WhenTrue(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate06-when.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("item"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.True},
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "item" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "item")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-08: Preserved body has NO ResourceNameLabel, NO crossplane traceability
+// labels injected, NO external_name annotation added.
+// ---------------------------------------------------------------------------
+
+func TestCollector_PreserveObserved_NoLabelInjection(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"db": {"apiVersion": "v1", "kind": "Database"},
+	})
+	cc := NewConditionCollector()
+	// Provide OXR with crossplane labels to verify they are NOT injected.
+	oxr := &structpb.Struct{Fields: map[string]*structpb.Value{
+		"metadata": structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+			"name": structpb.NewStringValue("my-composite"),
+		}}),
+	}}
+	c := NewCollector(cc, "gate08.star", oxr, observed)
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "db" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "db")
+	}
+
+	res := c.Resources()
+	cr := res["db"]
+
+	// Preserved body should only have the original fields from observed.
+	// No metadata.labels injection.
+	if md := cr.Body.GetFields()["metadata"]; md != nil {
+		if mdStruct := md.GetStructValue(); mdStruct != nil {
+			if lbls := mdStruct.GetFields()["labels"]; lbls != nil {
+				lblStruct := lbls.GetStructValue()
+				if lblStruct != nil {
+					// Check NO ResourceNameLabel.
+					if _, ok := lblStruct.GetFields()[ResourceNameLabel]; ok {
+						t.Errorf("preserved body should NOT have %s label", ResourceNameLabel)
+					}
+					// Check NO crossplane.io/composite label.
+					if _, ok := lblStruct.GetFields()[labelComposite]; ok {
+						t.Errorf("preserved body should NOT have %s label", labelComposite)
+					}
+				}
+			}
+		}
+	}
+
+	// Preserved body should have exactly the observed fields and nothing else.
+	bodyFields := cr.Body.GetFields()
+	if _, ok := bodyFields["apiVersion"]; !ok {
+		t.Error("preserved body should have apiVersion from observed")
+	}
+	if _, ok := bodyFields["kind"]; !ok {
+		t.Error("preserved body should have kind from observed")
+	}
+	// Metadata should NOT exist (it wasn't in observed).
+	if _, ok := bodyFields["metadata"]; ok {
+		t.Error("preserved body should NOT have metadata (was not in observed)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GATE-09: Observed body is *convert.StarlarkDict, converted via
+// convert.StarlarkToStruct internally.
+// ---------------------------------------------------------------------------
+
+func TestCollector_PreserveObserved_StarlarkDictConversion(t *testing.T) {
+	// Build observed with nested dict to verify StarlarkToStruct handles it.
+	obs := convert.NewStarlarkDict(1)
+	inner := convert.NewStarlarkDict(2)
+	_ = inner.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	// Add nested spec dict to exercise StarlarkToStruct recursion.
+	spec := convert.NewStarlarkDict(1)
+	_ = spec.SetKey(starlark.String("region"), starlark.String("us-east-1"))
+	spec.Freeze()
+	_ = inner.SetKey(starlark.String("spec"), spec)
+	inner.Freeze()
+	_ = obs.SetKey(starlark.String("db"), inner)
+	obs.Freeze()
+
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "gate09.star", nil, obs)
+	thread := new(starlark.Thread)
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "db" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "db")
+	}
+
+	// Verify nested struct conversion.
+	res := c.Resources()
+	cr := res["db"]
+	specField := cr.Body.GetFields()["spec"]
+	if specField == nil {
+		t.Fatal("preserved body should have spec field from observed")
+	}
+	specStruct := specField.GetStructValue()
+	if specStruct == nil {
+		t.Fatal("spec should be a struct")
+	}
+	if got := specStruct.GetFields()["region"].GetStringValue(); got != "us-east-1" {
+		t.Errorf("spec.region = %q, want %q", got, "us-east-1")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cliff guard: Resource(when=False, preserve_observed=True) with resource in
+// observed state -> emit observed body.
+// ---------------------------------------------------------------------------
+
+func TestCollector_WhenFalse_PreserveObserved_Found(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"db": {"apiVersion": "v1", "kind": "Database"},
+	})
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "cliff.star", nil, observed)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("skip_reason"), starlark.String("optional")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be ResourceRef.
+	ref, ok := val.(*ResourceRef)
+	if !ok {
+		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
+	}
+	if ref.name != "db" {
+		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "db")
+	}
+
+	// Resource must appear with observed body (NOT the dict body arg).
+	res := c.Resources()
+	cr, ok := res["db"]
+	if !ok {
+		t.Fatal("cliff guard resource should appear in Resources()")
+	}
+	if got := cr.Body.GetFields()["apiVersion"].GetStringValue(); got != "v1" {
+		t.Errorf("body.apiVersion = %q, want %q (should be observed body)", got, "v1")
+	}
+	if got := cr.Body.GetFields()["kind"].GetStringValue(); got != "Database" {
+		t.Errorf("body.kind = %q, want %q (should be observed body)", got, "Database")
+	}
+
+	// Ready must be ReadyUnspecified.
+	if cr.Ready != resource.ReadyUnspecified {
+		t.Errorf("Ready = %v, want ReadyUnspecified", cr.Ready)
+	}
+
+	// Warning event for cliff guard.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Preserving resource "db": observed body emitted, gated by when=False`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+// Cliff guard: Resource(when=False, preserve_observed=True) with resource NOT
+// in observed state -> skip.
+func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"other": {"kind": "Bucket"},
+	})
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "cliff-skip.star", nil, observed)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be None.
+	if val != starlark.None {
+		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	}
+
+	// Resource must NOT appear.
+	res := c.Resources()
+	if _, ok := res["db"]; ok {
+		t.Error("not-found cliff guard resource should not appear in Resources()")
+	}
+
+	// Warning event for cliff guard skip.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Skipping resource "db": gated by when=False, not found in observed state (preserve_observed=True)`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+// Cliff guard with user-provided skip_reason: used as message when not found.
+func TestCollector_WhenFalse_PreserveObserved_NotFound_CustomReason(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "cliff-reason.star", nil, nil) // nil observed
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("skip_reason"), starlark.String("feature disabled")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	if val != starlark.None {
+		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	}
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	// User-provided skip_reason should be used.
+	wantMsg := `Skipping resource "db": feature disabled`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+}
+
+// Preservation is NOT a skip — c.skipped should NOT be set.
+func TestCollector_PreserveObserved_NotInSkipped(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"db": {"apiVersion": "v1"},
+	})
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "preserve-not-skip.star", nil, observed)
+	thread := new(starlark.Thread)
+
+	// First preserve the resource.
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Verify db is NOT in skipped (so a subsequent Resource() call can still succeed).
+	c.mu.Lock()
+	isSkipped := c.skipped["db"]
+	c.mu.Unlock()
+	if isSkipped {
+		t.Error("preserved resource should NOT be marked as skipped")
+	}
+
+	// Verify resource IS in resources.
+	res := c.Resources()
+	if _, ok := res["db"]; !ok {
+		t.Error("preserved resource should appear in Resources()")
+	}
+}
+
+// Preservation skip metric: preserved resources should NOT increment
+// ResourcesSkippedTotal metric.
+func TestCollector_PreserveObserved_NoSkipMetric(t *testing.T) {
+	observed := makeObservedDict(t, map[string]map[string]string{
+		"db": {"apiVersion": "v1"},
+	})
+	cc := NewConditionCollector()
+	label := "preserve-metric.star"
+	c := NewCollector(cc, label, nil, observed)
+	thread := new(starlark.Thread)
+
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		starlark.None,
+	}, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	if delta != 0 {
+		t.Errorf("metric delta = %v, want 0 (preservation is not a skip)", delta)
+	}
+}
