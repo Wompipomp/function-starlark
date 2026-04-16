@@ -2018,3 +2018,146 @@ func TestCollector_Labels_InvalidType(t *testing.T) {
 		t.Errorf("error = %q, should contain 'labels must be dict or None, got int'", err.Error())
 	}
 }
+
+// --- recordSkip tests ---
+
+func TestCollector_RecordSkip_Basic(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	label := "test.star"
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	c.recordSkip("my-resource", "not needed")
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	}
+	wantMsg := `Skipping resource "my-resource": not needed`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
+	}
+	if events[0].Target != "Composite" {
+		t.Errorf("event target = %q, want %q", events[0].Target, "Composite")
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	if delta != 1 {
+		t.Errorf("metric delta = %v, want 1", delta)
+	}
+}
+
+func TestCollector_RecordSkip_Dedup(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "recordskip-dedup.star", nil, nil)
+
+	label := "recordskip-dedup.star"
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	c.recordSkip("x", "r1")
+	c.recordSkip("x", "r2")
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event after dedup, got %d", len(events))
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	if delta != 1 {
+		t.Errorf("metric delta = %v, want 1 (dedup)", delta)
+	}
+}
+
+func TestCollector_RecordSkip_DifferentNames(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "recordskip-diff.star", nil, nil)
+
+	label := "recordskip-diff.star"
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	c.recordSkip("a", "r1")
+	c.recordSkip("b", "r2")
+
+	events := cc.Events()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	if delta != 2 {
+		t.Errorf("metric delta = %v, want 2", delta)
+	}
+}
+
+func TestCollector_RecordSkip_EventParity(t *testing.T) {
+	cc := NewConditionCollector()
+	// Collector A: test recordSkip directly.
+	cA := NewCollector(cc, "parity.star", nil, nil)
+	cA.recordSkip("x", "some reason")
+
+	// Collector B: test via skip_resource builtin.
+	cB := NewCollector(cc, "parity.star", nil, nil)
+	thread := new(starlark.Thread)
+	_, err := starlark.Call(thread, cB.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("y"),
+		starlark.String("some reason"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource error: %v", err)
+	}
+
+	events := cc.Events()
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+
+	// Both events must have same structure (only name differs).
+	for i, e := range events {
+		if e.Severity != "Warning" {
+			t.Errorf("event[%d] severity = %q, want %q", i, e.Severity, "Warning")
+		}
+		if e.Target != "Composite" {
+			t.Errorf("event[%d] target = %q, want %q", i, e.Target, "Composite")
+		}
+	}
+	wantA := `Skipping resource "x": some reason`
+	if events[0].Message != wantA {
+		t.Errorf("event[0] message = %q, want %q", events[0].Message, wantA)
+	}
+	wantB := `Skipping resource "y": some reason`
+	if events[1].Message != wantB {
+		t.Errorf("event[1] message = %q, want %q", events[1].Message, wantB)
+	}
+}
+
+func TestCollector_RecordSkip_Concurrent(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "recordskip-concurrent.star", nil, nil)
+
+	label := "recordskip-concurrent.star"
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.recordSkip("shared", "reason")
+		}()
+	}
+	wg.Wait()
+
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Errorf("expected exactly 1 event after concurrent dedup, got %d", len(events))
+	}
+
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	if delta != 1 {
+		t.Errorf("metric delta = %v, want 1", delta)
+	}
+}
