@@ -134,6 +134,9 @@ else
 fi
 
 # Check status fields set by set_xr_status()
+# Builtins count: 34 predeclared names (v1.9 adds dict.compact as module member
+# and when/skip_reason/preserve_observed as Resource() kwargs -- none are new
+# predeclared names, so count stays 34)
 builtins_count=$(get_status_field "xtest/test-builtins" "test.builtinsCount")
 if [ "$builtins_count" = "34" ]; then
     pass "builtins: set_xr_status() wrote builtinsCount=34"
@@ -219,6 +222,59 @@ else
     else
         fail "builtins: no Usage resources found"
     fi
+fi
+
+# dict.compact recursive tests
+compact_pruned=$(get_status_field "xtest/test-builtins" "test.compactNestedPruned")
+if [ "$compact_pruned" = "true" ]; then
+    pass "compact: nested None pruned"
+else
+    fail "compact: nested None not pruned (got '$compact_pruned')"
+fi
+
+compact_kept=$(get_status_field "xtest/test-builtins" "test.compactNestedKept")
+if [ "$compact_kept" = "1" ]; then
+    pass "compact: nested non-None kept"
+else
+    fail "compact: nested non-None not kept (got '$compact_kept')"
+fi
+
+compact_list=$(get_status_field "xtest/test-builtins" "test.compactListDictPruned")
+if [ "$compact_list" = "true" ]; then
+    pass "compact: None in list-nested dict pruned"
+else
+    fail "compact: None in list-nested dict not pruned (got '$compact_list')"
+fi
+
+compact_empty=$(get_status_field "xtest/test-builtins" "test.compactEmptyPreserved")
+if [ "$compact_empty" = "true" ]; then
+    pass "compact: K8s empties preserved (empty string/list/dict)"
+else
+    fail "compact: K8s empties not preserved (got '$compact_empty')"
+fi
+
+# when=False gating tests
+# Check gated resource is absent
+composed=$(kubectl get nopresource -l crossplane.io/composite=test-builtins -o name 2>/dev/null || echo "")
+if echo "$composed" | grep -q "gated-resource"; then
+    fail "gating: gated-resource should have been skipped"
+else
+    pass "gating: gated-resource correctly skipped"
+fi
+
+# Check Warning event containing skip reason
+events=$(kubectl get events --field-selector involvedObject.name=test-builtins -o jsonpath='{.items[*].message}' 2>/dev/null || echo "")
+if echo "$events" | grep -q "Skipping"; then
+    pass "gating: Warning event emitted for skipped resource"
+else
+    fail "gating: no Warning event with 'Skipping' found"
+fi
+
+gated_status=$(get_status_field "xtest/test-builtins" "test.gatedSkipped")
+if [ "$gated_status" = "true" ]; then
+    pass "gating: set_xr_status confirmed gating executed"
+else
+    fail "gating: gated test status='$gated_status' (expected true)"
 fi
 
 # ============================================================
