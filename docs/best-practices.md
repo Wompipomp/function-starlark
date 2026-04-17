@@ -581,6 +581,100 @@ else:
 duration strings (`"30s"`, `"5m"`) or int seconds. Last call wins if called
 multiple times.
 
+## v1.9 patterns
+
+### Pattern: Optional fields with dict.compact
+
+Replace manual None-guarding with recursive `dict.compact`. Set optional fields
+to `None` and let compact prune them at any depth.
+
+```python
+# Before: manual None-guarding
+spec = {
+    "replicas": replicas,
+}
+if annotations:
+    spec["metadata"] = {"annotations": annotations}
+if volumes:
+    spec["template"] = {"spec": {"volumes": volumes}}
+
+# After: recursive dict.compact
+spec = dict.compact({
+    "replicas": replicas,
+    "metadata": {
+        "annotations": annotations if annotations else None,
+    },
+    "template": {
+        "spec": {
+            "volumes": volumes if volumes else None,
+        },
+    },
+})
+```
+
+Empty strings, lists, and dicts are preserved -- these carry intent in
+Kubernetes manifests (e.g., `resources: {}` means "no limits", not "omit the
+field"). See [builtins reference](builtins-reference.md#dictcompact) for the
+full signature and behavior details.
+
+### Pattern: Gated / preservable resources
+
+Three progressive patterns for controlling resource emission declaratively,
+from simple conditional skipping to cliff-guard preservation.
+
+**(a) Simple conditional emission with when/skip_reason:**
+
+Skip a resource when a feature is disabled. Replaces wrapping `Resource()` in
+`if/else` blocks with `skip_resource()`:
+
+```python
+# Skip resource when feature is disabled
+feature_enabled = get(oxr, "spec.features.monitoring", False)
+Resource("monitoring-stack", monitoring_body,
+    when=feature_enabled, skip_reason="monitoring disabled in spec")
+```
+
+**(b) Cliff guard with preserve_observed:**
+
+When config comes from an extra resource that may not exist on the first
+reconciliation (e.g., Azure connection config), use `preserve_observed` to keep
+the resource alive while the config source is temporarily unavailable:
+
+```python
+# Extra resource may not exist on first reconciliation
+azure_config = get_extra_resource("azure-conn", "data.config", None)
+body = {
+    "apiVersion": "nop.crossplane.io/v1alpha1",
+    "kind": "NopResource",
+    "spec": {"forProvider": {"config": azure_config}},
+} if azure_config else None
+
+Resource("azure-dep", body, preserve_observed=True)
+# First reconcile (no extra resource yet): body=None, emits observed body if it
+#   exists, skips if not
+# Subsequent reconciles: body=dict, emitted normally (preserve_observed is a no-op)
+```
+
+**(c) Combined: when + preserve_observed:**
+
+Gate on an explicit toggle while also preserving the observed body when config
+is absent:
+
+```python
+# Gate + preserve: skip when explicitly disabled, preserve observed when body absent
+enabled = get(oxr, "spec.features.cache", True)
+cache_config = get(oxr, "spec.cacheConfig", None)
+body = build_cache(cache_config) if cache_config else None
+
+Resource("cache", body,
+    when=enabled, skip_reason="cache disabled",
+    preserve_observed=True)
+```
+
+See [builtins reference](builtins-reference.md#resource) for the full behavior
+state table covering all combinations of `when`, `body`, and
+`preserve_observed`.
+
 ## See also
 
 - [Builtins reference](builtins-reference.md) -- complete function signatures
