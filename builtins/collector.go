@@ -374,6 +374,15 @@ func (c *Collector) resourceFn(
 		return nil, fmt.Errorf("Resource(%q): body must be dict, got %s", name, bodyVal.Type())
 	}
 
+	// Auto-compact: strip None-valued entries from body recursively.
+	// This lets users write optional fields as `"key": value if cond else None`
+	// without needing to manually wrap with dict.compact().
+	compacted, _, err := compactValue("Resource", body, 0)
+	if err != nil {
+		return nil, fmt.Errorf("Resource(%q): compact: %w", name, err)
+	}
+	body = compacted.(*starlark.Dict)
+
 	s, err := convert.PlainDictToStruct(body)
 	if err != nil {
 		return nil, fmt.Errorf("Resource(%q): %w", name, err)
