@@ -790,6 +790,74 @@ result = dict.compact(make_alternating(33))
 `, "recursion depth exceeds maximum")
 }
 
+// TestDict_CompactNoOpAliasesInput verifies the copy-on-change optimization:
+// when nothing is pruned, compactValue returns the original dict/list pointer
+// rather than an unnecessary copy. Protects against regressing the lazy
+// allocation in compactDict/compactList.
+func TestDict_CompactNoOpAliasesInput(t *testing.T) {
+	// Dict with no None anywhere: compactDict should return the input pointer.
+	inner := new(starlark.Dict)
+	_ = inner.SetKey(starlark.String("b"), starlark.MakeInt(1))
+	_ = inner.SetKey(starlark.String("c"), starlark.MakeInt(2))
+
+	got, changed, err := compactValue("test", inner, 0)
+	if err != nil {
+		t.Fatalf("compactValue error: %v", err)
+	}
+	if changed {
+		t.Errorf("changed = true, want false for no-None dict")
+	}
+	if got != starlark.Value(inner) {
+		t.Errorf("compactValue returned a copy; expected original dict pointer")
+	}
+
+	// Nested dict inside a dict: parent should alias both levels on no-op.
+	outer := new(starlark.Dict)
+	_ = outer.SetKey(starlark.String("a"), inner)
+
+	got, changed, err = compactValue("test", outer, 0)
+	if err != nil {
+		t.Fatalf("compactValue error: %v", err)
+	}
+	if changed {
+		t.Errorf("changed = true, want false for nested no-None dict")
+	}
+	if got != starlark.Value(outer) {
+		t.Errorf("compactValue returned a copy of outer dict; expected original pointer")
+	}
+
+	// List with no dicts needing compaction: compactList should return input list.
+	list := starlark.NewList([]starlark.Value{
+		starlark.MakeInt(1), starlark.MakeInt(2), starlark.MakeInt(3),
+	})
+	got, changed, err = compactValue("test", list, 0)
+	if err != nil {
+		t.Fatalf("compactValue error: %v", err)
+	}
+	if changed {
+		t.Errorf("changed = true, want false for no-op list")
+	}
+	if got != starlark.Value(list) {
+		t.Errorf("compactValue returned a copy of list; expected original pointer")
+	}
+
+	// Dict with a None: must allocate a fresh dict (not alias the input).
+	dirty := new(starlark.Dict)
+	_ = dirty.SetKey(starlark.String("x"), starlark.None)
+	_ = dirty.SetKey(starlark.String("y"), starlark.MakeInt(7))
+
+	got, changed, err = compactValue("test", dirty, 0)
+	if err != nil {
+		t.Fatalf("compactValue error: %v", err)
+	}
+	if !changed {
+		t.Errorf("changed = false, want true when None is pruned")
+	}
+	if got == starlark.Value(dirty) {
+		t.Errorf("compactValue aliased input when it should have allocated a copy")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test assertion helpers
 // ---------------------------------------------------------------------------

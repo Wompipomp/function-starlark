@@ -252,6 +252,10 @@ func dictOmitImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, 
 //   - Everything else (tuples, scalars, None): returned unchanged.
 //
 // Returns (compacted value, whether anything changed, error).
+//
+// Aliasing: on the no-change path, nested containers in the returned value
+// may share pointers with the input. Callers must not mutate the returned
+// value and expect the input to remain untouched.
 func compactValue(fnName string, v starlark.Value, depth int) (starlark.Value, bool, error) {
 	if depth > maxMergeDepth {
 		return nil, false, fmt.Errorf("%s: recursion depth exceeds maximum (%d)", fnName, maxMergeDepth)
@@ -269,17 +273,36 @@ func compactValue(fnName string, v starlark.Value, depth int) (starlark.Value, b
 }
 
 // compactDict prunes None-valued entries from a dict (any supported dict type)
-// and recurses into remaining values. Always returns a new *starlark.Dict.
+// and recurses into remaining values. Allocation is deferred until the first
+// change is observed: if nothing changed and input is a *starlark.Dict, the
+// original is returned and no copy is built. Otherwise a fresh *starlark.Dict
+// is returned.
 func compactDict(fnName string, v starlark.Value, depth int) (starlark.Value, bool, error) {
 	items, err := dictItems(fnName, v)
 	if err != nil {
 		return nil, false, err
 	}
 
-	result := new(starlark.Dict)
+	var result *starlark.Dict
+	// materialize lazily allocates result and backfills entries [0, upTo).
+	materialize := func(upTo int) error {
+		if result != nil {
+			return nil
+		}
+		result = new(starlark.Dict)
+		for _, prev := range items[:upTo] {
+			if err := result.SetKey(prev[0], prev[1]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	changed := false
-	for _, item := range items {
+	for i, item := range items {
 		if item[1] == starlark.None {
+			if err := materialize(i); err != nil {
+				return nil, false, err
+			}
 			changed = true
 			continue
 		}
@@ -288,9 +311,24 @@ func compactDict(fnName string, v starlark.Value, depth int) (starlark.Value, bo
 			return nil, false, err
 		}
 		if childChanged {
+			if err := materialize(i); err != nil {
+				return nil, false, err
+			}
 			changed = true
 		}
-		if err := result.SetKey(item[0], val); err != nil {
+		if result != nil {
+			if err := result.SetKey(item[0], val); err != nil {
+				return nil, false, err
+			}
+		}
+	}
+	if !changed {
+		if d, ok := v.(*starlark.Dict); ok {
+			return d, false, nil
+		}
+		// Input is a non-*starlark.Dict wrapper (StarlarkDict or SchemaDict).
+		// Callers type-assert to *starlark.Dict, so return a plain copy.
+		if err := materialize(len(items)); err != nil {
 			return nil, false, err
 		}
 	}
@@ -299,10 +337,11 @@ func compactDict(fnName string, v starlark.Value, depth int) (starlark.Value, bo
 
 // compactList recurses into list elements to compact any dicts found inside.
 // Never removes elements — None elements in lists pass through unchanged.
-// Uses copy-on-change: if no element changed, returns the original list.
+// Allocation is deferred until the first changed element: if nothing changed,
+// the original list is returned and no copy is built.
 func compactList(fnName string, l *starlark.List, depth int) (starlark.Value, bool, error) {
 	n := l.Len()
-	elems := make([]starlark.Value, n)
+	var elems []starlark.Value
 	changed := false
 	for i := range n {
 		elem := l.Index(i)
@@ -310,9 +349,15 @@ func compactList(fnName string, l *starlark.List, depth int) (starlark.Value, bo
 		if err != nil {
 			return nil, false, err
 		}
-		elems[i] = compacted
-		if elemChanged {
+		if elemChanged && elems == nil {
+			elems = make([]starlark.Value, i, n)
+			for j := range i {
+				elems[j] = l.Index(j)
+			}
 			changed = true
+		}
+		if elems != nil {
+			elems = append(elems, compacted)
 		}
 	}
 	if !changed {
@@ -327,6 +372,10 @@ func compactList(fnName string, l *starlark.List, depth int) (starlark.Value, bo
 // empty lists, and empty dicts are preserved because they can be semantically
 // meaningful in K8s-style manifests (e.g. `spec: {}` is not the same as
 // omitting spec).
+//
+// The top-level returned dict is always freshly allocated. Nested containers
+// may alias the input when the compactor did not modify them; callers should
+// not mutate nested values of the result and expect the input to stay intact.
 //
 // Raises an error if recursion depth exceeds maxMergeDepth (32).
 //
