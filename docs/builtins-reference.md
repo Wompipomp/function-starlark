@@ -196,7 +196,8 @@ protobuf structures for Kubernetes resource access.
 
 ```python
 ref = Resource(name, body, ready=None, labels=<auto>, connection_details=None,
-               depends_on=None, external_name=None)
+               depends_on=None, external_name=None,
+               when=True, skip_reason="", preserve_observed=False)
 ```
 
 Register a desired composed resource. This is the primary function for creating
@@ -213,6 +214,9 @@ Kubernetes resources in a composition.
 | `connection_details` | dict \| None | None | Per-resource connection details (string key-value pairs). |
 | `depends_on` | list \| None | None | List of ResourceRef, string, or `(ref, "field.path")` tuple for creation sequencing. |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
+| `when` | bool | `True` | Gate resource emission. `False` skips the resource (requires `skip_reason`). Only accepts `True` or `False` -- non-bool values raise a type error. |
+| `skip_reason` | string | `""` | Human-readable reason for skipping. Required when `when=False` (without `preserve_observed`). Appears in a Warning event. Cannot be set when `when=True`. |
+| `preserve_observed` | bool | `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. |
 
 **Returns:** ResourceRef with a `.name` attribute (the composition resource
 name). Use in `depends_on` for other resources.
@@ -258,6 +262,43 @@ behavior.
 
 Convenience for setting the `crossplane.io/external-name` annotation. Equivalent
 to setting the annotation in `body.metadata.annotations`.
+
+**when / skip_reason / preserve_observed -- resource gating:**
+
+These three kwargs control conditional resource emission and cliff-guard
+patterns. The `when` gate is evaluated first (before body type-checking), so when
+`when=False` the body kwarg is ignored.
+
+| `when` | `body` | `preserve_observed` | Behavior |
+|--------|--------|---------------------|----------|
+| True/omitted | dict | False/omitted | **Normal:** emit body as desired resource |
+| True/omitted | dict | True | **Normal:** emit body (preserve_observed is a no-op when body is a dict) |
+| True/omitted | None | False/omitted | **Warn + skip:** body is None; warns and skips, message suggests `preserve_observed=True` |
+| True/omitted | None | True | **Preserve:** emit observed body verbatim if found, skip with Warning if not |
+| False | dict/None | False/omitted | **Skip:** `skip_reason` required; resource not emitted; Warning event with skip_reason |
+| False | dict/None | True, found | **Cliff guard (found):** emit observed body verbatim; body kwarg ignored |
+| False | dict/None | True, not found | **Cliff guard (miss):** skip with Warning; body kwarg ignored |
+
+**Events emitted:**
+
+- **Skip paths** (when=False without preserve, or body=None without preserve)
+  emit a Warning event on the composite resource (XR) with the skip reason.
+- **Preserve paths** (preserve_observed=True with observed body found) emit a
+  Normal event noting that the observed body was emitted verbatim.
+- **Cliff guard miss** (preserve_observed=True but resource not found in observed
+  state) emits a Warning event indicating the resource was not found.
+- All events are associated with the XR as the involvedObject.
+
+**Errors:**
+
+- `skip_reason` provided without `when=False` raises an error. The skip_reason
+  kwarg is only valid when the resource is being gated off.
+- `when=False` without `skip_reason` (and without `preserve_observed=True`)
+  raises an error. A reason must be provided when skipping a resource.
+- Non-bool value for `when` raises a type error. Only `True` or `False` are
+  accepted (e.g., `when=1` or `when="yes"` will fail).
+- `body=None` without `preserve_observed=True` is not a fatal error but logs a
+  warning suggesting `preserve_observed=True` and skips the resource.
 
 **Example:**
 
@@ -309,6 +350,15 @@ Resource("iam-binding", {
     "kind": "ProjectIAMMember",
     "spec": {"forProvider": {"project": get(observed, "project.status.atProvider.projectId", "")}},
 }, depends_on=[(project, "status.atProvider.projectId")])
+
+# Conditional emission with gating
+Resource("optional-feature", feature_body,
+    when=feature_enabled, skip_reason="feature disabled by spec")
+
+# Cliff guard: preserve observed resource when config is unavailable
+config = get(oxr, "spec.externalConfig", None)
+body = build_resource(config) if config else None
+Resource("external-dep", body, preserve_observed=True)
 ```
 
 ---
