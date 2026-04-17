@@ -52,7 +52,7 @@ composite resource model.
 | `json` | encode, decode, encode_indent, indent | JSON encoding/decoding (from go.starlark.net/lib/json) |
 | `crypto` | sha256, sha512, sha1, md5, hmac_sha256, blake3, stable_id | Hashing, HMAC, and deterministic IDs |
 | `encoding` | b64enc, b64dec, b64url_enc, b64url_dec, b32enc, b32dec, hex_enc, hex_dec | Base64, base32, and hex encoding |
-| `dict` | merge, deep_merge, pick, omit, dig, has_path | Dict merge, subset, and path operations |
+| `dict` | merge, deep_merge, pick, omit, compact, dig, has_path | Dict merge, subset, compact, and path operations |
 | `regex` | match, find, find_all, find_groups, replace, replace_all, split | RE2 regular expressions |
 | `yaml` | encode, decode, decode_stream | K8s-compatible YAML (via sigs.k8s.io/yaml) |
 
@@ -1846,6 +1846,63 @@ are silently ignored.
 resource = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {}, "data": {}}
 dict.omit(resource, ["metadata"])
 # {"apiVersion": "v1", "kind": "ConfigMap", "data": {}}
+```
+
+---
+
+#### dict.compact
+
+```python
+dict.compact(d)
+```
+
+Recursively removes None-valued entries from a dict at any nesting depth.
+Recurses into nested dicts and lists. Tuples pass through untouched (immutable).
+None elements in lists are NOT removed (index safety). Returns a new dict without
+mutating the input.
+
+**K8s safety:** Empty strings, lists, and dicts are preserved at all depths --
+these carry intent in Kubernetes manifests (e.g., `resources: {}` means "no
+limits", not "omit the field").
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `d` | dict | required | Dict to compact. Nested dicts and dicts within lists are recursively compacted. |
+
+**Returns:** New dict with all None values removed at every nesting depth.
+
+**Errors:** Fails if recursion depth exceeds 32 levels.
+
+**Example:**
+
+```python
+# Prune optional fields from a Deployment spec
+deploy = dict.compact({
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "name": "my-app",
+        "annotations": annotations if annotations else None,
+    },
+    "spec": {
+        "replicas": replicas,
+        "template": {
+            "spec": {
+                "initContainers": init_containers if init_containers else None,
+                "containers": [{
+                    "name": "app",
+                    "image": image,
+                    "volumeMounts": volume_mounts if volume_mounts else None,
+                }],
+                "volumes": volumes if volumes else None,
+            },
+        },
+    },
+})
+# If annotations=None, initContainers=None, volumes=None:
+# Those keys are removed. Empty strings/lists/dicts survive.
 ```
 
 ---
