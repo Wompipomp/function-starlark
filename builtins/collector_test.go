@@ -13,6 +13,7 @@ import (
 
 	"github.com/wompipomp/function-starlark/convert"
 	"github.com/wompipomp/function-starlark/metrics"
+	"github.com/wompipomp/function-starlark/schema"
 )
 
 func TestNewCollector(t *testing.T) {
@@ -3075,5 +3076,162 @@ func TestCollector_PreserveObserved_NoSkipMetric(t *testing.T) {
 	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
 	if delta != 0 {
 		t.Errorf("metric delta = %v, want 0 (preservation is not a skip)", delta)
+	}
+}
+
+func TestCollector_BodyAutoCompact_TopLevel(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = body.SetKey(starlark.String("optional"), starlark.None)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("compact-top"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	cr := c.Resources()["compact-top"]
+	fields := cr.Body.GetFields()
+	if fields["apiVersion"].GetStringValue() != "v1" {
+		t.Errorf("apiVersion = %q, want 'v1'", fields["apiVersion"].GetStringValue())
+	}
+	if _, ok := fields["optional"]; ok {
+		t.Error("expected 'optional' (None) to be stripped from body, but it is present")
+	}
+}
+
+func TestCollector_BodyAutoCompact_Nested(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	inner := new(starlark.Dict)
+	_ = inner.SetKey(starlark.String("field"), starlark.String("val"))
+	_ = inner.SetKey(starlark.String("removed"), starlark.None)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("spec"), inner)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("compact-nested"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	cr := c.Resources()["compact-nested"]
+	spec := cr.Body.GetFields()["spec"].GetStructValue()
+	if spec == nil {
+		t.Fatal("spec is nil")
+	}
+	if spec.GetFields()["field"].GetStringValue() != "val" {
+		t.Errorf("spec.field = %q, want 'val'", spec.GetFields()["field"].GetStringValue())
+	}
+	if _, ok := spec.GetFields()["removed"]; ok {
+		t.Error("expected 'removed' (None) to be stripped from nested dict, but it is present")
+	}
+}
+
+func TestCollector_BodyAutoCompact_ListWithNestedDict(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	elem := new(starlark.Dict)
+	_ = elem.SetKey(starlark.String("a"), starlark.String("b"))
+	_ = elem.SetKey(starlark.String("c"), starlark.None)
+
+	items := starlark.NewList([]starlark.Value{elem})
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("items"), items)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("compact-list"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	cr := c.Resources()["compact-list"]
+	itemsList := cr.Body.GetFields()["items"].GetListValue()
+	if itemsList == nil {
+		t.Fatal("items is nil")
+	}
+	if len(itemsList.GetValues()) != 1 {
+		t.Fatalf("items length = %d, want 1", len(itemsList.GetValues()))
+	}
+	elemStruct := itemsList.GetValues()[0].GetStructValue()
+	if elemStruct == nil {
+		t.Fatal("items[0] is nil")
+	}
+	if elemStruct.GetFields()["a"].GetStringValue() != "b" {
+		t.Errorf("items[0].a = %q, want 'b'", elemStruct.GetFields()["a"].GetStringValue())
+	}
+	if _, ok := elemStruct.GetFields()["c"]; ok {
+		t.Error("expected 'c' (None) to be stripped from list element dict, but it is present")
+	}
+}
+
+func TestCollector_BodyAutoCompact_NoNone(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Service"))
+	_ = body.SetKey(starlark.String("port"), starlark.MakeInt(8080))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("compact-noop"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	cr := c.Resources()["compact-noop"]
+	fields := cr.Body.GetFields()
+	if fields["apiVersion"].GetStringValue() != "v1" {
+		t.Errorf("apiVersion = %q, want 'v1'", fields["apiVersion"].GetStringValue())
+	}
+	if fields["kind"].GetStringValue() != "Service" {
+		t.Errorf("kind = %q, want 'Service'", fields["kind"].GetStringValue())
+	}
+	if fields["port"].GetNumberValue() != 8080 {
+		t.Errorf("port = %v, want 8080", fields["port"].GetNumberValue())
+	}
+}
+
+func TestCollector_BodyAutoCompact_SchemaDict(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	inner := new(starlark.Dict)
+	_ = inner.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+	_ = inner.SetKey(starlark.String("optional"), starlark.None)
+
+	sd := schema.NewSchemaDict(nil, inner)
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("compact-schema"),
+		sd,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	cr := c.Resources()["compact-schema"]
+	fields := cr.Body.GetFields()
+	if fields["apiVersion"].GetStringValue() != "v1" {
+		t.Errorf("apiVersion = %q, want 'v1'", fields["apiVersion"].GetStringValue())
+	}
+	if _, ok := fields["optional"]; ok {
+		t.Error("expected 'optional' (None) to be stripped from SchemaDict body, but it is present")
 	}
 }
