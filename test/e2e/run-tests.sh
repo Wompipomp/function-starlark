@@ -277,6 +277,55 @@ else
     fail "gating: gated test status='$gated_status' (expected true)"
 fi
 
+# --- preserve_observed two-phase reconciliation test ---
+log "Phase 2: Testing preserve_observed with config removal..."
+
+# Phase 1 verification: preservable-resource should exist (created normally with body=dict)
+composed_preserve=$(kubectl get nopresource -l crossplane.io/composite=test-builtins -o name 2>/dev/null || echo "")
+if echo "$composed_preserve" | grep -q "preservable-resource"; then
+    pass "preserve: phase 1 - resource created normally"
+else
+    fail "preserve: phase 1 - preservable-resource not found"
+fi
+
+# Verify config was present on first reconciliation
+preserve_config=$(get_status_field "xtest/test-builtins" "test.preserveConfigPresent")
+if [ "$preserve_config" = "true" ]; then
+    pass "preserve: phase 1 - externalConfig was present"
+else
+    fail "preserve: phase 1 - externalConfig status='$preserve_config' (expected true)"
+fi
+
+# Phase 2: Patch XR to remove externalConfig (triggers re-reconciliation with body=None)
+log "Patching XR to remove externalConfig..."
+kubectl patch xtest/test-builtins --type=json \
+    -p '[{"op":"remove","path":"/spec/externalConfig"}]' 2>/dev/null
+
+# Wait for re-reconciliation -- the XR status field should update
+# Use a polling loop: wait until preserveConfigPresent becomes false (or None)
+log "Waiting for re-reconciliation..."
+for i in $(seq 1 30); do
+    preserve_status=$(get_status_field "xtest/test-builtins" "test.preserveConfigPresent" 2>/dev/null || echo "")
+    if [ "$preserve_status" = "false" ]; then
+        break
+    fi
+    sleep 2
+done
+
+if [ "$preserve_status" = "false" ]; then
+    pass "preserve: phase 2 - re-reconciliation detected (config absent)"
+else
+    fail "preserve: phase 2 - re-reconciliation not detected (status='$preserve_status', expected false)"
+fi
+
+# Phase 2 verification: preservable-resource should STILL exist (observed body re-emitted)
+composed_after=$(kubectl get nopresource -l crossplane.io/composite=test-builtins -o name 2>/dev/null || echo "")
+if echo "$composed_after" | grep -q "preservable-resource"; then
+    pass "preserve: phase 2 - resource preserved after config removal (observed body re-emitted)"
+else
+    fail "preserve: phase 2 - preservable-resource was deleted (preserve_observed did not work)"
+fi
+
 # ============================================================
 # TEST 2: OCI MODULE LOADING
 # ============================================================

@@ -9,3 +9,4 @@ spec:
     name: builtins-test
   region: us-east-1
   environment: prod
+  externalConfig: "test-value"
