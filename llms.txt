@@ -45,7 +45,7 @@ spec:
 
 ## Predeclared functions
 
-### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None)
+### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=True, skip_reason="", preserve_observed=False)
 
 Register a desired composed resource. This is the primary function.
 
@@ -56,6 +56,9 @@ Register a desired composed resource. This is the primary function.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
 - depends_on: List of ResourceRef, string, or tuple (ref, field_path) for creation sequencing. Plain refs/strings check existence. Tuples check that the specified field path has a non-empty value in the observed resource. Generates Crossplane Usage resources.
 - external_name: Sugar for crossplane.io/external-name annotation.
+- when: Bool gate (True/False only). False skips the resource (requires skip_reason). Non-bool values raise type error.
+- skip_reason: Human-readable skip reason. Required when when=False without preserve_observed. Appears in Warning event.
+- preserve_observed: When True and body is None (or when=False), emit the observed body verbatim if found. Cliff-guard for resources with temporarily unavailable config.
 - Returns: ResourceRef with .name attribute for use in depends_on.
 
 Example:
@@ -293,6 +296,7 @@ Six predeclared namespace modules. Available in every script without import.
 - dict.deep_merge(d1, d2, ...) -- recursive right-wins merge, returns new dict
 - dict.pick(d, keys) -- subset for matching keys
 - dict.omit(d, keys) -- copy with keys removed
+- dict.compact(d) -- recursively prune None values at any depth. K8s empties (empty string/list/dict) preserved. Max depth 32.
 - dict.dig(d, path, default=None) -- dotted-path lookup
 - dict.has_path(d, path) -- True iff dotted path exists
 

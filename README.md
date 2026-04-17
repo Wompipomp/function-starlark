@@ -28,7 +28,9 @@ with zero external toolchain.
   (json, crypto, encoding, dict, regex, yaml) available without imports.
   Use `get_extra_resource()` for one-call extra-resource field access and
   `set_response_ttl()` for custom requeue intervals.
-  [Builtins reference](docs/builtins-reference.md)
+  Recursive `dict.compact()` prunes None from nested dicts. Resource()
+  `when`/`preserve_observed` kwargs enable declarative gating and cliff-guard
+  patterns. [Builtins reference](docs/builtins-reference.md)
 - **Namespace alias imports** -- `load("module.star", ns="*")` wraps all exports
   in a struct, solving name conflicts when loading multiple provider schema
   packages. [Module system](docs/module-system.md)
@@ -55,7 +57,8 @@ with zero external toolchain.
 | JSON | `json.*` predeclared (encode, decode, encode_indent, indent) | `json` module (import) | `toJson`/`fromJson` (Sprig) |
 | Crypto / Hashing | `crypto.*` (sha256, sha512, sha1, md5, hmac, blake3, stable_id) | -- | `sha256sum`, `md5sum` (Sprig) |
 | Encoding | `encoding.*` (b64, b32, hex encode/decode) | `base64` module (import) | `b64enc`/`b64dec` (Sprig) |
-| Dict operations | `dict.*` (merge, deep_merge, pick, omit, dig, has_path) | -- | `merge`, `pick`, `omit`, `dig` (Sprig) |
+| Dict operations | `dict.*` (merge, deep_merge, pick, omit, compact, dig, has_path) | -- | `merge`, `pick`, `omit`, `dig` (Sprig) |
+| Resource gating | `when=`/`preserve_observed=` kwargs on `Resource()` | Not built-in | Not built-in |
 | Regex | `regex.*` (match, find, groups, replace, split) | `regex` module (import) | `regexMatch`, `regexFind` (Sprig) |
 | YAML | `yaml.*` (encode, decode, decode_stream) | `yaml` module (import) | `toYaml`/`fromYaml` (Sprig) |
 | Observed helpers | `is_observed()`, `observed_body()`, `get_extra_resource()`, `get_condition()` | -- | -- |
