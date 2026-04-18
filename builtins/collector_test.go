@@ -2516,6 +2516,49 @@ func TestCollector_WhenOmitted_NormalPath(t *testing.T) {
 	}
 }
 
+// stripObservedReadOnlyFields removes read-only metadata fields (managedFields,
+// resourceVersion, uid, generation, creationTimestamp) and status from a
+// struct so that a preserve_observed re-emission is accepted by server-side
+// apply.
+func TestStripObservedReadOnlyFields(t *testing.T) {
+	s := &structpb.Struct{
+		Fields: map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("v1"),
+			"metadata": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{
+					"name":              structpb.NewStringValue("keep"),
+					"managedFields":     structpb.NewListValue(&structpb.ListValue{}),
+					"resourceVersion":   structpb.NewStringValue("42"),
+					"uid":               structpb.NewStringValue("abc"),
+					"generation":        structpb.NewNumberValue(3),
+					"creationTimestamp": structpb.NewStringValue("2026-01-01T00:00:00Z"),
+				},
+			}),
+			"status": structpb.NewStructValue(&structpb.Struct{
+				Fields: map[string]*structpb.Value{"phase": structpb.NewStringValue("Running")},
+			}),
+		},
+	}
+
+	stripObservedReadOnlyFields(s)
+
+	if _, ok := s.Fields["status"]; ok {
+		t.Error("status should be stripped")
+	}
+	md := s.Fields["metadata"].GetStructValue()
+	for _, f := range []string{"managedFields", "resourceVersion", "uid", "generation", "creationTimestamp"} {
+		if _, ok := md.Fields[f]; ok {
+			t.Errorf("metadata.%s should be stripped", f)
+		}
+	}
+	if md.Fields["name"].GetStringValue() != "keep" {
+		t.Error("metadata.name should be preserved")
+	}
+
+	// nil safety.
+	stripObservedReadOnlyFields(nil)
+}
+
 // ---------------------------------------------------------------------------
 // makeObservedDict builds a frozen *convert.StarlarkDict containing the named
 // resources. Each entry maps name -> *convert.StarlarkDict with the given

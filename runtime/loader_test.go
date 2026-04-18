@@ -1535,3 +1535,32 @@ func TestResolveStarImports_PackageLocal_NonOCICaller_Error(t *testing.T) {
 		t.Errorf("error = %q, want it to contain 'not an OCI module'", err.Error())
 	}
 }
+
+// Regression: a module that uses package-local loads must be star-importable.
+// Previously the scan thread name carried a " (star-import-scan)" suffix that
+// leaked into ParseOCILoadTarget, so any "./sibling.star" load inside the
+// scanned module failed with "must end with .star".
+func TestResolveStarImports_PackageLocal_InsideStarImportedModule(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"oci://ghcr.io/org/pkg:v1/main.star": `load("./helper.star", "helper")
+load("./values.star", "greeting")
+message = greeting + ", " + helper`,
+		"oci://ghcr.io/org/pkg:v1/helper.star": `helper = "world"`,
+		"oci://ghcr.io/org/pkg:v1/values.star": `greeting = "hello"`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+
+	src := `load("oci://ghcr.io/org/pkg:v1/main.star", "*")
+out = message`
+	rewritten, err := loader.ResolveStarImports(src, "composition.star")
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+	if !strings.Contains(rewritten, `"message"`) {
+		t.Errorf("rewritten source missing expanded exports: %s", rewritten)
+	}
+}

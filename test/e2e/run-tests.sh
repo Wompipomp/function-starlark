@@ -115,19 +115,23 @@ else
     kubectl get xtest/test-builtins -o yaml 2>/dev/null || true
 fi
 
-# Check composed resources exist
+# Check composed resources exist. Composed resource K8s names are auto-generated
+# (e.g. "test-builtins-5qr7f"), so query by the function-starlark resource-name
+# label which holds the logical Resource() name.
 for res in resource-a resource-b resource-with-conn; do
-    if kubectl get nopresource -l crossplane.io/composite=test-builtins 2>/dev/null | grep -q "$res" 2>/dev/null; then
+    if kubectl get nopresource \
+        -l "crossplane.io/composite=test-builtins,function-starlark.crossplane.io/resource-name=$res" \
+        -o name 2>/dev/null | grep -q .; then
         pass "builtins: composed resource '$res' exists"
     else
-        # Fallback: check via XR status
-        pass "builtins: composed resource '$res' (checked via XR Ready)"
+        fail "builtins: composed resource '$res' not found"
     fi
 done
 
-# Check skipped resource does NOT exist
-composed=$(kubectl get nopresource -l crossplane.io/composite=test-builtins -o name 2>/dev/null || echo "")
-if echo "$composed" | grep -q "to-be-skipped"; then
+# Check skipped resource does NOT exist (query by logical resource-name label).
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-builtins,function-starlark.crossplane.io/resource-name=to-be-skipped" \
+    -o name 2>/dev/null | grep -q .; then
     fail "builtins: skip_resource() did not remove 'to-be-skipped'"
 else
     pass "builtins: skip_resource() correctly removed 'to-be-skipped'"
@@ -280,9 +284,11 @@ fi
 # --- preserve_observed two-phase reconciliation test ---
 log "Phase 2: Testing preserve_observed with config removal..."
 
-# Phase 1 verification: preservable-resource should exist (created normally with body=dict)
-composed_preserve=$(kubectl get nopresource -l crossplane.io/composite=test-builtins -o name 2>/dev/null || echo "")
-if echo "$composed_preserve" | grep -q "preservable-resource"; then
+# Phase 1 verification: preservable-resource should exist (created normally with body=dict).
+# Match by logical resource-name label since the K8s object name is auto-generated.
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-builtins,function-starlark.crossplane.io/resource-name=preservable-resource" \
+    -o name 2>/dev/null | grep -q .; then
     pass "preserve: phase 1 - resource created normally"
 else
     fail "preserve: phase 1 - preservable-resource not found"
@@ -318,9 +324,10 @@ else
     fail "preserve: phase 2 - re-reconciliation not detected (status='$preserve_status', expected false)"
 fi
 
-# Phase 2 verification: preservable-resource should STILL exist (observed body re-emitted)
-composed_after=$(kubectl get nopresource -l crossplane.io/composite=test-builtins -o name 2>/dev/null || echo "")
-if echo "$composed_after" | grep -q "preservable-resource"; then
+# Phase 2 verification: preservable-resource should STILL exist (observed body re-emitted).
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-builtins,function-starlark.crossplane.io/resource-name=preservable-resource" \
+    -o name 2>/dev/null | grep -q .; then
     pass "preserve: phase 2 - resource preserved after config removal (observed body re-emitted)"
 else
     fail "preserve: phase 2 - preservable-resource was deleted (preserve_observed did not work)"

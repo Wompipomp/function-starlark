@@ -17,6 +17,11 @@ import (
 // LoadFunc is the signature for Thread.Load callbacks.
 type LoadFunc func(thread *starlark.Thread, module string) (starlark.StringDict, error)
 
+// starImportScanSuffix is appended to thread names inside getModuleExports so
+// the scan thread is identifiable. load() strips it before using the name as
+// an OCI parent reference.
+const starImportScanSuffix = " (star-import-scan)"
+
 // ModuleLoader resolves and executes Starlark modules with caching and
 // cycle detection. It is created per-reconciliation in fn.go so that each
 // reconciliation gets a fresh module globals cache (while sharing the
@@ -112,7 +117,10 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 	if oci.IsPackageLocalTarget(module) {
 		parent := ""
 		if thread != nil {
-			parent = thread.Name
+			// Strip the " (star-import-scan)" suffix that getModuleExports
+			// appends to thread names so OCI URLs remain parseable during
+			// export scanning of modules that use package-local loads.
+			parent = strings.TrimSuffix(thread.Name, starImportScanSuffix)
 		}
 		if !strings.HasPrefix(parent, "oci://") {
 			return nil, fmt.Errorf(
@@ -471,7 +479,7 @@ func (m *ModuleLoader) getModuleExports(module string) ([]string, error) {
 	}
 
 	thread := &starlark.Thread{
-		Name: module + " (star-import-scan)",
+		Name: module + starImportScanSuffix,
 		Load: m.load,
 		Print: func(_ *starlark.Thread, _ string) {
 			// Suppress print during export scanning.

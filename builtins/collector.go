@@ -120,6 +120,9 @@ func (c *Collector) SkipResourceBuiltin() *starlark.Builtin {
 // lookupObservedBody looks up a resource by name in the observed composed
 // resources dict and converts it from *convert.StarlarkDict to *structpb.Struct.
 // Returns (nil, false, nil) when the resource is not found or c.observed is nil.
+// Server-side-apply fields (metadata.managedFields, metadata.resourceVersion)
+// and status are stripped so the result can be re-emitted as desired state
+// without tripping apiserver validation.
 func (c *Collector) lookupObservedBody(name string) (*structpb.Struct, bool, error) {
 	if c.observed == nil {
 		return nil, false, nil
@@ -139,7 +142,26 @@ func (c *Collector) lookupObservedBody(name string) (*structpb.Struct, bool, err
 	if err != nil {
 		return nil, false, fmt.Errorf("observed %q: %w", name, err)
 	}
+	stripObservedReadOnlyFields(s)
 	return s, true, nil
+}
+
+// stripObservedReadOnlyFields removes fields from an observed body that would
+// be rejected when re-emitted as desired state via server-side apply.
+func stripObservedReadOnlyFields(s *structpb.Struct) {
+	if s == nil {
+		return
+	}
+	if md := s.GetFields()["metadata"]; md != nil {
+		if mdStruct := md.GetStructValue(); mdStruct != nil {
+			delete(mdStruct.Fields, "managedFields")
+			delete(mdStruct.Fields, "resourceVersion")
+			delete(mdStruct.Fields, "uid")
+			delete(mdStruct.Fields, "generation")
+			delete(mdStruct.Fields, "creationTimestamp")
+		}
+	}
+	delete(s.Fields, "status")
 }
 
 // recordPreserve stores the observed body directly and emits a Warning event.
