@@ -226,7 +226,8 @@ Per-composition `spec` fields take precedence over env vars.
 |---------|---------|-------------|
 | `STARLARK_OCI_DEFAULT_REGISTRY` | -- | Default OCI registry for short-form `load()` targets |
 | `STARLARK_OCI_INSECURE_REGISTRIES` | -- | Comma-separated list of HTTP-only registries |
-| `STARLARK_OCI_CACHE_TTL` | `5m` | TTL for OCI tag-to-digest resolution cache |
+| `STARLARK_OCI_PULL_POLICY` | `IfNotPresent` | OCI pull policy: `IfNotPresent` (cache for pod lifetime) or `Always` (revalidate per `STARLARK_OCI_CACHE_TTL`) |
+| `STARLARK_OCI_CACHE_TTL` | `0` | Revalidation interval for OCI tag cache. Only consulted when `STARLARK_OCI_PULL_POLICY=Always` |
 | `STARLARK_DOCKER_CONFIG_SECRET` | -- | Kubernetes Secret name for private OCI registry credentials |
 | `STARLARK_USAGE_API_VERSION` | -- | Crossplane Usage API version override (`v1` or `v2`) |
 

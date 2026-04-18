@@ -7,14 +7,14 @@ import (
 )
 
 func TestNewCache(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	if c == nil {
 		t.Fatal("NewCache returned nil")
 	}
 }
 
 func TestCacheGetByTagEmpty(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	files, fresh := c.GetByTag("ghcr.io/org/lib:v1")
 	if files != nil {
 		t.Errorf("expected nil files for empty cache, got %v", files)
@@ -26,7 +26,7 @@ func TestCacheGetByTagEmpty(t *testing.T) {
 
 func TestCachePutAndGetFresh(t *testing.T) {
 	now := time.Now()
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.nowFn = func() time.Time { return now }
 
 	c.PutContent("sha256:abc", map[string]string{"h.star": "x = 1"})
@@ -46,7 +46,7 @@ func TestCachePutAndGetFresh(t *testing.T) {
 
 func TestCacheGetByTagStale(t *testing.T) {
 	now := time.Now()
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.nowFn = func() time.Time { return now }
 
 	c.PutContent("sha256:abc", map[string]string{"h.star": "x = 1"})
@@ -67,8 +67,42 @@ func TestCacheGetByTagStale(t *testing.T) {
 	}
 }
 
+// Under IfNotPresent the TTL is ignored and cached entries stay fresh
+// indefinitely — this is the zero-traffic-after-first-pull mode.
+func TestCacheGetByTagIfNotPresent_NeverStales(t *testing.T) {
+	now := time.Now()
+	// TTL of 5 minutes would mark this stale under PullAlways; here it must not.
+	c := NewCache(PullIfNotPresent, 5*time.Minute)
+	c.nowFn = func() time.Time { return now }
+
+	c.PutContent("sha256:abc", map[string]string{"h.star": "x = 1"})
+	c.PutTag("ghcr.io/org/lib:v1", "sha256:abc")
+
+	// Advance the clock by a year.
+	c.nowFn = func() time.Time { return now.Add(365 * 24 * time.Hour) }
+
+	files, fresh := c.GetByTag("ghcr.io/org/lib:v1")
+	if files == nil {
+		t.Fatal("expected cached files, got nil")
+	}
+	if !fresh {
+		t.Error("IfNotPresent should treat any cached entry as fresh")
+	}
+	if files["h.star"] != "x = 1" {
+		t.Errorf("got %q, want %q", files["h.star"], "x = 1")
+	}
+}
+
+// Unknown policy strings fall back to IfNotPresent (the safe default).
+func TestNewCache_UnknownPolicyDefaultsToIfNotPresent(t *testing.T) {
+	c := NewCache(PullPolicy("garbage"), 0)
+	if c.policy != PullIfNotPresent {
+		t.Errorf("policy = %q, want %q", c.policy, PullIfNotPresent)
+	}
+}
+
 func TestCacheGetByDigestHit(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.PutContent("sha256:abc", map[string]string{"h.star": "x = 1"})
 
 	files, ok := c.GetByDigest("sha256:abc")
@@ -81,7 +115,7 @@ func TestCacheGetByDigestHit(t *testing.T) {
 }
 
 func TestCacheGetByDigestMiss(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	files, ok := c.GetByDigest("sha256:unknown")
 	if ok {
 		t.Error("expected ok=false for unknown digest")
@@ -92,7 +126,7 @@ func TestCacheGetByDigestMiss(t *testing.T) {
 }
 
 func TestCacheConcurrentAccess(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	var wg sync.WaitGroup
 
 	// Concurrent writers.

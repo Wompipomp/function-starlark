@@ -3193,7 +3193,7 @@ Resource("test", {"tag": tag("prod")})`
 // cache are available to the Starlark script via the inline module map.
 func TestRunFunctionOCILoadFromCache(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Pre-populate cache with a tag -> digest -> content chain.
 	cache.PutContent("sha256:abc123", map[string]string{
@@ -3234,7 +3234,7 @@ func TestRunFunctionOCILoadFromCache(t *testing.T) {
 // resolve from the content cache layer.
 func TestRunFunctionOCIDigestPin(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	digest := "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 	cache.PutContent(digest, map[string]string{
@@ -3274,7 +3274,7 @@ func TestRunFunctionOCIDigestPin(t *testing.T) {
 // unreachable OCI registry (cold cache miss) produces a Fatal response.
 func TestRunFunctionOCIMissingModule(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Mock fetcher that returns error.
 	fetcher := &testOCIFetcher{err: fmt.Errorf("connection refused")}
@@ -3303,7 +3303,7 @@ func TestRunFunctionOCIMissingModule(t *testing.T) {
 // wrong media type produces a Fatal response.
 func TestRunFunctionOCIMediaTypeRejection(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Build an image with wrong artifact type.
 	img := buildTestOCIImage(t, map[string]string{
@@ -3340,7 +3340,7 @@ func TestRunFunctionOCIMediaTypeRejection(t *testing.T) {
 func TestRunFunctionStarImport(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 
-	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: oci.NewCache(5 * time.Minute)}
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: oci.NewCache(oci.PullAlways, 5*time.Minute)}
 
 	req := &fnv1.RunFunctionRequest{
 		Input: resource.MustStructJSON(`{
@@ -3379,7 +3379,7 @@ func TestRunFunctionStarImport(t *testing.T) {
 // TestRunFunctionStarImportOCI verifies that star import works for OCI modules.
 func TestRunFunctionStarImportOCI(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Pre-populate cache with module that has multiple exports.
 	cache.PutContent("sha256:star123", map[string]string{
@@ -3423,7 +3423,7 @@ _hidden = 30`,
 // overwrite each other. Each package's module must be independently accessible.
 func TestRunFunctionOCIMultiPackageSameFilename(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Package A: ghcr.io/org/pkg-a:v1 contains helpers.star with greet_a().
 	cache.PutContent("sha256:pkga001", map[string]string{
@@ -3477,7 +3477,7 @@ func TestRunFunctionOCINoTargets(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 
 	// Providing ociCache ensures the OCI code path is active but not triggered.
-	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: oci.NewCache(5 * time.Minute)}
+	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: oci.NewCache(oci.PullAlways, 5*time.Minute)}
 
 	req := &fnv1.RunFunctionRequest{
 		Input: resource.MustStructJSON(`{
@@ -3516,7 +3516,7 @@ func TestRunFunctionDefaultRegistryFromEnv(t *testing.T) {
 	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "ghcr.io/wompipomp")
 
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Pre-populate cache: the short-form target "function-starlark-stdlib:v1/naming.star"
 	// expands to "oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star"
@@ -3562,7 +3562,7 @@ func TestRunFunctionDefaultRegistryFromSpec(t *testing.T) {
 	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "ghcr.io/fallback")
 
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	// Pre-populate cache with the spec override registry.
 	cache.PutContent("sha256:override001", map[string]string{
@@ -3606,7 +3606,7 @@ func TestRunFunctionDefaultRegistryInvalid(t *testing.T) {
 	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "not a valid registry!")
 
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
 
 	req := &fnv1.RunFunctionRequest{
@@ -3633,7 +3633,7 @@ func TestRunFunctionDefaultRegistryInvalidFromSpec(t *testing.T) {
 	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "")
 
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
 
 	req := &fnv1.RunFunctionRequest{
@@ -3663,7 +3663,7 @@ func TestRunFunctionDefaultRegistryNotConfigured(t *testing.T) {
 	t.Setenv("STARLARK_OCI_DEFAULT_REGISTRY", "")
 
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 	f := &Function{log: logging.NewNopLogger(), runtime: rt, ociCache: cache}
 
 	req := &fnv1.RunFunctionRequest{
@@ -3686,7 +3686,7 @@ func TestRunFunctionDefaultRegistryNotConfigured(t *testing.T) {
 
 func TestRunFunctionOCICredentialKeychain(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	cache.PutContent("sha256:abc123", map[string]string{
 		"helpers.star": `def greet(name): return "cred-hello " + name`,
@@ -3736,7 +3736,7 @@ func TestRunFunctionOCICredentialKeychain(t *testing.T) {
 
 func TestRunFunctionOCICredentialMissingFallback(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	cache.PutContent("sha256:abc123", map[string]string{
 		"helpers.star": `def greet(name): return "fallback-hello " + name`,
@@ -3776,7 +3776,7 @@ func TestRunFunctionOCICredentialMissingFallback(t *testing.T) {
 
 func TestRunFunctionOCICredentialNoConfigKey(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
-	cache := oci.NewCache(5 * time.Minute)
+	cache := oci.NewCache(oci.PullAlways, 5*time.Minute)
 
 	cache.PutContent("sha256:abc123", map[string]string{
 		"helpers.star": `val = "ok"`,

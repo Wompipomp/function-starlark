@@ -618,32 +618,44 @@ secret still works independently via the env var.
 
 OCI modules are cached in-memory with a two-layer architecture:
 
-| Layer | Key | TTL | Purpose |
-|-------|-----|-----|---------|
-| Tag cache | `registry/repo:tag` → digest | 5 min (configurable) | Avoid HEAD requests on every reconciliation |
-| Content cache | `sha256:...` → `.star` files | Forever (immutable) | Content-addressed, same digest = same content |
+| Layer | Key | Lifetime | Purpose |
+|-------|-----|----------|---------|
+| Tag cache | `registry/repo:tag` → digest | Governed by `STARLARK_OCI_PULL_POLICY` | Avoid revalidating tags on every reconciliation |
+| Content cache | `sha256:...` → `.star` files | Pod lifetime (immutable) | Content-addressed; same digest = same content |
+
+### Pull policy
+
+Revalidation follows a Kubernetes-style pull policy:
+
+| `STARLARK_OCI_PULL_POLICY` | Behavior |
+|---------------------------|----------|
+| `IfNotPresent` (default)  | First reference pulls the artifact; every later reconciliation reuses the cached copy for the pod's lifetime. No HEAD checks, zero steady-state registry traffic. Refresh by restarting the pod or pointing at a different tag/digest. |
+| `Always`                  | On cache miss or after `STARLARK_OCI_CACHE_TTL` expires, the resolver issues one manifest `HEAD`. Unchanged digest → serve cached content (no blob transfer). Changed digest → pull the new manifest and layers. |
+
+`STARLARK_OCI_CACHE_TTL` is only consulted under `Always`; it has no effect
+under `IfNotPresent`. `0` means "revalidate on every reconciliation."
+
+Configure on the function pod via DeploymentRuntimeConfig:
+
+```yaml
+env:
+  - name: STARLARK_OCI_PULL_POLICY
+    value: "Always"          # opt-in if you retag and want in-place updates
+  - name: STARLARK_OCI_CACHE_TTL
+    value: "10m"             # only applies when policy is Always
+```
 
 ### How cache lookups work
 
-1. **Fresh hit** (tag TTL not expired): serve from cache, zero network calls
-2. **Stale** (tag TTL expired, registry reachable): re-resolve tag → if same
-   digest, serve cached content; if new digest, pull new artifact
-3. **Stale + registry down**: serve last-known-good content with a warning
-4. **Cold miss + registry down**: fail fast with error naming the unreachable
-   registry
-
-### Configuring cache TTL
-
-The cache TTL is a pod-level setting configured via the `STARLARK_OCI_CACHE_TTL`
-environment variable (default: `5m`). Set it on the function pod via
-DeploymentRuntimeConfig:
-
-```yaml
-# In your DeploymentRuntimeConfig
-env:
-  - name: STARLARK_OCI_CACHE_TTL
-    value: "10m"
-```
+1. **Hit under `IfNotPresent`** → serve from cache, zero network calls.
+2. **Fresh hit under `Always`** (within TTL) → serve from cache, zero network
+   calls.
+3. **Stale under `Always`** (TTL expired, registry reachable) → HEAD the tag.
+   If the digest matches, refresh TTL and serve cached content. If it changed,
+   pull the new artifact.
+4. **Stale + registry down** → serve last-known-good content with a warning.
+5. **Cold miss + registry down** → fail fast with an error naming the
+   unreachable registry.
 
 The cache lives in-memory on the function pod. It does not survive pod
 restarts — the first reconciliation after a restart pays the OCI pull cost
@@ -655,9 +667,10 @@ restarts — the first reconciliation after a restart pays the OCI pull cost
 load("oci://ghcr.io/my-org/lib@sha256:abc123.../helpers.star", "create_bucket")
 ```
 
-Digest references go directly to the content cache layer. If the digest is
-cached, it's served immediately. If not, it's pulled once and cached forever.
-This is the most deterministic option for production compositions.
+Digest references go directly to the content cache layer, unaffected by
+`STARLARK_OCI_PULL_POLICY`. If the digest is cached, it's served immediately.
+If not, it's pulled once and cached forever. This is the most deterministic
+option for production compositions.
 
 ## Transitive dependencies
 

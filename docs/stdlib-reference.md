@@ -403,6 +403,25 @@ The stdlib follows semantic versioning:
 Pin to a major version alias (`:v1`) for compositions that should receive
 compatible updates, or pin to a specific tag for maximum reproducibility.
 
+## Caching and freshness
+
+Resolved stdlib artifacts are cached in-memory by the function pod. The
+revalidation strategy is governed by a Kubernetes-style pull policy:
+
+| `STARLARK_OCI_PULL_POLICY` | Behavior |
+|---------------------------|----------|
+| `IfNotPresent` (default)  | First reference pulls the artifact; subsequent reconciliations reuse the in-memory copy for the pod's lifetime. No HEAD checks. Pick up a retag by restarting the pod or bumping the tag. |
+| `Always`                  | On cache miss or after `STARLARK_OCI_CACHE_TTL` expires, the resolver issues a manifest HEAD. The digest is compared against the digest cache; unchanged digests reuse cached content, changed digests trigger a full pull. |
+
+`STARLARK_OCI_CACHE_TTL` is only consulted under `Always` (default `0` =
+revalidate on every reconciliation). Digest-pinned loads — 
+`oci://…/stdlib@sha256:…/naming.star` — bypass policy/TTL altogether and
+never revalidate.
+
+Under the default `IfNotPresent` policy, steady-state registry traffic is
+zero regardless of reconciliation rate. Use `Always` when you intentionally
+need in-place updates without a pod restart.
+
 ## See also
 
 - [Library Authoring Guide](library-authoring.md) -- How to create your own

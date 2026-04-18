@@ -21,7 +21,8 @@ type CLI struct {
 	Insecure    bool   `help:"Run without mTLS credentials." env:"FUNCTION_INSECURE"`
 
 	MaxRecvMessageSize int           `help:"Maximum message size in MB." default:"4" env:"MAX_RECV_MESSAGE_SIZE"`
-	OCICacheTTL        time.Duration `help:"TTL for OCI tag-to-digest cache entries." default:"5m" env:"STARLARK_OCI_CACHE_TTL"`
+	OCIPullPolicy      string        `help:"OCI pull policy (Kubernetes-style). 'IfNotPresent' (default): cache tag->digest for the pod lifetime; never revalidate. 'Always': revalidate via HEAD on each reconciliation (or once per OCICacheTTL window)." default:"IfNotPresent" enum:"IfNotPresent,Always" env:"STARLARK_OCI_PULL_POLICY"`
+	OCICacheTTL        time.Duration `help:"TTL for OCI tag-to-digest cache entries. Only consulted when OCIPullPolicy=Always; ignored under IfNotPresent. 0 means revalidate on every reconciliation." default:"0" env:"STARLARK_OCI_CACHE_TTL"`
 }
 
 func (c *CLI) Run() error {
@@ -30,10 +31,10 @@ func (c *CLI) Run() error {
 		return err
 	}
 
-	log.Info("Starting function-starlark", "debug", c.Debug, "address", c.Address, "insecure", c.Insecure, "ociCacheTTL", c.OCICacheTTL)
+	log.Info("Starting function-starlark", "debug", c.Debug, "address", c.Address, "insecure", c.Insecure, "ociPullPolicy", c.OCIPullPolicy, "ociCacheTTL", c.OCICacheTTL)
 
 	rt := runtime.NewRuntime(log)
-	cache := oci.NewCache(c.OCICacheTTL)
+	cache := oci.NewCache(oci.PullPolicy(c.OCIPullPolicy), c.OCICacheTTL)
 
 	return function.Serve(&Function{log: log, runtime: rt, scriptDir: "/scripts", ociCache: cache},
 		function.Listen(c.Network, c.Address),

@@ -370,15 +370,23 @@ Prometheus metrics:
 
 ### OCI tag resolution caching
 
-OCI tag-to-digest mappings are cached with a configurable TTL (default 5
-minutes). This avoids re-resolving tags on every reconciliation. The cache TTL
-is a pod-level setting configured via the `STARLARK_OCI_CACHE_TTL` environment
-variable (e.g., `10m`).
+OCI tag-to-digest mappings are cached in-memory on the function pod. The
+resolver honors a Kubernetes-style pull policy set per pod via
+`STARLARK_OCI_PULL_POLICY`:
+
+- **`IfNotPresent` (default)** — pull on first reference, then reuse the
+  cached copy for the pod's lifetime. No revalidation, zero steady-state
+  registry traffic. Treat tags as immutable; restart the pod (or pin a new
+  tag/digest) to pick up a retag.
+- **`Always`** — revalidate with a manifest `HEAD` on cache miss or after
+  `STARLARK_OCI_CACHE_TTL` elapses (default `0` means every reconciliation).
+  Unchanged digest reuses cached content; a changed digest triggers a new
+  pull. Use this when you intentionally push updates to moving tags and want
+  in-place refresh without a pod restart.
 
 Digest-pinned references (e.g., `@sha256:abc123...`) bypass the tag cache
-entirely and are cached permanently, since a digest is immutable. Use tags for
-development (automatic refresh on TTL expiry) and digest-pinned references for
-production (maximum determinism).
+entirely and are cached permanently regardless of policy, since a digest is
+immutable. Recommended for production compositions.
 
 OCI resolution time is tracked via the
 `function_starlark_oci_resolve_duration_seconds` histogram.

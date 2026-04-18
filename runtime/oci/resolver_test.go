@@ -162,7 +162,7 @@ func buildOrasImage(t *testing.T, files map[string]string) v1.Image {
 }
 
 func TestResolveOrasPerFileLayers(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildOrasImage(t, map[string]string{
 		"naming.star":     `def resource_name(key): return key`,
 		"networking.star": `def cidr(prefix, bits): return prefix`,
@@ -190,7 +190,7 @@ func TestResolveOrasPerFileLayers(t *testing.T) {
 }
 
 func TestResolveFromCache(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.PutContent("sha256:abc", map[string]string{"helpers.star": "x = 1"})
 	c.PutTag("ghcr.io/org/lib:v1", "sha256:abc")
 
@@ -215,7 +215,7 @@ func TestResolveFromCache(t *testing.T) {
 }
 
 func TestResolveFetchAndExtract(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"helpers.star": `helper = "loaded"`,
 		"utils.star":   `util = "loaded"`,
@@ -244,7 +244,7 @@ func TestResolveFetchAndExtract(t *testing.T) {
 }
 
 func TestResolveWrongArtifactType(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"helpers.star": `x = 1`,
 	}, "application/vnd.wrong.type", LayerMediaType)
@@ -269,7 +269,7 @@ func TestResolveWrongArtifactType(t *testing.T) {
 }
 
 func TestResolveWrongLayerType(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"helpers.star": `x = 1`,
 	}, ArtifactMediaType, "application/vnd.wrong.layer")
@@ -295,7 +295,7 @@ func TestResolveWrongLayerType(t *testing.T) {
 }
 
 func TestResolveDeduplicatesSameRef(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"a.star": `a = 1`,
 		"b.star": `b = 2`,
@@ -325,7 +325,7 @@ func TestResolveDeduplicatesSameRef(t *testing.T) {
 }
 
 func TestResolveEmptyLayers(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Create an image with no layers.
 	img := mutate.MediaType(empty.Image, types.OCIManifestSchema1)
@@ -347,7 +347,7 @@ func TestResolveEmptyLayers(t *testing.T) {
 }
 
 func TestResolveFileNotInArtifact(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"other.star": `x = 1`,
 	}, ArtifactMediaType, LayerMediaType)
@@ -368,7 +368,7 @@ func TestResolveFileNotInArtifact(t *testing.T) {
 }
 
 func TestResolveTransitiveDeps(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Module A loads module B from another OCI ref.
 	imgA := buildTestImage(t, map[string]string{
@@ -402,7 +402,7 @@ a_fn = lambda: b_fn()`,
 }
 
 func TestResolveCycleDetection(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Module A loads B, module B loads A.
 	imgA := buildTestImage(t, map[string]string{
@@ -431,7 +431,7 @@ func TestResolveCycleDetection(t *testing.T) {
 
 func TestResolveStaleServing(t *testing.T) {
 	now := time.Now()
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.nowFn = func() time.Time { return now }
 
 	// Populate cache with content.
@@ -456,7 +456,7 @@ func TestResolveStaleServing(t *testing.T) {
 }
 
 func TestResolveColdMissFails(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Registry is unreachable, cache is empty.
 	f := &mockFetcher{err: fmt.Errorf("connection refused")}
@@ -470,7 +470,7 @@ func TestResolveColdMissFails(t *testing.T) {
 }
 
 func TestResolveTarSafety(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Build tar with path traversal attempt.
 	var buf bytes.Buffer
@@ -513,7 +513,7 @@ func TestResolveTarSafety(t *testing.T) {
 }
 
 func TestResolveSkipsNonStarAndNonRegular(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Build tar with a non-.star file and a symlink.
 	var buf bytes.Buffer
@@ -563,7 +563,7 @@ func TestResolveSkipsNonStarAndNonRegular(t *testing.T) {
 }
 
 func TestResolveUsesKeychain(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"h.star": `x = 1`,
 	}, ArtifactMediaType, LayerMediaType)
@@ -585,7 +585,7 @@ func TestResolveUsesKeychain(t *testing.T) {
 }
 
 func TestExtractTarNestedPaths(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"apps/v1.star": `apps_v1 = "apps"`,
 		"core/v1.star": `core_v1 = "core"`,
@@ -612,7 +612,7 @@ func TestExtractTarNestedPaths(t *testing.T) {
 }
 
 func TestExtractOrasNestedPaths(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildOrasImage(t, map[string]string{
 		"apps/v1.star": `apps_v1 = "apps"`,
 		"core/v1.star": `core_v1 = "core"`,
@@ -638,7 +638,7 @@ func TestExtractOrasNestedPaths(t *testing.T) {
 }
 
 func TestExtractHighFileCount(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Build a tar with 150 .star files — was blocked by maxFileCount=100.
 	files := make(map[string]string, 150)
@@ -667,7 +667,7 @@ func TestExtractHighFileCount(t *testing.T) {
 }
 
 func TestExtractNestedPathTraversal(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	img := buildTestImage(t, map[string]string{
 		"apps/../../etc/passwd.star": `x = 1`,
 	}, ArtifactMediaType, LayerMediaType)
@@ -688,7 +688,7 @@ func TestExtractNestedPathTraversal(t *testing.T) {
 }
 
 func TestResolveTransitivePackageLocal(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Single artifact with two files. a.star loads its sibling via ./b.star.
 	img := buildTestImage(t, map[string]string{
@@ -724,7 +724,7 @@ value = x`,
 }
 
 func TestResolveTransitiveShortForm(t *testing.T) {
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 
 	// Module A uses explicit oci:// and contains a short-form load of module B.
 	imgA := buildTestImage(t, map[string]string{
@@ -762,7 +762,7 @@ a_fn = lambda: b_fn()`,
 }
 
 func TestResolveInsecureRegistry(t *testing.T) {
-	c := NewCache(time.Hour)
+	c := NewCache(PullAlways, time.Hour)
 	img := buildTestImage(t, map[string]string{"h.star": `val = 1`}, ArtifactMediaType, LayerMediaType)
 	f := &mockFetcher{images: map[string]v1.Image{
 		"localhost:5050/org/lib:v1": img,
@@ -786,7 +786,7 @@ func TestResolveInsecureRegistry(t *testing.T) {
 }
 
 func TestResolveSecureRegistryUsesKeychain(t *testing.T) {
-	c := NewCache(time.Hour)
+	c := NewCache(PullAlways, time.Hour)
 	img := buildTestImage(t, map[string]string{"h.star": `val = 1`}, ArtifactMediaType, LayerMediaType)
 	f := &mockFetcher{images: map[string]v1.Image{
 		"ghcr.io/org/lib:v1": img,
@@ -811,7 +811,7 @@ func TestResolveSecureRegistryUsesKeychain(t *testing.T) {
 
 func TestResolveHeadOptimization(t *testing.T) {
 	now := time.Now()
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.nowFn = func() time.Time { return now }
 
 	// Build image and compute its digest.
@@ -855,7 +855,7 @@ func TestResolveHeadOptimization(t *testing.T) {
 
 func TestResolveHeadDigestChanged(t *testing.T) {
 	now := time.Now()
-	c := NewCache(5 * time.Minute)
+	c := NewCache(PullAlways, 5*time.Minute)
 	c.nowFn = func() time.Time { return now }
 
 	// Pre-populate cache with old content.
