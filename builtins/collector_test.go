@@ -2265,7 +2265,7 @@ func TestCollector_WhenFalse_NoSkipReason_Errors(t *testing.T) {
 	}
 }
 
-func TestCollector_SkipReason_WithoutWhenFalse_Errors(t *testing.T) {
+func TestCollector_SkipReason_WithoutWhenFalse_Allowed(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2273,17 +2273,68 @@ func TestCollector_SkipReason_WithoutWhenFalse_Errors(t *testing.T) {
 	body := new(starlark.Dict)
 	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
 
-	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
 		starlark.String("bucket"),
 		body,
 	}, []starlark.Tuple{
 		{starlark.String("skip_reason"), starlark.String("some reason")},
 	})
-	if err == nil {
-		t.Fatal("expected error for skip_reason without when=False")
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "skip_reason requires when=False") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason requires when=False")
+
+	// Return value must be a ResourceRef (resource emitted as desired).
+	if _, ok := val.(*ResourceRef); !ok {
+		t.Errorf("Resource() = %v (%s), want *ResourceRef", val, val.Type())
+	}
+
+	// Resource MUST appear in collected resources (not skipped).
+	res := c.Resources()
+	if _, ok := res["bucket"]; !ok {
+		t.Error("expected resource \"bucket\" in Resources(), not found")
+	}
+
+	// No skip event must have been recorded.
+	events := cc.Events()
+	if len(events) != 0 {
+		t.Errorf("Events() len = %d, want 0 (no skip event should be emitted)", len(events))
+	}
+}
+
+func TestCollector_SkipReason_WithWhenTrue_Allowed(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.True},
+		{starlark.String("skip_reason"), starlark.String("some reason")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value must be a ResourceRef (resource emitted as desired).
+	if _, ok := val.(*ResourceRef); !ok {
+		t.Errorf("Resource() = %v (%s), want *ResourceRef", val, val.Type())
+	}
+
+	// Resource MUST appear in collected resources (not skipped).
+	res := c.Resources()
+	if _, ok := res["bucket"]; !ok {
+		t.Error("expected resource \"bucket\" in Resources(), not found")
+	}
+
+	// No skip event must have been recorded.
+	events := cc.Events()
+	if len(events) != 0 {
+		t.Errorf("Events() len = %d, want 0 (no skip event should be emitted)", len(events))
 	}
 }
 
