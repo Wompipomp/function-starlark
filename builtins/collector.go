@@ -309,10 +309,9 @@ func (c *Collector) resourceFn(
 	}
 	preserveActive := preserveProvided && preserveVal == starlark.True
 
-	// Validate skip_reason constraints.
-	if skipReason != "" && !whenFalse {
-		return nil, fmt.Errorf("Resource(%q): skip_reason requires when=False", name)
-	}
+	// Validate skip_reason is provided when gating off.
+	// skip_reason is always legal (stable across reconciliations where `when`
+	// may flip between True and False); it is only consulted on skip paths.
 	if whenFalse && !preserveActive && skipReason == "" {
 		return nil, fmt.Errorf("Resource(%q): skip_reason is required when when=False", name)
 	}
