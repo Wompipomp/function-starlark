@@ -215,7 +215,7 @@ Kubernetes resources in a composition.
 | `depends_on` | list \| None | None | List of ResourceRef, string, or `(ref, "field.path")` tuple for creation sequencing. |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
 | `when` | bool | `True` | Gate resource emission. `False` skips the resource (requires `skip_reason`). Only accepts `True` or `False` -- non-bool values raise a type error. |
-| `skip_reason` | string | `""` | Human-readable reason for skipping. Required when `when=False` (without `preserve_observed`). Appears in a Warning event. Cannot be set when `when=True`. |
+| `skip_reason` | string | `""` | Human-readable reason for skipping. Required when `when=False` (without `preserve_observed`). Appears in a Warning event on skip paths. Always legal to set (unused on non-skip paths); useful when `when` is a runtime expression that may flip between `True` and `False` across reconciliations. |
 | `preserve_observed` | bool | `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. |
 
 **Returns:** ResourceRef with a `.name` attribute (the composition resource
@@ -291,8 +291,6 @@ patterns. The `when` gate is evaluated first (before body type-checking), so whe
 
 **Errors:**
 
-- `skip_reason` provided without `when=False` raises an error. The skip_reason
-  kwarg is only valid when the resource is being gated off.
 - `when=False` without `skip_reason` (and without `preserve_observed=True`)
   raises an error. A reason must be provided when skipping a resource.
 - Non-bool value for `when` raises a type error. Only `True` or `False` are
