@@ -1,6 +1,9 @@
 """Mock Kubernetes apps/v1 schemas for e2e testing.
 
-Simulates the generated schemas-k8s package structure.
+Simulates the generated schemas-k8s package structure. Field names do NOT
+match real K8s API (camelCase) — this is a local mock used only to exercise
+the schema/field/Deployment code path. Real K8s wire-format testing is
+covered by pulling the actual ghcr.io/wompipomp/schemas-k8s package.
 """
 
 ContainerPort = schema("ContainerPort",
@@ -26,6 +29,8 @@ DeploymentSpec = schema("DeploymentSpec",
 )
 
 Deployment = schema("Deployment",
+    apiVersion=field(type="string", default="apps/v1"),
+    kind=field(type="string", default="Deployment"),
     metadata=field(type="dict", required=True),
     spec=field(type=DeploymentSpec, required=True),
 )
@@ -38,6 +43,8 @@ StatefulSetSpec = schema("StatefulSetSpec",
 )
 
 StatefulSet = schema("StatefulSet",
+    apiVersion=field(type="string", default="apps/v1"),
+    kind=field(type="string", default="StatefulSet"),
     metadata=field(type="dict", required=True),
     spec=field(type=StatefulSetSpec, required=True),
 )

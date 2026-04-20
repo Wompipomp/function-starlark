@@ -417,6 +417,44 @@ else
     fail "schemas: cosmosdb.Account location='$cosmos_loc' (expected westeurope)"
 fi
 
+# --- Schema defaults populate apiVersion + kind ---
+dep_api=$(get_status_field "xtest/test-schemas" "test.k8sDeploymentApiVersion")
+if [ "$dep_api" = "apps/v1" ]; then
+    pass "schemas: Deployment apiVersion defaulted from schema (apps/v1)"
+else
+    fail "schemas: Deployment apiVersion='$dep_api' (expected apps/v1)"
+fi
+dep_kind=$(get_status_field "xtest/test-schemas" "test.k8sDeploymentKind")
+if [ "$dep_kind" = "Deployment" ]; then
+    pass "schemas: Deployment kind defaulted from schema"
+else
+    fail "schemas: Deployment kind='$dep_kind' (expected Deployment)"
+fi
+ss_api=$(get_status_field "xtest/test-schemas" "test.k8sStatefulSetApiVersion")
+if [ "$ss_api" = "apps/v1" ]; then
+    pass "schemas: StatefulSet apiVersion defaulted from schema (apps/v1)"
+else
+    fail "schemas: StatefulSet apiVersion='$ss_api' (expected apps/v1)"
+fi
+ss_kind=$(get_status_field "xtest/test-schemas" "test.k8sStatefulSetKind")
+if [ "$ss_kind" = "StatefulSet" ]; then
+    pass "schemas: StatefulSet kind defaulted from schema"
+else
+    fail "schemas: StatefulSet kind='$ss_kind' (expected StatefulSet)"
+fi
+
+# --- Resource() reads apiVersion+kind from a SchemaDict's defaults ---
+# The composition builds NopRes(spec=...) with no apiVersion/kind; the
+# schema defaults must propagate through Resource() into the desired state
+# so Crossplane emits a real NopResource in the cluster.
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-schemas,function-starlark.crossplane.io/resource-name=schema-defaulted-gvk" \
+    -o name 2>/dev/null | grep -q .; then
+    pass "schemas: Resource(schema instance) emitted composed resource using schema-defaulted apiVersion/kind"
+else
+    fail "schemas: no NopResource found for 'schema-defaulted-gvk' (Resource() did not pick up GVK from schema defaults)"
+fi
+
 # ============================================================
 # TEST 4: TRANSITIVE STAR IMPORTS IN MODULES
 # ============================================================

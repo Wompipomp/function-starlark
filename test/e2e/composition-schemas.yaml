@@ -94,6 +94,20 @@ spec:
             if cosmos["location"] != "westeurope": fatal("cosmosdb location wrong")
             if cosmos["kind"] != "GlobalDocumentDB": fatal("cosmosdb kind wrong")
 
+            # --- Test: schema defaults populate apiVersion + kind ---
+            # The Deployment/StatefulSet schemas in schemas-k8s:v1.35 declare
+            # apiVersion and kind as fields with defaults, so callers never
+            # need to repeat them. Instantiate with only metadata + spec and
+            # assert both fields come back populated.
+            if deployment["apiVersion"] != "apps/v1":
+                fatal("Deployment apiVersion default missing, got: " + str(deployment["apiVersion"]))
+            if deployment["kind"] != "Deployment":
+                fatal("Deployment kind default missing, got: " + str(deployment["kind"]))
+            if statefulset["apiVersion"] != "apps/v1":
+                fatal("StatefulSet apiVersion default missing, got: " + str(statefulset["apiVersion"]))
+            if statefulset["kind"] != "StatefulSet":
+                fatal("StatefulSet kind default missing, got: " + str(statefulset["kind"]))
+
             # --- Create a NopResource to prove the composition ran ---
             Resource("schema-test", {
                 "apiVersion": "nop.crossplane.io/v1alpha1",
@@ -108,8 +122,38 @@ spec:
                 },
             })
 
+            # --- Test: Resource() reads apiVersion+kind from schema defaults ---
+            # Inline schema pinned to provider-nop's GVK so the emitted
+            # resource actually reaches the apiserver (unlike the mock
+            # Deployment above, whose snake_case spec fields core K8s would
+            # reject). The instance is built with only "spec"; the defaulted
+            # apiVersion/kind must flow through SchemaDict → Resource() →
+            # desired state, producing a real NopResource in the cluster.
+            NopRes = schema("NopRes",
+                apiVersion=field(type="string", default="nop.crossplane.io/v1alpha1"),
+                kind=field(type="string", default="NopResource"),
+                spec=field(type="dict", required=True),
+            )
+            nop_inst = NopRes(spec={
+                "forProvider": {
+                    "conditionAfter": [
+                        {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                        {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                    ],
+                },
+            })
+            if nop_inst["apiVersion"] != "nop.crossplane.io/v1alpha1":
+                fatal("NopRes apiVersion default missing, got: " + str(nop_inst["apiVersion"]))
+            if nop_inst["kind"] != "NopResource":
+                fatal("NopRes kind default missing, got: " + str(nop_inst["kind"]))
+            Resource("schema-defaulted-gvk", nop_inst)
+
             set_xr_status("test.schemasLoaded", True)
             set_xr_status("test.k8sDeploymentReplicas", deployment["spec"]["replicas"])
+            set_xr_status("test.k8sDeploymentApiVersion", deployment["apiVersion"])
+            set_xr_status("test.k8sDeploymentKind", deployment["kind"])
+            set_xr_status("test.k8sStatefulSetApiVersion", statefulset["apiVersion"])
+            set_xr_status("test.k8sStatefulSetKind", statefulset["kind"])
             set_xr_status("test.storageLocation", sa["location"])
             set_xr_status("test.cosmosLocation", cosmos["location"])
 
