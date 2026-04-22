@@ -6,7 +6,6 @@ import (
 
 	"github.com/crossplane/function-sdk-go/logging"
 	"go.starlark.net/starlark"
-	"go.starlark.net/starlarkstruct"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/wompipomp/function-starlark/runtime"
@@ -96,26 +95,99 @@ func TestBuildGlobals_DictModule(t *testing.T) {
 		t.Fatal(`globals["dict"] missing -- dict module not registered in BuildGlobals`)
 	}
 
-	mod, ok := v.(*starlarkstruct.Module)
+	// The dict binding must satisfy both HasAttrs (for dict.merge etc.)
+	// and Callable (so dict(mapping) still works despite shadowing the
+	// universe dict builtin).
+	attrs, ok := v.(starlark.HasAttrs)
 	if !ok {
-		t.Fatalf(`globals["dict"] is %T, want *starlarkstruct.Module`, v)
+		t.Fatalf(`globals["dict"] is %T, want starlark.HasAttrs`, v)
 	}
-
-	if mod.Name != "dict" {
-		t.Errorf("mod.Name = %q, want %q", mod.Name, "dict")
+	callable, ok := v.(starlark.Callable)
+	if !ok {
+		t.Fatalf(`globals["dict"] is %T, want starlark.Callable`, v)
+	}
+	if got := callable.Name(); got != "dict" {
+		t.Errorf("Callable.Name() = %q, want %q", got, "dict")
 	}
 
 	wantMembers := []string{"merge", "deep_merge", "pick", "omit", "compact", "dig", "has_path"}
 	for _, name := range wantMembers {
-		if _, ok := mod.Members[name]; !ok {
-			t.Errorf(`dict.Members missing %q`, name)
+		val, err := attrs.Attr(name)
+		if err != nil {
+			t.Errorf("dict.%s Attr error: %v", name, err)
+			continue
+		}
+		if val == nil {
+			t.Errorf(`dict missing attr %q`, name)
 		}
 	}
 
 	// Guard against drift that silently adds or removes a member.
-	if got := len(mod.Members); got != len(wantMembers) {
-		t.Errorf("len(mod.Members) = %d, want %d (dict module drift?)", got, len(wantMembers))
+	if got := len(attrs.AttrNames()); got != len(wantMembers) {
+		t.Errorf("len(AttrNames()) = %d, want %d (dict module drift?)", got, len(wantMembers))
 	}
+}
+
+// TestDict_AsConstructor verifies that the `dict` binding is callable as
+// the universe dict() constructor even though it also exposes a namespace
+// (dict.merge, dict.deep_merge, ...). This is the whole point of the
+// callable-module wrapper — without it, `dict(base)` would fail because
+// the module shadows the universe builtin.
+func TestDict_AsConstructor(t *testing.T) {
+	// No-args: empty dict.
+	out := runDictScript(t, `
+result = dict()
+count = len(result)
+is_dict = type(result) == "dict"
+`)
+	assertInt(t, out, "count", 0)
+	assertBool(t, out, "is_dict", true)
+
+	// Shallow copy of a mapping.
+	out = runDictScript(t, `
+base = {"a": 1, "b": 2}
+result = dict(base)
+count = len(result)
+has_a = result["a"] == 1
+has_b = result["b"] == 2
+# mutating the copy does not affect the original
+result["c"] = 3
+base_unchanged = "c" not in base
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_b", true)
+	assertBool(t, out, "base_unchanged", true)
+
+	// From iterable of key-value pairs.
+	out = runDictScript(t, `
+result = dict([("a", 1), ("b", 2)])
+count = len(result)
+has_a = result["a"] == 1
+has_b = result["b"] == 2
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_b", true)
+
+	// From kwargs.
+	out = runDictScript(t, `
+result = dict(a=1, b=2)
+count = len(result)
+has_a = result["a"] == 1
+has_b = result["b"] == 2
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_b", true)
+
+	// Namespace access still works alongside call syntax.
+	out = runDictScript(t, `
+copied = dict({"a": 1})
+merged = dict.merge(copied, {"b": 2})
+count = len(merged)
+`)
+	assertInt(t, out, "count", 2)
 }
 
 // ---------------------------------------------------------------------------

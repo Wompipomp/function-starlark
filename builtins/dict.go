@@ -14,10 +14,10 @@ import (
 // maxMergeDepth is the maximum recursion depth for dict.deep_merge.
 const maxMergeDepth = 32
 
-// DictModule is the predeclared "dict" namespace module.
-// It provides dict manipulation functions for safe merging, filtering,
-// and nested path traversal of Kubernetes-style dictionaries.
-var DictModule = &starlarkstruct.Module{
+// dictInnerModule holds the namespace members for the "dict" binding
+// (dict.merge, dict.deep_merge, ...). It is wrapped by DictModule so that
+// the binding is also callable as the universe dict() constructor.
+var dictInnerModule = &starlarkstruct.Module{
 	Name: "dict",
 	Members: starlark.StringDict{
 		"merge":      starlark.NewBuiltin("dict.merge", dictMergeImpl),
@@ -29,6 +29,49 @@ var DictModule = &starlarkstruct.Module{
 		"has_path":   starlark.NewBuiltin("dict.has_path", dictHasPathImpl),
 	},
 }
+
+// universeDict is the universe dict() builtin captured at init time.
+// DictModule.CallInternal delegates to it so dict(), dict(mapping),
+// dict(iterable), and dict(**kwargs) behave identically to the shadowed
+// universe builtin.
+var universeDict = starlark.Universe["dict"].(*starlark.Builtin)
+
+// callableDictModule is a starlark.Value that behaves both as a module
+// (attribute access: dict.merge, dict.deep_merge, ...) and as a callable
+// (dict(), dict(mapping), dict(iterable), dict(**kwargs)). It lets the
+// "dict" predeclared binding reclaim its namespace without losing access
+// to the shadowed universe dict() constructor.
+type callableDictModule struct {
+	inner *starlarkstruct.Module
+}
+
+var (
+	_ starlark.Value    = (*callableDictModule)(nil)
+	_ starlark.HasAttrs = (*callableDictModule)(nil)
+	_ starlark.Callable = (*callableDictModule)(nil)
+)
+
+func (m *callableDictModule) String() string        { return m.inner.String() }
+func (m *callableDictModule) Type() string          { return m.inner.Type() }
+func (m *callableDictModule) Truth() starlark.Bool  { return m.inner.Truth() }
+func (m *callableDictModule) Hash() (uint32, error) { return m.inner.Hash() }
+func (m *callableDictModule) Freeze()               { m.inner.Freeze() }
+
+func (m *callableDictModule) Attr(name string) (starlark.Value, error) {
+	return m.inner.Attr(name)
+}
+func (m *callableDictModule) AttrNames() []string { return m.inner.AttrNames() }
+
+func (m *callableDictModule) Name() string { return "dict" }
+
+func (m *callableDictModule) CallInternal(thread *starlark.Thread, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	return universeDict.CallInternal(thread, args, kwargs)
+}
+
+// DictModule is the predeclared "dict" binding. It exposes the namespace
+// members (dict.merge, dict.deep_merge, ...) and is also callable as the
+// universe dict() constructor.
+var DictModule = &callableDictModule{inner: dictInnerModule}
 
 // dictItems extracts key-value tuples from any dict-like Starlark value.
 // It supports *starlark.Dict, *convert.StarlarkDict, and *schema.SchemaDict.
