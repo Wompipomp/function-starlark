@@ -90,6 +90,7 @@ func BuildGlobals(
 		"set_condition":          condCollector.SetConditionBuiltin(),
 		"emit_event":             condCollector.EmitEventBuiltin(),
 		"fatal":                  condCollector.FatalBuiltin(),
+		"set_composite_ready":    collector.SetCompositeReadyBuiltin(),
 		"set_connection_details": connCollector.SetConnectionDetailsBuiltin(),
 		"set_xr_status": starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 			return setXRStatus(b.Name(), dxr, args, kwargs)
@@ -481,4 +482,68 @@ func readyToProto(r resource.Ready) fnv1.Ready {
 	default:
 		return fnv1.Ready_READY_UNSPECIFIED
 	}
+}
+
+const (
+	CompositeReadyConditionType = "ComposedResourcesReady"
+	compositeReadyReasonPending = "PendingConditionalResources"
+)
+
+// ApplyCompositeReady sets rsp.Desired.Composite.Ready. An explicit
+// set_composite_ready() call wins; otherwise any non-optional Resource(when=False)
+// skip flips Ready to False and emits a ComposedResourcesReady=False condition.
+// With neither, Ready is left UNSPECIFIED.
+func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc *ConditionCollector) {
+	override, skips := collector.compositeReadyState()
+
+	if !override.Set && len(skips) == 0 {
+		return
+	}
+
+	if rsp.Desired == nil {
+		rsp.Desired = &fnv1.State{}
+	}
+	if rsp.Desired.Composite == nil {
+		rsp.Desired.Composite = &fnv1.Resource{}
+	}
+
+	if override.Set {
+		if override.Ready {
+			rsp.Desired.Composite.Ready = fnv1.Ready_READY_TRUE
+		} else {
+			rsp.Desired.Composite.Ready = fnv1.Ready_READY_FALSE
+		}
+		if override.Reason != "" {
+			status := "True"
+			if !override.Ready {
+				status = "False"
+			}
+			cc.AddCondition(CollectedCondition{
+				Type:    CompositeReadyConditionType,
+				Status:  status,
+				Reason:  override.Reason,
+				Message: override.Message,
+				Target:  "CompositeAndClaim",
+			})
+		}
+		return
+	}
+
+	rsp.Desired.Composite.Ready = fnv1.Ready_READY_FALSE
+
+	parts := make([]string, 0, len(skips))
+	for _, s := range skips {
+		if s.Reason != "" {
+			parts = append(parts, fmt.Sprintf("%q (%s)", s.Name, s.Reason))
+		} else {
+			parts = append(parts, fmt.Sprintf("%q", s.Name))
+		}
+	}
+	cc.AddCondition(CollectedCondition{
+		Type:    CompositeReadyConditionType,
+		Status:  "False",
+		Reason:  compositeReadyReasonPending,
+		Message: fmt.Sprintf("Pending resources: %s", strings.Join(parts, "; ")),
+		Target:  "CompositeAndClaim",
+	})
 }

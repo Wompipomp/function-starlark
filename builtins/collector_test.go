@@ -2029,7 +2029,7 @@ func TestCollector_RecordSkip_Basic(t *testing.T) {
 	label := "test.star"
 	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
 
-	c.recordSkip("my-resource", "not needed")
+	c.recordSkip("my-resource", "not needed", true)
 
 	events := cc.Events()
 	if len(events) != 1 {
@@ -2059,8 +2059,8 @@ func TestCollector_RecordSkip_Dedup(t *testing.T) {
 	label := "recordskip-dedup.star"
 	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
 
-	c.recordSkip("x", "r1")
-	c.recordSkip("x", "r2")
+	c.recordSkip("x", "r1", true)
+	c.recordSkip("x", "r2", true)
 
 	events := cc.Events()
 	if len(events) != 1 {
@@ -2080,8 +2080,8 @@ func TestCollector_RecordSkip_DifferentNames(t *testing.T) {
 	label := "recordskip-diff.star"
 	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
 
-	c.recordSkip("a", "r1")
-	c.recordSkip("b", "r2")
+	c.recordSkip("a", "r1", true)
+	c.recordSkip("b", "r2", true)
 
 	events := cc.Events()
 	if len(events) != 2 {
@@ -2098,7 +2098,7 @@ func TestCollector_RecordSkip_EventParity(t *testing.T) {
 	cc := NewConditionCollector()
 	// Collector A: test recordSkip directly.
 	cA := NewCollector(cc, "parity.star", nil, nil)
-	cA.recordSkip("x", "some reason")
+	cA.recordSkip("x", "some reason", true)
 
 	// Collector B: test via skip_resource builtin.
 	cB := NewCollector(cc, "parity.star", nil, nil)
@@ -2147,7 +2147,7 @@ func TestCollector_RecordSkip_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			c.recordSkip("shared", "reason")
+			c.recordSkip("shared", "reason", true)
 		}()
 	}
 	wg.Wait()
@@ -3327,5 +3327,267 @@ func TestCollector_BodyAutoCompact_SchemaDict(t *testing.T) {
 	}
 	if _, ok := fields["optional"]; ok {
 		t.Error("expected 'optional' (None) to be stripped from SchemaDict body, but it is present")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Composite readiness gating: optional= kwarg and set_composite_ready()
+// ---------------------------------------------------------------------------
+
+// callResourceWhenFalse is a helper to invoke Resource(name, body=None, when=False, skip_reason=..., <extra kwargs>).
+// Returns any error from the call.
+func callResourceWhenFalse(c *Collector, name, skipReason string, extra []starlark.Tuple) error {
+	thread := new(starlark.Thread)
+	kwargs := []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("skip_reason"), starlark.String(skipReason)},
+	}
+	kwargs = append(kwargs, extra...)
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String(name),
+		starlark.None,
+	}, kwargs)
+	return err
+}
+
+func TestCollector_Gating_WhenFalseDefaultGates(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+
+	if err := callResourceWhenFalse(c, "r1", "not yet", nil); err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	skips := c.GatingSkips()
+	if len(skips) != 1 {
+		t.Fatalf("GatingSkips() len = %d, want 1", len(skips))
+	}
+	if skips[0].Name != "r1" || skips[0].Reason != "not yet" {
+		t.Errorf("GatingSkips()[0] = %+v, want {Name:r1 Reason:\"not yet\"}", skips[0])
+	}
+}
+
+func TestCollector_Gating_OptionalTrueDoesNotGate(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+
+	err := callResourceWhenFalse(c, "backup", "backups disabled", []starlark.Tuple{
+		{starlark.String("optional"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	if got := c.GatingSkips(); len(got) != 0 {
+		t.Errorf("GatingSkips() = %+v, want empty (optional=True)", got)
+	}
+	// Skip event must still be emitted even when optional=True.
+	// (Observability of the skip is independent of the gating decision.)
+	if _, skipped := c.skipped["backup"]; !skipped {
+		t.Error("resource should still be recorded as skipped")
+	}
+}
+
+func TestCollector_Gating_OptionalFalseExplicitGates(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+
+	err := callResourceWhenFalse(c, "r1", "explicit", []starlark.Tuple{
+		{starlark.String("optional"), starlark.False},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if got := c.GatingSkips(); len(got) != 1 {
+		t.Errorf("GatingSkips() len = %d, want 1", len(got))
+	}
+}
+
+func TestCollector_Gating_InvalidOptionalType(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+
+	err := callResourceWhenFalse(c, "r1", "reason", []starlark.Tuple{
+		{starlark.String("optional"), starlark.String("yes")},
+	})
+	if err == nil {
+		t.Fatal("expected type error for non-bool optional, got nil")
+	}
+	if !strings.Contains(err.Error(), "optional") {
+		t.Errorf("error = %v, want mention of optional", err)
+	}
+}
+
+func TestCollector_Gating_Dedup(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+
+	if err := callResourceWhenFalse(c, "r1", "first", nil); err != nil {
+		t.Fatalf("first call error: %v", err)
+	}
+	// Second call for the same name should be a no-op (skipped map dedups).
+	if err := callResourceWhenFalse(c, "r1", "second", nil); err != nil {
+		t.Fatalf("second call error: %v", err)
+	}
+
+	skips := c.GatingSkips()
+	if len(skips) != 1 {
+		t.Errorf("GatingSkips() len = %d, want 1 (deduped)", len(skips))
+	}
+}
+
+func TestCollector_Gating_PreserveObservedFoundDoesNotGate(t *testing.T) {
+	// Build an observed dict containing "r1" so the cliff-guard finds it.
+	observed := convert.NewStarlarkDict(1)
+	obsBody := convert.NewStarlarkDict(0)
+	_ = obsBody.SetField("apiVersion", starlark.String("v1"))
+	_ = obsBody.SetField("kind", starlark.String("Dummy"))
+	_ = observed.SetKey(starlark.String("r1"), obsBody)
+	observed.Freeze()
+
+	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
+
+	err := callResourceWhenFalse(c, "r1", "preserved", []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Observed body was emitted; no gating should be recorded.
+	if got := c.GatingSkips(); len(got) != 0 {
+		t.Errorf("GatingSkips() = %+v, want empty (preserve found)", got)
+	}
+	if _, emitted := c.Resources()["r1"]; !emitted {
+		t.Error("expected r1 to be emitted from observed body")
+	}
+}
+
+func TestCollector_Gating_PreserveObservedMissGates(t *testing.T) {
+	// Empty observed dict: preserve miss should skip + gate (default optional=False).
+	observed := convert.NewStarlarkDict(0)
+	observed.Freeze()
+	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
+
+	err := callResourceWhenFalse(c, "r1", "preserved-miss", []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if got := c.GatingSkips(); len(got) != 1 {
+		t.Errorf("GatingSkips() len = %d, want 1 (preserve miss should gate)", len(got))
+	}
+}
+
+func TestCollector_Gating_PreserveObservedMissOptionalDoesNotGate(t *testing.T) {
+	observed := convert.NewStarlarkDict(0)
+	observed.Freeze()
+	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
+
+	err := callResourceWhenFalse(c, "r1", "preserved-miss", []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("optional"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if got := c.GatingSkips(); len(got) != 0 {
+		t.Errorf("GatingSkips() = %+v, want empty (optional=True)", got)
+	}
+}
+
+func TestCollector_Gating_SkipResourceNeverGates(t *testing.T) {
+	// skip_resource is a pure observability primitive -- it emits a Warning
+	// event and records a skip but never gates composite readiness. Gating
+	// lives on Resource(when=False) where emission is actually decided.
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
+		starlark.String("r1"),
+		starlark.String("just no"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("skip_resource() error: %v", err)
+	}
+
+	if got := c.GatingSkips(); len(got) != 0 {
+		t.Errorf("GatingSkips() = %+v, want empty (skip_resource never gates)", got)
+	}
+}
+
+func TestCollector_SetCompositeReady_False(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.False,
+	}, []starlark.Tuple{
+		{starlark.String("reason"), starlark.String("WaitingForCluster")},
+		{starlark.String("message"), starlark.String("cluster is still provisioning")},
+	})
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	got := c.CompositeReadyOverride()
+	if !got.Set {
+		t.Fatal("Override.Set = false, want true")
+	}
+	if got.Ready {
+		t.Error("Override.Ready = true, want false")
+	}
+	if got.Reason != "WaitingForCluster" {
+		t.Errorf("Override.Reason = %q, want WaitingForCluster", got.Reason)
+	}
+	if got.Message != "cluster is still provisioning" {
+		t.Errorf("Override.Message = %q, want cluster is still provisioning", got.Message)
+	}
+}
+
+func TestCollector_SetCompositeReady_True(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.True,
+	}, nil)
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	got := c.CompositeReadyOverride()
+	if !got.Set || !got.Ready {
+		t.Errorf("Override = %+v, want {Set:true Ready:true}", got)
+	}
+}
+
+func TestCollector_SetCompositeReady_LastCallWins(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, _ = starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.True,
+	}, nil)
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.False,
+	}, []starlark.Tuple{
+		{starlark.String("reason"), starlark.String("Flipped")},
+	})
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	got := c.CompositeReadyOverride()
+	if got.Ready || got.Reason != "Flipped" {
+		t.Errorf("Override = %+v, want last call (Ready=false, Reason=Flipped)", got)
+	}
+}
+
+func TestCollector_SetCompositeReady_WrongType(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.String("yes"),
+	}, nil)
+	if err == nil {
+		t.Fatal("expected type error for non-bool ready arg, got nil")
 	}
 }

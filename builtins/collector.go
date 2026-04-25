@@ -74,17 +74,36 @@ type CollectedResource struct {
 	ConnectionDetails map[string][]byte
 }
 
+// GatingSkip records a skip that should block the composite resource from
+// being marked Ready. Resources skipped with optional=True do NOT appear here.
+type GatingSkip struct {
+	Name   string
+	Reason string
+}
+
+// CompositeReadyOverride captures an explicit set_composite_ready() call.
+// When Set is false, the override is absent and auto-gating (via GatingSkip)
+// decides the composite ready state.
+type CompositeReadyOverride struct {
+	Set     bool
+	Ready   bool
+	Reason  string
+	Message string
+}
+
 // Collector accumulates Resource() calls from Starlark scripts.
 // Duplicate names use last-wins semantics.
 type Collector struct {
-	mu           sync.Mutex
-	resources    map[string]CollectedResource
-	skipped      map[string]bool
-	dependencies []DependencyPair
-	cc           *ConditionCollector
-	scriptName   string
-	oxr          *structpb.Struct      // frozen observed XR, for label extraction
-	observed     *convert.StarlarkDict // frozen observed composed resources; may be nil
+	mu             sync.Mutex
+	resources      map[string]CollectedResource
+	skipped        map[string]bool
+	gatingSkips    []GatingSkip
+	compositeReady CompositeReadyOverride
+	dependencies   []DependencyPair
+	cc             *ConditionCollector
+	scriptName     string
+	oxr            *structpb.Struct      // frozen observed XR, for label extraction
+	observed       *convert.StarlarkDict // frozen observed composed resources; may be nil
 }
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
@@ -115,6 +134,11 @@ func (c *Collector) Builtin() *starlark.Builtin {
 // observability.
 func (c *Collector) SkipResourceBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("skip_resource", c.skipResourceFn)
+}
+
+// SetCompositeReadyBuiltin returns the "set_composite_ready" builtin.
+func (c *Collector) SetCompositeReadyBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("set_composite_ready", c.setCompositeReadyFn)
 }
 
 // lookupObservedBody looks up a resource by name in the observed composed
@@ -183,15 +207,20 @@ func (c *Collector) recordPreserve(name string, body *structpb.Struct, message s
 }
 
 // recordSkip handles skip registration, Warning event emission, and metric
-// increment. It is a no-op if name was already skipped. The caller must NOT
-// hold c.mu when calling recordSkip (lock ordering: c.mu before cc.mu).
-func (c *Collector) recordSkip(name, reason string) {
+// increment. When gate is true and the skip is new, the resource is also
+// recorded as gating composite resource readiness (XR Ready=False).
+// It is a no-op if name was already skipped. The caller must NOT hold c.mu
+// when calling recordSkip (lock ordering: c.mu before cc.mu).
+func (c *Collector) recordSkip(name, reason string, gate bool) {
 	c.mu.Lock()
 	if c.skipped[name] {
 		c.mu.Unlock()
 		return
 	}
 	c.skipped[name] = true
+	if gate {
+		c.gatingSkips = append(c.gatingSkips, GatingSkip{Name: name, Reason: reason})
+	}
 	c.mu.Unlock()
 
 	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName).Inc()
@@ -203,9 +232,70 @@ func (c *Collector) recordSkip(name, reason string) {
 	})
 }
 
-// skipResourceFn implements skip_resource(name, reason). It records the skip,
-// emits a Warning event on first call for a given name, and errors if the
-// resource was already emitted via Resource().
+// setCompositeReadyFn implements set_composite_ready(ready, reason="", message="").
+// It records an explicit override of the composite resource's Ready state.
+// When called more than once, the last call wins.
+func (c *Collector) setCompositeReadyFn(
+	_ *starlark.Thread,
+	b *starlark.Builtin,
+	args starlark.Tuple,
+	kwargs []starlark.Tuple,
+) (starlark.Value, error) {
+	var ready bool
+	var reason, message string
+
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"ready", &ready, "reason?", &reason, "message?", &message); err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	c.compositeReady = CompositeReadyOverride{
+		Set:     true,
+		Ready:   ready,
+		Reason:  reason,
+		Message: message,
+	}
+	c.mu.Unlock()
+
+	return starlark.None, nil
+}
+
+// GatingSkips returns a copy of skipped resources that gate composite readiness.
+func (c *Collector) GatingSkips() []GatingSkip {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return copyGatingSkips(c.gatingSkips)
+}
+
+// CompositeReadyOverride returns the explicit composite-ready override, if any.
+// The returned value's Set field is true iff set_composite_ready() was called.
+func (c *Collector) CompositeReadyOverride() CompositeReadyOverride {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.compositeReady
+}
+
+// compositeReadyState reads the override and gating skips in a single lock
+// acquisition for the ApplyCompositeReady hot path.
+func (c *Collector) compositeReadyState() (CompositeReadyOverride, []GatingSkip) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.compositeReady, copyGatingSkips(c.gatingSkips)
+}
+
+func copyGatingSkips(src []GatingSkip) []GatingSkip {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]GatingSkip, len(src))
+	copy(out, src)
+	return out
+}
+
+// skipResourceFn implements skip_resource(name, reason). Records the skip and
+// emits a Warning event (deduped per name); errors if the resource was already
+// emitted via Resource(). Does not gate composite readiness.
 func (c *Collector) skipResourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -227,7 +317,7 @@ func (c *Collector) skipResourceFn(
 	c.mu.Unlock()
 
 	// Delegate to shared skip path (handles dedup, metric, Warning event).
-	c.recordSkip(name, reason)
+	c.recordSkip(name, reason, false)
 	return starlark.None, nil
 }
 
@@ -288,7 +378,7 @@ func validateBoolKwarg(val starlark.Value, paramName, resourceName string) (bool
 	return !bool(b), true, nil
 }
 
-// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None, skip_reason="", preserve_observed=None) Starlark builtin.
+// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None, skip_reason="", preserve_observed=None, optional=False) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -305,6 +395,7 @@ func (c *Collector) resourceFn(
 	var whenVal starlark.Value
 	var skipReason string
 	var preserveVal starlark.Value
+	var optional bool
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"name", &name, "body", &bodyVal, "ready?", &readyVal,
@@ -314,7 +405,8 @@ func (c *Collector) resourceFn(
 		"external_name??", &externalNameVal,
 		"when?", &whenVal,
 		"skip_reason?", &skipReason,
-		"preserve_observed?", &preserveVal); err != nil {
+		"preserve_observed?", &preserveVal,
+		"optional?", &optional); err != nil {
 		return nil, err
 	}
 
@@ -331,6 +423,8 @@ func (c *Collector) resourceFn(
 	}
 	preserveActive := preserveProvided && preserveVal == starlark.True
 
+	gate := !optional
+
 	// Validate skip_reason is provided when gating off.
 	// skip_reason is always legal (stable across reconciliations where `when`
 	// may flip between True and False); it is only consulted on skip paths.
@@ -340,7 +434,7 @@ func (c *Collector) resourceFn(
 
 	// GATE-01: when=False without preserve -> skip.
 	if whenFalse && !preserveActive {
-		c.recordSkip(name, skipReason)
+		c.recordSkip(name, skipReason, gate)
 		return starlark.None, nil
 	}
 
@@ -359,13 +453,13 @@ func (c *Collector) resourceFn(
 		if skipReason != "" {
 			reason = skipReason
 		}
-		c.recordSkip(name, reason)
+		c.recordSkip(name, reason, gate)
 		return starlark.None, nil
 	}
 
 	// GATE-05: body=None without preserve -> warn and skip.
 	if bodyVal == starlark.None && !preserveActive {
-		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.")
+		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.", gate)
 		return starlark.None, nil
 	}
 
@@ -379,7 +473,7 @@ func (c *Collector) resourceFn(
 			c.recordPreserve(name, s, "body=None, emitting observed body")
 			return &ResourceRef{name: name}, nil
 		}
-		c.recordSkip(name, "not found in observed state")
+		c.recordSkip(name, "not found in observed state", gate)
 		return starlark.None, nil
 	}
 

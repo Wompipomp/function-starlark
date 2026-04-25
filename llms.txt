@@ -45,7 +45,7 @@ spec:
 
 ## Predeclared functions
 
-### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=True, skip_reason="", preserve_observed=False)
+### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=True, skip_reason="", preserve_observed=False, optional=False)
 
 Register a desired composed resource. This is the primary function.
 
@@ -59,6 +59,7 @@ Register a desired composed resource. This is the primary function.
 - when: Bool gate (True/False only). False skips the resource (requires skip_reason). Non-bool values raise type error.
 - skip_reason: Human-readable skip reason. Required when when=False without preserve_observed. Appears in Warning event.
 - preserve_observed: When True and body is None (or when=False), emit the observed body verbatim if found. Cliff-guard for resources with temporarily unavailable config.
+- optional: When False (default), a skip (when=False without a successful preserve_observed) gates the XR to Ready=False and emits a ComposedResourcesReady=False condition. Set True for resources that are expected to be absent by design (feature flags, tier add-ons).
 - Returns: ResourceRef with .name attribute for use in depends_on.
 
 Example:
@@ -130,6 +131,19 @@ if not region:
     fatal("spec.region is required")
 ```
 
+### set_composite_ready(ready, reason="", message="")
+
+Explicitly set the XR's Ready state. Takes precedence over auto-gating from Resource(when=False) skips (last call wins). When reason is provided, emits a ComposedResourcesReady condition targeted at CompositeAndClaim (with message if supplied). A message without a reason is dropped (Kubernetes conditions require a reason). The ComposedResourcesReady type is reserved -- set_condition("ComposedResourcesReady", ...) raises an error.
+
+```python
+# Gate the XR on observed cluster phase, not on a conditional Resource()
+phase = get_observed("db-cluster", "status.atProvider.phase", "")
+if phase != "Running":
+    set_composite_ready(False,
+        reason="WaitingForCluster",
+        message="cluster phase is %s" % phase)
+```
+
 ### set_connection_details(details)
 
 Set XR-level connection details.
@@ -153,7 +167,7 @@ set_xr_status("atProvider", {"bucketCount": len(buckets), "environment": env})
 
 ### skip_resource(name, reason)
 
-Remove a resource from desired state (e.g., conditionally skip a resource from a previous pipeline step).
+Remove a resource from desired state (e.g., conditionally skip a resource from a previous pipeline step). Pure observability primitive: emits a Warning event, does NOT gate composite readiness. For new code prefer Resource(..., when=False) which also gates the XR; skip_resource is mainly for removing a resource that a prior pipeline step added.
 ```python
 skip_resource("monitoring", "monitoring only in prod")
 ```

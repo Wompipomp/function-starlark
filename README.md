@@ -24,13 +24,19 @@ with zero external toolchain.
   that catch typos, wrong types, and missing fields at construction time. Mix
   schema-validated and plain dict resources freely.
   [Builtins reference](docs/builtins-reference.md)
-- **34 predeclared names** -- 6 globals, 22 functions, and 6 namespace modules
+- **35 predeclared names** -- 6 globals, 23 functions, and 6 namespace modules
   (json, crypto, encoding, dict, regex, yaml) available without imports.
   Use `get_extra_resource()` for one-call extra-resource field access and
   `set_response_ttl()` for custom requeue intervals.
   Recursive `dict.compact()` prunes None from nested dicts. Resource()
   `when`/`preserve_observed` kwargs enable declarative gating and cliff-guard
   patterns. [Builtins reference](docs/builtins-reference.md)
+- **Composite readiness gating** -- `Resource(when=False)` automatically holds
+  the XR's Ready condition at False until the dependency is met (opt-out with
+  `optional=True` for legitimately-absent resources), and `set_composite_ready()`
+  lets you explicitly gate the XR on observed state. Closes the classic
+  Crossplane gap where conditional resources let the XR flip to Ready
+  prematurely. [Composite readiness docs](docs/builtins-reference.md#set_composite_ready)
 - **Namespace alias imports** -- `load("module.star", ns="*")` wraps all exports
   in a struct, solving name conflicts when loading multiple provider schema
   packages. [Module system](docs/module-system.md)

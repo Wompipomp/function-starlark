@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 34 predeclared names -- 6 globals, 22 functions, and
+function-starlark provides 35 predeclared names -- 6 globals, 23 functions, and
 6 namespace modules -- that are automatically available in every Starlark script
 without import. These are the core API for interacting with Crossplane's
 composite resource model.
@@ -30,6 +30,7 @@ composite resource model.
 | `set_condition()` | function | Set a condition on the composite resource |
 | `emit_event()` | function | Emit a Normal or Warning event |
 | `fatal()` | function | Halt execution with a fatal error |
+| `set_composite_ready()` | function | Explicitly set the XR's Ready state (overrides auto-gating) |
 | `set_connection_details()` | function | Set XR-level connection details |
 | `set_xr_status()` | function | Set XR status field at dot-path with auto-created intermediates |
 | `get_observed()` | function | One-call observed resource field lookup with default |
@@ -197,7 +198,7 @@ protobuf structures for Kubernetes resource access.
 ```python
 ref = Resource(name, body, ready=None, labels=<auto>, connection_details=None,
                depends_on=None, external_name=None,
-               when=True, skip_reason="", preserve_observed=False)
+               when=True, skip_reason="", preserve_observed=False, optional=False)
 ```
 
 Register a desired composed resource. This is the primary function for creating
@@ -217,6 +218,7 @@ Kubernetes resources in a composition.
 | `when` | bool | `True` | Gate resource emission. `False` skips the resource (requires `skip_reason`). Only accepts `True` or `False` -- non-bool values raise a type error. |
 | `skip_reason` | string | `""` | Human-readable reason for skipping. Required when `when=False` (without `preserve_observed`). Appears in a Warning event on skip paths. Always legal to set (unused on non-skip paths); useful when `when` is a runtime expression that may flip between `True` and `False` across reconciliations. |
 | `preserve_observed` | bool | `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. |
+| `optional` | bool | `False` | When a skip path is taken (e.g. `when=False` without a successful `preserve_observed`), the default (`optional=False`) gates the **composite resource** Ready state to `False` so the XR does not appear ready while a conditional dependency is missing. Set `optional=True` for resources that are legitimately absent by design (feature flags, tier-gated add-ons) so their absence does not block the XR from being ready. |
 
 **Returns:** ResourceRef with a `.name` attribute (the composition resource
 name). Use in `depends_on` for other resources.
@@ -295,8 +297,34 @@ patterns. The `when` gate is evaluated first (before body type-checking), so whe
   raises an error. A reason must be provided when skipping a resource.
 - Non-bool value for `when` raises a type error. Only `True` or `False` are
   accepted (e.g., `when=1` or `when="yes"` will fail).
+- Non-bool value for `optional` raises a type error.
 - `body=None` without `preserve_observed=True` is not a fatal error but logs a
   warning suggesting `preserve_observed=True` and skips the resource.
+
+**optional -- composite readiness gating:**
+
+When a resource is skipped (`when=False` without a successful
+`preserve_observed`, or `body=None` without `preserve_observed`) the skip is
+*gating* by default: the composite resource's `Ready` state is forced to
+`False` and a `ComposedResourcesReady=False` condition is emitted with the
+skipped resource name and reason. This closes the classic Crossplane
+conditional-resource gap where the XR flips to `Ready=True` before all
+dependencies have been rendered.
+
+Set `optional=True` for resources that are *expected* to be absent under
+certain configurations (feature flags, tier-gated add-ons, environment opt-ins);
+such skips are still recorded as Warning events but do **not** gate XR ready.
+
+`set_composite_ready()` always overrides auto-gating.
+
+| Scenario | `optional` | XR `Ready` effect | Condition emitted |
+|---|---|---|---|
+| `when=True` or emitted body | any | unchanged (auto-ready decides) | none |
+| `when=False` skipped, default | `False` | `READY_FALSE` | `ComposedResourcesReady=False` |
+| `when=False` skipped, opted out | `True` | unchanged | none |
+| `preserve_observed=True`, found | any | unchanged | none |
+| `preserve_observed=True`, miss | `False` | `READY_FALSE` | `ComposedResourcesReady=False` |
+| `preserve_observed=True`, miss | `True` | unchanged | none |
 
 **Example:**
 
@@ -349,9 +377,16 @@ Resource("iam-binding", {
     "spec": {"forProvider": {"project": get(observed, "project.status.atProvider.projectId", "")}},
 }, depends_on=[(project, "status.atProvider.projectId")])
 
-# Conditional emission with gating
-Resource("optional-feature", feature_body,
-    when=feature_enabled, skip_reason="feature disabled by spec")
+# Conditional emission that GATES the XR Ready until the dependency is met.
+# If cluster_ready is False, the XR stays Ready=False with a
+# ComposedResourcesReady=False condition that names the pending resource.
+Resource("db-replica", replica_body,
+    when=cluster_ready, skip_reason="waiting for cluster to provision")
+
+# Truly-optional resource: its absence must NOT block the XR from being ready.
+Resource("backup-schedule", backup_body,
+    when=backups_enabled, skip_reason="backups disabled by spec",
+    optional=True)
 
 # Cliff guard: preserve observed resource when config is unavailable
 config = get(oxr, "spec.externalConfig", None)
@@ -370,6 +405,12 @@ skip_resource(name, reason)
 Remove a resource from the desired state. Use this to conditionally remove a
 resource that was added by a previous pipeline step. A Warning event is emitted
 on the first call for a given resource name.
+
+`skip_resource` is a pure observability primitive -- it does **not** gate
+composite readiness. Gating belongs on `Resource(..., when=False)` where the
+emission decision is made. In most new code the `when=` kwarg on `Resource()`
+removes the need for `skip_resource` entirely; use `skip_resource` only when
+suppressing a resource produced by a prior pipeline step.
 
 **Parameters:**
 
@@ -526,6 +567,69 @@ fatal result to Crossplane, which sets a `ReconcileError` condition on the XR.
 region = get(oxr, "spec.region", "")
 if not region:
     fatal(message="spec.region is required")
+```
+
+---
+
+### set_composite_ready
+
+```python
+set_composite_ready(ready, reason="", message="")
+```
+
+Explicitly set the composite resource's (XR) `Ready` state in the function
+response. Use this when the XR's readiness depends on observed state rather
+than on conditional resource emission -- for example, waiting until a database
+cluster reaches `Running` before marking the XR ready.
+
+An explicit call **always overrides** auto-gating from
+`Resource(..., when=False)` skips (see the `optional` parameter on
+`Resource()`). Last call wins if invoked more than once.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ready` | bool | required | `True` to mark the XR Ready; `False` to mark it not ready. |
+| `reason` | string | `""` | Optional machine-readable reason surfaced as a `ComposedResourcesReady` condition. |
+| `message` | string | `""` | Optional human-readable message surfaced alongside `reason`. |
+
+**Returns:** None.
+
+**Conditions emitted:**
+
+- If `reason` is provided, emits a `ComposedResourcesReady` condition with
+  status matching `ready`, target `CompositeAndClaim`, and the supplied
+  `message` (if any).
+- If `reason` is omitted, no condition is emitted (only the `Ready` field is
+  updated on the response). A `message` without a `reason` is silently
+  dropped -- Kubernetes conditions require a reason.
+
+The `ComposedResourcesReady` condition type is reserved. Calling
+`set_condition("ComposedResourcesReady", ...)` directly raises an error; use
+this builtin or `Resource(..., when=False)` instead.
+
+**Interaction with auto-gating:**
+
+- Explicit `set_composite_ready(True)` overrides auto-gating from skipped
+  resources -- the XR will be `Ready=True` even if conditional resources were
+  skipped.
+- Explicit `set_composite_ready(False)` takes precedence and, when a `reason`
+  is provided, replaces the auto-generated "PendingConditionalResources"
+  reason.
+
+**Example:**
+
+```python
+# Gate the XR on observed cluster phase rather than on a conditional Resource().
+phase = get_observed("db-cluster", "status.atProvider.phase", "")
+if phase != "Running":
+    set_composite_ready(False,
+        reason="WaitingForCluster",
+        message="cluster phase is %s, waiting for Running" % phase)
+
+# Force ready even though a legacy resource is always absent.
+set_composite_ready(True)
 ```
 
 ---

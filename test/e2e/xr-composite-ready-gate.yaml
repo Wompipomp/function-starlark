@@ -1,0 +1,13 @@
+# Auto-gating: Resource(when=False) with default optional=False gates the XR.
+# Expected outcome: XR stays Ready=False with a ComposedResourcesReady=False
+# condition mentioning 'pending-dep'.
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-composite-ready-gate
+  labels:
+    e2e-test: composite-ready
+spec:
+  compositionRef:
+    name: composite-ready-test
+  mode: gate

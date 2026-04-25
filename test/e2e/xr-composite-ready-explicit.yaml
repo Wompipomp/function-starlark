@@ -1,0 +1,13 @@
+# Explicit: set_composite_ready(False, reason=..., message=...) forces the XR
+# to stay Ready=False with the user-supplied reason, independent of any
+# resource-level skips.
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-composite-ready-explicit
+  labels:
+    e2e-test: composite-ready
+spec:
+  compositionRef:
+    name: composite-ready-test
+  mode: explicit

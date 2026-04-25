@@ -206,6 +206,76 @@ skip_resource("old-bucket", "Migrated to new storage backend")
 A Warning event is emitted for each skipped resource, and the
 `function_starlark_resources_skipped_total` counter is incremented.
 
+`skip_resource` is a pure observability primitive -- it does **not** gate
+composite readiness. That responsibility lives on `Resource(..., when=False)`;
+see the next section. In most new code the `when=` kwarg on `Resource()`
+removes the need for `skip_resource` entirely.
+
+## Composite readiness gating
+
+Crossplane aggregates the XR's Ready condition from whatever resources the
+function pipeline reports. If a conditional branch short-circuits and does not
+emit a resource at all, downstream readiness detectors (like
+[function-auto-ready](https://github.com/crossplane-contrib/function-auto-ready))
+have nothing to wait on and the XR flips to `Ready=True` prematurely. This is
+the long-standing
+[conditional-resource readiness gap](https://github.com/crossplane-contrib/function-auto-ready/issues/25).
+
+function-starlark closes this gap with two primitives:
+
+### Auto-gating via `Resource(when=False)`
+
+By default, a skipped resource gates the composite. The XR's Ready is set to
+False and a `ComposedResourcesReady=False` condition is emitted that names the
+skipped resources and their skip reasons:
+
+```python
+# XR stays Ready=False until the cluster is ready and this Resource can be rendered.
+Resource("db-replica", replica_body,
+    when=cluster_ready,
+    skip_reason="waiting for cluster to provision")
+```
+
+Set `optional=True` for resources that are *expected* to be absent under
+certain configurations (feature flags, tier-gated add-ons); such skips are
+still recorded as Warning events but do not gate the XR:
+
+```python
+# Absent by design -- the XR should still reach Ready.
+Resource("backup-schedule", backup_body,
+    when=backups_enabled,
+    skip_reason="backups disabled by spec",
+    optional=True)
+```
+
+`preserve_observed=True` interacts as follows: if the observed body is found
+and re-emitted, there is no skip and no gating; if it is missing, the skip
+path applies the `optional` rule.
+
+### Explicit `set_composite_ready`
+
+Use the builtin when XR readiness depends on observed state rather than
+conditional resource emission:
+
+```python
+phase = get_observed("db-cluster", "status.atProvider.phase", "")
+if phase != "Running":
+    set_composite_ready(False,
+        reason="WaitingForCluster",
+        message="cluster phase is %s, waiting for Running" % phase)
+```
+
+Precedence: an explicit `set_composite_ready()` call always wins over
+auto-gating from `Resource(when=False)` skips (last call wins if invoked more
+than once).
+
+### Condition surface
+
+The `ComposedResourcesReady` condition is targeted at `CompositeAndClaim` so
+claim users see the reason without inspecting the XR directly. The condition
+type is deliberately distinct from `Ready` (managed by Crossplane's
+aggregation) -- it is a supplementary, function-emitted signal.
+
 ## Conditions and events
 
 ### set_condition

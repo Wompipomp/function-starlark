@@ -84,6 +84,28 @@ func TestSetCondition_WithTarget(t *testing.T) {
 	}
 }
 
+func TestSetCondition_ReservedType(t *testing.T) {
+	cc := NewConditionCollector()
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, cc.SetConditionBuiltin(), starlark.Tuple{
+		starlark.String(CompositeReadyConditionType),
+		starlark.String("False"),
+		starlark.String("WhyNot"),
+		starlark.String("msg"),
+	}, nil)
+	if err == nil {
+		t.Fatal("set_condition with reserved type should error")
+	}
+	if !strings.Contains(err.Error(), CompositeReadyConditionType) ||
+		!strings.Contains(err.Error(), "set_composite_ready") {
+		t.Errorf("error = %v, want it to name the reserved type and suggest set_composite_ready()", err)
+	}
+	if got := cc.Conditions(); len(got) != 0 {
+		t.Errorf("expected no conditions recorded on reserved-type rejection, got %+v", got)
+	}
+}
+
 func TestSetCondition_MissingArgs(t *testing.T) {
 	cc := NewConditionCollector()
 	thread := new(starlark.Thread)

@@ -395,6 +395,10 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			return rsp, nil
 		}
 
+		// Must run before ApplyConditions so the auto-gating condition is emitted
+		// alongside user conditions.
+		builtins.ApplyCompositeReady(rsp, collector, condCollector)
+
 		// Apply pipeline context changes.
 		if err := builtins.ApplyContext(rsp, globals["context"]); err != nil {
 			fatal(errors.Wrapf(err, "applying context"))

@@ -6,10 +6,11 @@ End-to-end tests that run function-starlark in a real Crossplane cluster.
 
 | Test | Composition | What it validates |
 |------|-------------|-------------------|
-| **builtins** | `composition-builtins.yaml` | All 22 builtins: globals, safe access, Resource, conditions, events, status, connection details, schema, struct |
+| **builtins** | `composition-builtins.yaml` | All 23 function builtins: globals, safe access, Resource, conditions, events, status, connection details, schema, struct, composite readiness |
 | **oci-loading** | `composition-oci.yaml` | `load("oci://...")` from a local registry, transitive module resolution |
 | **star-imports** | `composition-star-imports.yaml` | Transitive `load("x.star", "*")` inside modules, diamond dependency pattern |
 | **depends-on** | `composition-depends-on.yaml` | Creation sequencing (A->B->C chain), deletion ordering via Usage resources |
+| **composite-ready** | `composition-composite-ready.yaml` | Composite readiness gating: auto-gate via `Resource(when=False)`, opt-out via `optional=True`, explicit `set_composite_ready(False, reason=..., message=...)` |
 
 ## Prerequisites
 

@@ -57,12 +57,13 @@ function-starlark provides these predeclared globals:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None)` | Register a desired composed resource; returns ResourceRef. `depends_on` accepts ResourceRef, string, or `(ref, "field.path")` tuple |
-| `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason |
+| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None, when=True, skip_reason="", preserve_observed=False, optional=False)` | Register a desired composed resource; returns ResourceRef. `depends_on` accepts ResourceRef, string, or `(ref, "field.path")` tuple. `when=False` auto-gates the XR to Ready=False (opt-out with `optional=True`). |
+| `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason. Pure observability -- does NOT gate the XR. For new code prefer `Resource(when=False, skip_reason=...)` which also handles composite-readiness gating. |
 | `get` | `get(obj, path, default=None)` | Safe nested dict access with dot-path or list-of-keys |
 | `set_condition` | `set_condition(type, status, reason, message, target="Composite")` | Set an XR condition |
 | `emit_event` | `emit_event(severity, message, target="Composite")` | Emit a Normal or Warning event |
 | `fatal` | `fatal(message)` | Halt execution with a fatal error |
+| `set_composite_ready` | `set_composite_ready(ready, reason="", message="")` | Explicitly set the XR's Ready state (takes precedence over auto-gating). KCL has no direct equivalent -- gate the composite via observed state. |
 | `set_connection_details` | `set_connection_details(dict)` | Set XR-level connection details |
 | `require_extra_resource` | `require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)` | Request a single extra resource |
 | `require_extra_resources` | `require_extra_resources(name, apiVersion, kind, match_labels)` | Request multiple extra resources by label selector |

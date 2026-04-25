@@ -83,6 +83,15 @@ func (cc *ConditionCollector) AddEvent(e CollectedEvent) {
 	cc.mu.Unlock()
 }
 
+// AddCondition appends a condition to the collector. Used by fn.go
+// post-processing (composite ready gating) to emit conditions outside of
+// Starlark execution.
+func (cc *ConditionCollector) AddCondition(c CollectedCondition) {
+	cc.mu.Lock()
+	cc.conditions = append(cc.conditions, c)
+	cc.mu.Unlock()
+}
+
 // setConditionFn implements set_condition(type, status, reason, message, target="Composite").
 func (cc *ConditionCollector) setConditionFn(
 	_ *starlark.Thread,
@@ -97,6 +106,10 @@ func (cc *ConditionCollector) setConditionFn(
 		"type", &typ, "status", &status, "reason", &reason,
 		"message", &message, "target?", &target); err != nil {
 		return nil, err
+	}
+
+	if typ == CompositeReadyConditionType {
+		return nil, fmt.Errorf("set_condition: %q is reserved for composite-ready gating; use set_composite_ready() or Resource(..., when=False) instead", CompositeReadyConditionType)
 	}
 
 	cc.mu.Lock()

@@ -1,0 +1,12 @@
+# Opt-out: Resource(when=False, optional=True) does NOT gate the XR.
+# Expected outcome: XR reaches Ready=True (only the "dummy" resource matters).
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-composite-ready-optional
+  labels:
+    e2e-test: composite-ready
+spec:
+  compositionRef:
+    name: composite-ready-test
+  mode: optional

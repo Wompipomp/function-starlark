@@ -5041,3 +5041,196 @@ func TestRunFunctionLabelsEmptyDict(t *testing.T) {
 		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
 	}
 }
+
+// runStarlarkSource is a small helper for composite-readiness integration tests
+// that only care about selected response fields.
+func runStarlarkSource(t *testing.T, script string) *fnv1.RunFunctionResponse {
+	t.Helper()
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+		},
+	}
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return rsp
+}
+
+// TestRunFunctionCompositeReady_WhenFalseAutoGates verifies that a skipped
+// Resource with when=False (default optional=False) flips the composite's
+// Ready to READY_FALSE and emits an informational condition.
+func TestRunFunctionCompositeReady_WhenFalseAutoGates(t *testing.T) {
+	rsp := runStarlarkSource(t, `Resource("db-replica", None, when=False, skip_reason="cluster not ready")`)
+
+	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+
+	var foundCond bool
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" && c.GetStatus() == fnv1.Status_STATUS_CONDITION_FALSE {
+			foundCond = true
+			if !strings.Contains(c.GetMessage(), "db-replica") {
+				t.Errorf("condition message = %q, want to mention db-replica", c.GetMessage())
+			}
+		}
+	}
+	if !foundCond {
+		t.Errorf("expected ComposedResourcesReady=False condition, got %+v", rsp.GetConditions())
+	}
+}
+
+// TestRunFunctionCompositeReady_OptionalDoesNotGate verifies optional=True
+// skips do not flip the composite's Ready state.
+func TestRunFunctionCompositeReady_OptionalDoesNotGate(t *testing.T) {
+	rsp := runStarlarkSource(t, `Resource("backup", None, when=False, skip_reason="backups disabled", optional=True)`)
+
+	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_UNSPECIFIED {
+		t.Errorf("Composite.Ready = %v, want READY_UNSPECIFIED (optional skip)", got)
+	}
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" {
+			t.Errorf("unexpected ComposedResourcesReady condition: %+v", c)
+		}
+	}
+}
+
+// TestRunFunctionCompositeReady_ExplicitOverride verifies set_composite_ready()
+// wins over auto-gating.
+func TestRunFunctionCompositeReady_ExplicitOverride(t *testing.T) {
+	rsp := runStarlarkSource(t, `
+Resource("db-replica", None, when=False, skip_reason="pending")
+set_composite_ready(True)
+`)
+
+	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_TRUE {
+		t.Errorf("Composite.Ready = %v, want READY_TRUE (explicit override wins)", got)
+	}
+}
+
+// TestRunFunctionCompositeReady_ExplicitFalseWithReason verifies
+// set_composite_ready(False, reason=..., message=...) emits a condition.
+func TestRunFunctionCompositeReady_ExplicitFalseWithReason(t *testing.T) {
+	rsp := runStarlarkSource(t, `set_composite_ready(False, reason="WaitingForCluster", message="cluster still provisioning")`)
+
+	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	var found bool
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" &&
+			c.GetReason() == "WaitingForCluster" &&
+			c.GetMessage() == "cluster still provisioning" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected user-specified condition, got %+v", rsp.GetConditions())
+	}
+}
+
+// TestRunFunctionCompositeReadyComposition is a preflight that runs the exact
+// Starlark body shipped in test/e2e/composition-composite-ready.yaml for all
+// three modes, so syntax errors or contract regressions are caught by go test
+// before any e2e cluster roundtrip.
+func TestRunFunctionCompositeReadyComposition(t *testing.T) {
+	script := `mode = get(oxr, "spec.mode", "gate")
+set_xr_status("test.mode", mode)
+
+Resource("dummy", {
+    "apiVersion": "nop.crossplane.io/v1alpha1",
+    "kind": "NopResource",
+    "spec": {"forProvider": {"conditionAfter": [
+        {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+        {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+    ]}},
+})
+
+if mode == "gate":
+    Resource("pending-dep", None,
+        when=False,
+        skip_reason="E2E: auto-gating test, dependency not yet provisioned")
+    set_xr_status("test.scenario", "auto-gate")
+elif mode == "optional":
+    Resource("optional-feature", None,
+        when=False,
+        skip_reason="E2E: optional feature disabled",
+        optional=True)
+    set_xr_status("test.scenario", "optional-optout")
+elif mode == "explicit":
+    set_composite_ready(False,
+        reason="WaitingForExternalSignal",
+        message="E2E: explicit set_composite_ready with reason/message")
+    set_xr_status("test.scenario", "explicit-false")
+else:
+    fatal("unknown mode %q, expected gate|optional|explicit" % mode)
+`
+
+	type expect struct {
+		ready     fnv1.Ready
+		condType  string
+		condReason string
+	}
+	cases := map[string]expect{
+		"gate":     {fnv1.Ready_READY_FALSE, "ComposedResourcesReady", "PendingConditionalResources"},
+		"optional": {fnv1.Ready_READY_UNSPECIFIED, "", ""},
+		"explicit": {fnv1.Ready_READY_FALSE, "ComposedResourcesReady", "WaitingForExternalSignal"},
+	}
+
+	for mode, want := range cases {
+		t.Run(mode, func(t *testing.T) {
+			rt := runtime.NewRuntime(logging.NewNopLogger())
+			f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+			oxr := resource.MustStructJSON(fmt.Sprintf(`{"spec":{"mode":%q}}`, mode))
+			req := &fnv1.RunFunctionRequest{
+				Input: resource.MustStructJSON(fmt.Sprintf(`{
+					"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+					"kind": "StarlarkInput",
+					"spec": {"source": %q}
+				}`, script)),
+				Observed: &fnv1.State{
+					Composite: &fnv1.Resource{Resource: oxr},
+				},
+			}
+
+			rsp, err := f.RunFunction(context.Background(), req)
+			if err != nil {
+				t.Fatalf("RunFunction error: %v", err)
+			}
+
+			if got := rsp.GetDesired().GetComposite().GetReady(); got != want.ready {
+				t.Errorf("Composite.Ready = %v, want %v", got, want.ready)
+			}
+
+			if want.condType == "" {
+				for _, c := range rsp.GetConditions() {
+					if c.GetType() == "ComposedResourcesReady" {
+						t.Errorf("unexpected ComposedResourcesReady condition in %q mode: %+v", mode, c)
+					}
+				}
+				return
+			}
+
+			var found bool
+			for _, c := range rsp.GetConditions() {
+				if c.GetType() == want.condType && c.GetReason() == want.condReason {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("missing condition type=%q reason=%q in %q mode; got %+v",
+					want.condType, want.condReason, mode, rsp.GetConditions())
+			}
+		})
+	}
+}

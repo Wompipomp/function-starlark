@@ -1,0 +1,74 @@
+# Composition for composite-readiness gating tests. Three modes driven by
+# spec.mode on the XR:
+#   "gate"     -- Resource(when=False) without optional=True. The skipped
+#                  resource gates the XR to Ready=False and an informational
+#                  ComposedResourcesReady=False condition is emitted.
+#   "optional" -- Resource(when=False, optional=True). The skipped resource
+#                  does NOT gate the XR; it still reaches Ready=True.
+#   "explicit" -- set_composite_ready(False, reason=..., message=...). The
+#                  XR stays Ready=False with the user-supplied reason, even
+#                  though no resources were skipped.
+#
+# Every mode also emits a dummy NopResource that reaches Ready=True so the
+# "optional" case can actually reach the Ready condition.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: composite-ready-test
+  labels:
+    e2e-test: composite-ready
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: composite-ready-scenarios
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            mode = get(oxr, "spec.mode", "gate")
+            set_xr_status("test.mode", mode)
+
+            # Always emit one dummy NopResource so the "optional" case has
+            # something to become Ready on.
+            Resource("dummy", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            })
+
+            if mode == "gate":
+                # Auto-gate: skip without optional=True → XR Ready=False + condition.
+                Resource("pending-dep", None,
+                    when=False,
+                    skip_reason="E2E: auto-gating test, dependency not yet provisioned")
+                set_xr_status("test.scenario", "auto-gate")
+
+            elif mode == "optional":
+                # Opt-out: skip with optional=True → XR still reaches Ready.
+                Resource("optional-feature", None,
+                    when=False,
+                    skip_reason="E2E: optional feature disabled",
+                    optional=True)
+                set_xr_status("test.scenario", "optional-optout")
+
+            elif mode == "explicit":
+                # Explicit: user directly sets composite ready=False.
+                set_composite_ready(False,
+                    reason="WaitingForExternalSignal",
+                    message="E2E: explicit set_composite_ready with reason/message")
+                set_xr_status("test.scenario", "explicit-false")
+
+            else:
+                fatal("unknown mode %q, expected gate|optional|explicit" % mode)
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

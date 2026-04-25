@@ -37,6 +37,29 @@ wait_for_condition() {
     return 1
 }
 
+# Waits until the Starlark function has processed the XR at least once (the
+# custom ComposedResourcesReady condition has been set OR the XR Synced
+# condition is True). Used by composite-readiness tests that expect the XR to
+# remain Ready=False, since wait_for_condition(..., Ready) would time out.
+wait_for_reconciled() {
+    local resource="$1" timeout="${2:-60}"
+    local end=$((SECONDS + timeout))
+    while [ $SECONDS -lt $end ]; do
+        local synced
+        synced=$(kubectl get "$resource" -o jsonpath="{.status.conditions[?(@.type==\"Synced\")].status}" 2>/dev/null || echo "")
+        if [ "$synced" = "True" ]; then
+            return 0
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+get_condition_field() {
+    local resource="$1" type="$2" field="$3"
+    kubectl get "$resource" -o jsonpath="{.status.conditions[?(@.type==\"$type\")].$field}" 2>/dev/null || echo ""
+}
+
 wait_for_resource() {
     local resource="$1" timeout="${2:-60}"
     local end=$((SECONDS + timeout))
@@ -90,6 +113,7 @@ else
 fi
 kubectl apply -f "$SCRIPT_DIR/composition-depends-on.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-star-imports.yaml"
+kubectl apply -f "$SCRIPT_DIR/composition-composite-ready.yaml"
 if [ -f "$SCRIPT_DIR/composition-schemas-rendered.yaml" ]; then
     kubectl apply -f "$SCRIPT_DIR/composition-schemas-rendered.yaml"
 else
@@ -138,14 +162,12 @@ else
 fi
 
 # Check status fields set by set_xr_status()
-# Builtins count: 34 predeclared names (v1.9 adds dict.compact as module member
-# and when/skip_reason/preserve_observed as Resource() kwargs -- none are new
-# predeclared names, so count stays 34)
+# Builtins count: 35 predeclared names (adds set_composite_ready).
 builtins_count=$(get_status_field "xtest/test-builtins" "test.builtinsCount")
-if [ "$builtins_count" = "34" ]; then
-    pass "builtins: set_xr_status() wrote builtinsCount=34"
+if [ "$builtins_count" = "35" ]; then
+    pass "builtins: set_xr_status() wrote builtinsCount=35"
 else
-    fail "builtins: set_xr_status() builtinsCount='$builtins_count' (expected 34)"
+    fail "builtins: set_xr_status() builtinsCount='$builtins_count' (expected 35)"
 fi
 
 schema_worked=$(get_status_field "xtest/test-builtins" "test.schemaWorked")
@@ -670,6 +692,95 @@ else
 fi
 
 # ============================================================
+# TEST 7: COMPOSITE READINESS GATING
+# ============================================================
+log ""
+log "===== TEST 7: COMPOSITE READINESS GATING ====="
+
+# --- Scenario A: auto-gate ---
+log "Scenario A: auto-gate (Resource(when=False) without optional=True)"
+kubectl apply -f "$SCRIPT_DIR/xr-composite-ready-gate.yaml"
+
+if wait_for_reconciled "xtest/test-composite-ready-gate" 60; then
+    pass "composite-ready/gate: XR reconciled by function"
+else
+    fail "composite-ready/gate: XR never Synced within timeout"
+    kubectl get xtest/test-composite-ready-gate -o yaml 2>/dev/null || true
+fi
+
+# Ready should stay False (or Unknown). Must NOT be True.
+gate_ready=$(get_condition_field "xtest/test-composite-ready-gate" "Ready" "status")
+if [ "$gate_ready" = "True" ]; then
+    fail "composite-ready/gate: XR Ready=$gate_ready (expected False; auto-gating failed)"
+else
+    pass "composite-ready/gate: XR Ready=$gate_ready (not True, as expected)"
+fi
+
+# A ComposedResourcesReady=False condition should be present.
+gate_cond_status=$(get_condition_field "xtest/test-composite-ready-gate" "ComposedResourcesReady" "status")
+gate_cond_reason=$(get_condition_field "xtest/test-composite-ready-gate" "ComposedResourcesReady" "reason")
+gate_cond_msg=$(get_condition_field "xtest/test-composite-ready-gate" "ComposedResourcesReady" "message")
+if [ "$gate_cond_status" = "False" ] && [ "$gate_cond_reason" = "PendingConditionalResources" ]; then
+    pass "composite-ready/gate: ComposedResourcesReady=False with reason PendingConditionalResources"
+else
+    fail "composite-ready/gate: condition status=$gate_cond_status reason=$gate_cond_reason (expected False / PendingConditionalResources)"
+fi
+if echo "$gate_cond_msg" | grep -q "pending-dep"; then
+    pass "composite-ready/gate: condition message names the skipped resource"
+else
+    fail "composite-ready/gate: condition message='$gate_cond_msg' (expected to mention pending-dep)"
+fi
+
+# --- Scenario B: optional opt-out ---
+log "Scenario B: optional opt-out (Resource(when=False, optional=True))"
+kubectl apply -f "$SCRIPT_DIR/xr-composite-ready-optional.yaml"
+
+if wait_for_condition "xtest/test-composite-ready-optional" "Ready" 120; then
+    pass "composite-ready/optional: XR reached Ready=True (optional skip did not gate)"
+else
+    fail "composite-ready/optional: XR did not reach Ready (optional=True should not gate)"
+    kubectl get xtest/test-composite-ready-optional -o yaml 2>/dev/null || true
+fi
+
+# ComposedResourcesReady condition must NOT be present (optional skips don't emit it).
+opt_cond_status=$(get_condition_field "xtest/test-composite-ready-optional" "ComposedResourcesReady" "status")
+if [ -z "$opt_cond_status" ]; then
+    pass "composite-ready/optional: no ComposedResourcesReady condition (as expected)"
+else
+    fail "composite-ready/optional: unexpected ComposedResourcesReady=$opt_cond_status (optional skips should not emit it)"
+fi
+
+# --- Scenario C: explicit set_composite_ready(False) ---
+log "Scenario C: explicit set_composite_ready(False, reason=..., message=...)"
+kubectl apply -f "$SCRIPT_DIR/xr-composite-ready-explicit.yaml"
+
+if wait_for_reconciled "xtest/test-composite-ready-explicit" 60; then
+    pass "composite-ready/explicit: XR reconciled by function"
+else
+    fail "composite-ready/explicit: XR never Synced within timeout"
+fi
+
+explicit_ready=$(get_condition_field "xtest/test-composite-ready-explicit" "Ready" "status")
+if [ "$explicit_ready" = "True" ]; then
+    fail "composite-ready/explicit: XR Ready=$explicit_ready (expected False; explicit override failed)"
+else
+    pass "composite-ready/explicit: XR Ready=$explicit_ready (not True, as expected)"
+fi
+
+explicit_cond_reason=$(get_condition_field "xtest/test-composite-ready-explicit" "ComposedResourcesReady" "reason")
+explicit_cond_msg=$(get_condition_field "xtest/test-composite-ready-explicit" "ComposedResourcesReady" "message")
+if [ "$explicit_cond_reason" = "WaitingForExternalSignal" ]; then
+    pass "composite-ready/explicit: condition carries user-supplied reason"
+else
+    fail "composite-ready/explicit: condition reason='$explicit_cond_reason' (expected WaitingForExternalSignal)"
+fi
+if echo "$explicit_cond_msg" | grep -q "explicit set_composite_ready"; then
+    pass "composite-ready/explicit: condition carries user-supplied message"
+else
+    fail "composite-ready/explicit: condition message='$explicit_cond_msg' (expected user-supplied message)"
+fi
+
+# ============================================================
 # CLEANUP
 # ============================================================
 log ""
@@ -680,6 +791,9 @@ kubectl delete xtest test-builtins --wait=false 2>/dev/null || true
 kubectl delete xtest test-oci --wait=false 2>/dev/null || true
 kubectl delete xtest test-schemas --wait=false 2>/dev/null || true
 kubectl delete xtest test-star-imports --wait=false 2>/dev/null || true
+kubectl delete xtest test-composite-ready-gate --wait=false 2>/dev/null || true
+kubectl delete xtest test-composite-ready-optional --wait=false 2>/dev/null || true
+kubectl delete xtest test-composite-ready-explicit --wait=false 2>/dev/null || true
 
 # Wait for cleanup
 sleep 10

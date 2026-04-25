@@ -70,6 +70,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"oxr", "dxr", "observed", "Resource", "skip_resource", "get",
 		"context", "environment", "extra_resources",
 		"set_condition", "emit_event", "fatal",
+		"set_composite_ready",
 		"set_connection_details", "require_extra_resource", "require_extra_resources",
 		"get_label", "get_annotation", "set_xr_status", "get_observed",
 		"schema", "field", "struct", "json", "crypto", "encoding", "dict",
@@ -1796,5 +1797,235 @@ func TestGetObserved(t *testing.T) {
 				t.Errorf("get_observed() = %v, want %v", result, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ApplyCompositeReady tests
+// ---------------------------------------------------------------------------
+
+func TestApplyCompositeReady_NoopWhenNothingSet(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	rsp := &fnv1.RunFunctionResponse{}
+
+	ApplyCompositeReady(rsp, c, cc)
+
+	if rsp.Desired != nil {
+		t.Errorf("Desired should remain nil when no override and no skips, got %+v", rsp.Desired)
+	}
+	if len(cc.Conditions()) != 0 {
+		t.Errorf("expected no conditions, got %+v", cc.Conditions())
+	}
+}
+
+func TestApplyCompositeReady_AutoGatesOnGatingSkip(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	// Simulate a Resource(when=False, skip_reason=..., optional=False) call.
+	c.recordSkip("db-replica", "cluster not yet ready", true)
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if rsp.Desired == nil || rsp.Desired.Composite == nil {
+		t.Fatalf("expected Composite to be set, got %+v", rsp.Desired)
+	}
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+
+	conds := cc.Conditions()
+	if len(conds) != 1 {
+		t.Fatalf("expected 1 condition, got %d: %+v", len(conds), conds)
+	}
+	if conds[0].Type != CompositeReadyConditionType || conds[0].Status != "False" ||
+		conds[0].Reason != compositeReadyReasonPending {
+		t.Errorf("condition = %+v, want type=%s status=False reason=%s",
+			conds[0], CompositeReadyConditionType, compositeReadyReasonPending)
+	}
+	if !strings.Contains(conds[0].Message, "db-replica") ||
+		!strings.Contains(conds[0].Message, "cluster not yet ready") {
+		t.Errorf("condition message = %q, want it to include resource name and reason", conds[0].Message)
+	}
+	if conds[0].Target != "CompositeAndClaim" {
+		t.Errorf("condition target = %q, want CompositeAndClaim", conds[0].Target)
+	}
+}
+
+func TestApplyCompositeReady_OptionalSkipDoesNotGate(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	// optional=True skip: recorded but does NOT gate.
+	c.recordSkip("backup", "backups disabled", false)
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if rsp.Desired != nil {
+		t.Errorf("Desired should remain nil when only optional skips exist, got %+v", rsp.Desired)
+	}
+	if len(cc.Conditions()) != 0 {
+		t.Errorf("expected no conditions, got %+v", cc.Conditions())
+	}
+}
+
+func TestApplyCompositeReady_ExplicitFalseOverrides(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.False,
+	}, []starlark.Tuple{
+		{starlark.String("reason"), starlark.String("WaitingForCluster")},
+		{starlark.String("message"), starlark.String("cluster is provisioning")},
+	})
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	conds := cc.Conditions()
+	if len(conds) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(conds))
+	}
+	if conds[0].Reason != "WaitingForCluster" || conds[0].Message != "cluster is provisioning" {
+		t.Errorf("condition = %+v, want user-provided reason/message", conds[0])
+	}
+	if conds[0].Status != "False" {
+		t.Errorf("condition Status = %q, want False", conds[0].Status)
+	}
+}
+
+func TestApplyCompositeReady_ExplicitFalseNoReasonNoCondition(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.False,
+	}, nil)
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	if got := cc.Conditions(); len(got) != 0 {
+		t.Errorf("expected no conditions without user-provided reason/message, got %+v", got)
+	}
+}
+
+// Message without reason is not a valid Kubernetes condition (reason is
+// mandatory, message is optional), so we drop it silently rather than invent
+// a fallback reason. The Ready field is still flipped.
+func TestApplyCompositeReady_ExplicitFalseMessageOnlyNoCondition(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.False,
+	}, []starlark.Tuple{
+		{starlark.String("message"), starlark.String("orphan message")},
+	})
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	if got := cc.Conditions(); len(got) != 0 {
+		t.Errorf("expected no conditions when message provided without reason, got %+v", got)
+	}
+}
+
+func TestApplyCompositeReady_ExplicitTrueOverridesGating(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	// Record a gating skip that would auto-gate to False.
+	c.recordSkip("db-replica", "waiting", true)
+
+	// User explicitly says ready=True; explicit wins over auto-gating.
+	thread := new(starlark.Thread)
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.True,
+	}, nil)
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_TRUE {
+		t.Errorf("Composite.Ready = %v, want READY_TRUE (explicit override wins)", got)
+	}
+	// No condition should be auto-emitted since user passed no reason/message
+	// AND explicit override suppresses the auto-gating condition.
+	if got := cc.Conditions(); len(got) != 0 {
+		t.Errorf("expected no conditions (explicit True, no reason), got %+v", got)
+	}
+}
+
+func TestApplyCompositeReady_MultipleGatingSkips(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	c.recordSkip("a", "reason-a", true)
+	c.recordSkip("b", "reason-b", true)
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	conds := cc.Conditions()
+	if len(conds) != 1 {
+		t.Fatalf("expected 1 aggregated condition, got %d", len(conds))
+	}
+	// Both names should appear in the message.
+	if !strings.Contains(conds[0].Message, "a") || !strings.Contains(conds[0].Message, "b") {
+		t.Errorf("condition message = %q, want it to include both skipped names", conds[0].Message)
+	}
+}
+
+func TestApplyCompositeReady_PreservesExistingComposite(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	c.recordSkip("r1", "waiting", true)
+
+	rsp := &fnv1.RunFunctionResponse{
+		Desired: &fnv1.State{
+			Composite: &fnv1.Resource{
+				Resource: &structpb.Struct{Fields: map[string]*structpb.Value{
+					"foo": structpb.NewStringValue("bar"),
+				}},
+			},
+		},
+	}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	if rsp.Desired.Composite.Resource == nil ||
+		rsp.Desired.Composite.Resource.Fields["foo"].GetStringValue() != "bar" {
+		t.Error("Composite.Resource was clobbered by ApplyCompositeReady")
 	}
 }

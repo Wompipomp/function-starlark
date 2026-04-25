@@ -1,4 +1,4 @@
-# Composition that exercises all 34 builtins in a single reconciliation.
+# Composition that exercises all 35 builtins in a single reconciliation.
 # Uses provider-nop NopResource for composed resources (no cloud credentials needed).
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
@@ -28,7 +28,7 @@ spec:
           source: |
             # ============================================================
             # E2E BUILTINS REGRESSION TEST
-            # Tests all 34 predeclared names in a single composition.
+            # Tests all 35 predeclared names in a single composition.
             # ============================================================
 
             # --- Test: inline module loading ---
@@ -143,6 +143,8 @@ spec:
             # --- Test: skip_resource() ---
             # Intentionally omit a resource and emit a Warning event.
             # The resource will NOT appear in desired state.
+            # skip_resource is pure observability -- it never gates composite
+            # readiness (gating lives on Resource(when=False)).
             skip_resource("to-be-skipped", reason="testing skip_resource builtin")
 
             # --- Test: set_condition() ---
@@ -160,7 +162,7 @@ spec:
             )
 
             # --- Test: set_xr_status() ---
-            set_xr_status("test.builtinsCount", 34)
+            set_xr_status("test.builtinsCount", 35)
             set_xr_status("test.region", region)
             set_xr_status("test.environment", env)
             set_xr_status("test.schemaWorked", True)
@@ -229,14 +231,18 @@ spec:
             empties = dict.compact({"a": {"s": "", "l": [], "d": {}, "n": None}})
             set_xr_status("test.compactEmptyPreserved", len(empties["a"]) == 3)
 
-            # --- when=False gating test ---
+            # --- when=False emission-skip test (optional=True: do NOT gate XR ready) ---
+            # This exercises the skip path without blocking the XR from reaching
+            # Ready. The dedicated composite-readiness composition covers the
+            # auto-gating (optional=False) and set_composite_ready() semantics.
             Resource("gated-resource", {
                 "apiVersion": "nop.crossplane.io/v1alpha1",
                 "kind": "NopResource",
                 "spec": {"forProvider": {"conditionAfter": [
                     {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
                 ]}},
-            }, when=False, skip_reason="E2E test: gating with when=False")
+            }, when=False, skip_reason="E2E test: gating with when=False",
+               optional=True)
             set_xr_status("test.gatedSkipped", True)
 
             # --- preserve_observed test ---

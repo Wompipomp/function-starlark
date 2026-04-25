@@ -28,16 +28,38 @@ Resource("bucket", bucket_config)
 
 ### Pattern: Conditional resources
 
-Use plain `if` statements for environment-specific or optional resources:
+Prefer `Resource(..., when=..., skip_reason=...)` over `if`-wrapped emissions
+for conditional resources. `when=` makes the skip observable as a Warning
+event and -- by default -- gates the XR's Ready condition to False until the
+condition becomes true. That prevents claims from flipping to Ready
+prematurely while a dependency is still pending.
 
 ```python
-if env == "prod":
-    Resource("monitoring", {
-        "apiVersion": "monitoring.example.io/v1",
-        "kind": "Dashboard",
-        "spec": {"forProvider": {"region": region, "enabled": True}},
-    })
+# GATES the XR -- XR stays Ready=False until the cluster is ready.
+Resource("db-replica", replica_body,
+    when=cluster_ready,
+    skip_reason="waiting for cluster to provision")
 ```
+
+For resources that are *expected* to be absent under some configurations
+(feature flags, tier-gated add-ons, environment opt-ins), use
+`optional=True` so the absence does not block the XR:
+
+```python
+Resource("monitoring", {
+    "apiVersion": "monitoring.example.io/v1",
+    "kind": "Dashboard",
+    "spec": {"forProvider": {"region": region, "enabled": True}},
+}, when=env == "prod",
+   skip_reason="monitoring only in prod",
+   optional=True)
+```
+
+Plain `if` guards are still fine for purely local control flow that does not
+map to a "resource missing by design" semantic, but they leave no audit trail
+and no readiness signal. See
+[features.md#composite-readiness-gating](features.md#composite-readiness-gating)
+for the full model.
 
 ### Pattern: Loop resources with refs
 
