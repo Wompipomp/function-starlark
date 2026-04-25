@@ -5176,8 +5176,8 @@ else:
 `
 
 	type expect struct {
-		ready     fnv1.Ready
-		condType  string
+		ready      fnv1.Ready
+		condType   string
 		condReason string
 	}
 	cases := map[string]expect{
