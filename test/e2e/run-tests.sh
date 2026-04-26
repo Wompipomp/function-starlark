@@ -114,6 +114,7 @@ fi
 kubectl apply -f "$SCRIPT_DIR/composition-depends-on.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-star-imports.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-composite-ready.yaml"
+kubectl apply -f "$SCRIPT_DIR/composition-transitive-skip.yaml"
 if [ -f "$SCRIPT_DIR/composition-schemas-rendered.yaml" ]; then
     kubectl apply -f "$SCRIPT_DIR/composition-schemas-rendered.yaml"
 else
@@ -781,6 +782,62 @@ else
 fi
 
 # ============================================================
+# TEST 8: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE
+# ============================================================
+log ""
+log "===== TEST 8: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE ====="
+
+# --- Scenario A: transitive skip ---
+log "Scenario A: transitive skip (Resource(when=False) + downstream depends_on=[upstream])"
+kubectl apply -f "$SCRIPT_DIR/xr-transitive-skip.yaml"
+
+if wait_for_reconciled "xtest/test-transitive-skip" 60; then
+    pass "transitive-skip/cascade: XR reconciled by function (depends_on=[None] tolerated, no fatal)"
+else
+    fail "transitive-skip/cascade: XR never Synced within timeout"
+    kubectl get xtest/test-transitive-skip -o yaml 2>/dev/null || true
+fi
+
+trans_ready=$(get_condition_field "xtest/test-transitive-skip" "Ready" "status")
+if [ "$trans_ready" = "True" ]; then
+    fail "transitive-skip/cascade: XR Ready=$trans_ready (expected False; transitive cascade failed)"
+else
+    pass "transitive-skip/cascade: XR Ready=$trans_ready (not True, as expected)"
+fi
+
+trans_cond_status=$(get_condition_field "xtest/test-transitive-skip" "ComposedResourcesReady" "status")
+trans_cond_reason=$(get_condition_field "xtest/test-transitive-skip" "ComposedResourcesReady" "reason")
+trans_cond_msg=$(get_condition_field "xtest/test-transitive-skip" "ComposedResourcesReady" "message")
+if [ "$trans_cond_status" = "False" ] && [ "$trans_cond_reason" = "PendingConditionalResources" ]; then
+    pass "transitive-skip/cascade: ComposedResourcesReady=False/PendingConditionalResources"
+else
+    fail "transitive-skip/cascade: condition status=$trans_cond_status reason=$trans_cond_reason (expected False / PendingConditionalResources)"
+fi
+if echo "$trans_cond_msg" | grep -q "upstream" && echo "$trans_cond_msg" | grep -q "downstream"; then
+    pass "transitive-skip/cascade: condition message names both 'upstream' and 'downstream'"
+else
+    fail "transitive-skip/cascade: condition message='$trans_cond_msg' (expected to mention both upstream and downstream)"
+fi
+
+# --- Scenario B: optional cascade does NOT propagate ---
+log "Scenario B: optional cascade (Resource(when=False, optional=True) does not transitively skip)"
+kubectl apply -f "$SCRIPT_DIR/xr-transitive-skip-optional.yaml"
+
+if wait_for_condition "xtest/test-transitive-skip-optional" "Ready" 120; then
+    pass "transitive-skip/optional-cascade: XR reached Ready=True (optional dep dropped, downstream emitted)"
+else
+    fail "transitive-skip/optional-cascade: XR did not reach Ready (optional SkippedRef should not cascade)"
+    kubectl get xtest/test-transitive-skip-optional -o yaml 2>/dev/null || true
+fi
+
+opt_cascade_cond=$(get_condition_field "xtest/test-transitive-skip-optional" "ComposedResourcesReady" "status")
+if [ -z "$opt_cascade_cond" ]; then
+    pass "transitive-skip/optional-cascade: no ComposedResourcesReady condition (as expected)"
+else
+    fail "transitive-skip/optional-cascade: unexpected ComposedResourcesReady=$opt_cascade_cond (optional cascade should not gate)"
+fi
+
+# ============================================================
 # CLEANUP
 # ============================================================
 log ""
@@ -794,6 +851,8 @@ kubectl delete xtest test-star-imports --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-gate --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-optional --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-explicit --wait=false 2>/dev/null || true
+kubectl delete xtest test-transitive-skip --wait=false 2>/dev/null || true
+kubectl delete xtest test-transitive-skip-optional --wait=false 2>/dev/null || true
 
 # Wait for cleanup
 sleep 10

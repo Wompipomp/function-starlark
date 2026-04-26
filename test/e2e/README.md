@@ -11,6 +11,7 @@ End-to-end tests that run function-starlark in a real Crossplane cluster.
 | **star-imports** | `composition-star-imports.yaml` | Transitive `load("x.star", "*")` inside modules, diamond dependency pattern |
 | **depends-on** | `composition-depends-on.yaml` | Creation sequencing (A->B->C chain), deletion ordering via Usage resources |
 | **composite-ready** | `composition-composite-ready.yaml` | Composite readiness gating: auto-gate via `Resource(when=False)`, opt-out via `optional=True`, explicit `set_composite_ready(False, reason=..., message=...)` |
+| **transitive-skip** | `composition-transitive-skip.yaml` | Transitive skip via `SkippedRef` in `depends_on` (gates downstream + composite); optional cascade does not propagate; `depends_on=[None]` is tolerated without error |
 
 ## Prerequisites
 

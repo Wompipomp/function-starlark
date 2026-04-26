@@ -58,6 +58,47 @@ func (r *ResourceRef) Attr(name string) (starlark.Value, error) {
 
 func (r *ResourceRef) AttrNames() []string { return []string{"name"} }
 
+// SkippedRef is the value returned by Resource() when the resource was skipped
+// (when=False, body=None without preserve, preserve_observed miss, or
+// transitively skipped via depends_on). It exposes .name and .optional like
+// ResourceRef but its truth value is False so `if ref:` continues to gate
+// callers correctly. Passing a SkippedRef to depends_on triggers transitive
+// skip when optional=False, or is silently ignored when optional=True.
+type SkippedRef struct {
+	name     string
+	optional bool
+}
+
+var (
+	_ starlark.Value    = (*SkippedRef)(nil)
+	_ starlark.HasAttrs = (*SkippedRef)(nil)
+)
+
+func (r *SkippedRef) String() string       { return r.name }
+func (r *SkippedRef) Type() string         { return "SkippedRef" }
+func (r *SkippedRef) Freeze()              {}
+func (r *SkippedRef) Truth() starlark.Bool { return starlark.False }
+func (r *SkippedRef) Hash() (uint32, error) {
+	h := uint32(2166136261)
+	for i := 0; i < len(r.name); i++ {
+		h ^= uint32(r.name[i])
+		h *= 16777619
+	}
+	return h, nil
+}
+
+func (r *SkippedRef) Attr(name string) (starlark.Value, error) {
+	switch name {
+	case "name":
+		return starlark.String(r.name), nil
+	case "optional":
+		return starlark.Bool(r.optional), nil
+	}
+	return nil, nil
+}
+
+func (r *SkippedRef) AttrNames() []string { return []string{"name", "optional"} }
+
 // DependencyPair records a dependency between two resources.
 type DependencyPair struct {
 	Dependent  string // resource that depends on another
@@ -81,6 +122,14 @@ type GatingSkip struct {
 	Reason string
 }
 
+// GatingDefer records a resource deferred by the creation sequencer (its
+// dependencies are not yet ready). Reason is a human description of the unmet
+// dependencies (e.g., `waiting for "db" to have Ready=True`).
+type GatingDefer struct {
+	Name   string
+	Reason string
+}
+
 // CompositeReadyOverride captures an explicit set_composite_ready() call.
 // When Set is false, the override is absent and auto-gating (via GatingSkip)
 // decides the composite ready state.
@@ -98,6 +147,7 @@ type Collector struct {
 	resources      map[string]CollectedResource
 	skipped        map[string]bool
 	gatingSkips    []GatingSkip
+	gatingDefers   []GatingDefer
 	compositeReady CompositeReadyOverride
 	dependencies   []DependencyPair
 	cc             *ConditionCollector
@@ -268,6 +318,25 @@ func (c *Collector) GatingSkips() []GatingSkip {
 	return copyGatingSkips(c.gatingSkips)
 }
 
+// GatingDefers returns a copy of sequencer-deferred resources that gate
+// composite readiness.
+func (c *Collector) GatingDefers() []GatingDefer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return copyGatingDefers(c.gatingDefers)
+}
+
+// AddGatingDefers appends sequencer-deferred resources as composite-ready
+// gating items. Called by fn.go after Sequencer.Evaluate returns.
+func (c *Collector) AddGatingDefers(items []GatingDefer) {
+	if len(items) == 0 {
+		return
+	}
+	c.mu.Lock()
+	c.gatingDefers = append(c.gatingDefers, items...)
+	c.mu.Unlock()
+}
+
 // CompositeReadyOverride returns the explicit composite-ready override, if any.
 // The returned value's Set field is true iff set_composite_ready() was called.
 func (c *Collector) CompositeReadyOverride() CompositeReadyOverride {
@@ -276,12 +345,12 @@ func (c *Collector) CompositeReadyOverride() CompositeReadyOverride {
 	return c.compositeReady
 }
 
-// compositeReadyState reads the override and gating skips in a single lock
-// acquisition for the ApplyCompositeReady hot path.
-func (c *Collector) compositeReadyState() (CompositeReadyOverride, []GatingSkip) {
+// compositeReadyState reads the override, gating skips, and gating defers in a
+// single lock acquisition for the ApplyCompositeReady hot path.
+func (c *Collector) compositeReadyState() (CompositeReadyOverride, []GatingSkip, []GatingDefer) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.compositeReady, copyGatingSkips(c.gatingSkips)
+	return c.compositeReady, copyGatingSkips(c.gatingSkips), copyGatingDefers(c.gatingDefers)
 }
 
 func copyGatingSkips(src []GatingSkip) []GatingSkip {
@@ -289,6 +358,15 @@ func copyGatingSkips(src []GatingSkip) []GatingSkip {
 		return nil
 	}
 	out := make([]GatingSkip, len(src))
+	copy(out, src)
+	return out
+}
+
+func copyGatingDefers(src []GatingDefer) []GatingDefer {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]GatingDefer, len(src))
 	copy(out, src)
 	return out
 }
@@ -435,7 +513,7 @@ func (c *Collector) resourceFn(
 	// GATE-01: when=False without preserve -> skip.
 	if whenFalse && !preserveActive {
 		c.recordSkip(name, skipReason, gate)
-		return starlark.None, nil
+		return &SkippedRef{name: name, optional: optional}, nil
 	}
 
 	// when=False + preserve_observed=True: cliff guard — emit observed body if found.
@@ -454,13 +532,13 @@ func (c *Collector) resourceFn(
 			reason = skipReason
 		}
 		c.recordSkip(name, reason, gate)
-		return starlark.None, nil
+		return &SkippedRef{name: name, optional: optional}, nil
 	}
 
 	// GATE-05: body=None without preserve -> warn and skip.
 	if bodyVal == starlark.None && !preserveActive {
 		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.", gate)
-		return starlark.None, nil
+		return &SkippedRef{name: name, optional: optional}, nil
 	}
 
 	// body=None + preserve_observed=True: emit observed body if found, skip otherwise.
@@ -474,7 +552,31 @@ func (c *Collector) resourceFn(
 			return &ResourceRef{name: name}, nil
 		}
 		c.recordSkip(name, "not found in observed state", gate)
-		return starlark.None, nil
+		return &SkippedRef{name: name, optional: optional}, nil
+	}
+
+	// Pre-scan depends_on for transitive-skip triggers BEFORE body conversion
+	// so we don't waste work when an upstream skip will short-circuit us.
+	// A non-optional SkippedRef anywhere in depends_on (including as the first
+	// element of a tuple) propagates the skip to this resource.
+	if dependsOn != nil {
+		for i := 0; i < dependsOn.Len(); i++ {
+			var sr *SkippedRef
+			switch v := dependsOn.Index(i).(type) {
+			case *SkippedRef:
+				sr = v
+			case starlark.Tuple:
+				if v.Len() == 2 {
+					if first, ok := v.Index(0).(*SkippedRef); ok {
+						sr = first
+					}
+				}
+			}
+			if sr != nil && !sr.optional {
+				c.recordSkip(name, fmt.Sprintf("depends on skipped %q", sr.name), gate)
+				return &SkippedRef{name: name, optional: optional}, nil
+			}
+		}
 	}
 
 	// --- Normal body processing path (when=True or when omitted, body is dict) ---
@@ -542,13 +644,23 @@ func (c *Collector) resourceFn(
 		}
 	}
 
-	// Process depends_on list if provided.
+	// Process depends_on list if provided. By this point the pre-scan has
+	// already applied transitive skip for any non-optional *SkippedRef items,
+	// so any *SkippedRef that survives here is optional and is silently
+	// dropped. starlark.None is also tolerated for back-compat with patterns
+	// like `depends_on=[ref if ref else None]`.
 	if dependsOn != nil {
 		for i := 0; i < dependsOn.Len(); i++ {
 			item := dependsOn.Index(i)
+			if item == starlark.None {
+				continue
+			}
 			switch v := item.(type) {
 			case *ResourceRef:
 				c.addDependency(name, v.name, true, "")
+			case *SkippedRef:
+				// Optional skip (non-optional was caught in the pre-scan).
+				continue
 			case starlark.String:
 				c.addDependency(name, string(v), false, "")
 			case starlark.Tuple:
@@ -556,19 +668,26 @@ func (c *Collector) resourceFn(
 					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple must have exactly 2 elements, got %d",
 						name, i, v.Len())
 				}
-				// Extract first element: must be ResourceRef or string.
+				// Extract first element: must be ResourceRef, SkippedRef, or string.
 				var depName string
 				var isRef bool
+				dropTuple := false
 				switch first := v.Index(0).(type) {
 				case *ResourceRef:
 					depName = first.name
 					isRef = true
+				case *SkippedRef:
+					// Optional skip in tuple form: drop the whole entry.
+					dropTuple = true
 				case starlark.String:
 					depName = string(first)
 					isRef = false
 				default:
-					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple first element must be ResourceRef or string, got %s",
+					return nil, fmt.Errorf("Resource(%q): depends_on[%d] tuple first element must be ResourceRef, SkippedRef, or string, got %s",
 						name, i, v.Index(0).Type())
+				}
+				if dropTuple {
+					continue
 				}
 				// Extract second element: must be non-empty string.
 				fieldPathVal, ok := v.Index(1).(starlark.String)
@@ -583,7 +702,7 @@ func (c *Collector) resourceFn(
 				}
 				c.addDependency(name, depName, isRef, fieldPath)
 			default:
-				return nil, fmt.Errorf("Resource(%q): depends_on[%d] must be ResourceRef, string, or tuple, got %s",
+				return nil, fmt.Errorf("Resource(%q): depends_on[%d] must be ResourceRef, SkippedRef, string, tuple, or None, got %s",
 					name, i, item.Type())
 			}
 		}

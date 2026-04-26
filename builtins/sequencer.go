@@ -10,9 +10,10 @@ import (
 
 // SequencerResult holds the output of creation sequencing evaluation.
 type SequencerResult struct {
-	Deferred    []string         // resource names to withhold from desired state
-	Events      []CollectedEvent // Warning events for each deferred resource + summary
-	AnyDeferred bool             // true if any resources were deferred (caller sets short TTL)
+	Deferred     []string         // resource names to withhold from desired state
+	Events       []CollectedEvent // Warning events for each deferred resource + summary
+	GatingDefers []GatingDefer    // per-resource unmet-dep description for composite-ready gating
+	AnyDeferred  bool             // true if any resources were deferred (caller sets short TTL)
 }
 
 // Sequencer evaluates creation ordering based on dependency relationships
@@ -89,6 +90,14 @@ func (s *Sequencer) Evaluate() SequencerResult {
 	}
 	sort.Strings(deferred) // deterministic ordering
 
+	gatingDefers := make([]GatingDefer, 0, len(deferred))
+	for _, name := range deferred {
+		gatingDefers = append(gatingDefers, GatingDefer{
+			Name:   name,
+			Reason: strings.Join(unmetDeps[name], "; "),
+		})
+	}
+
 	anyDeferred := len(deferred) > 0
 	if anyDeferred {
 		// Stable message (only resource names, no changing reasons) so Kubernetes
@@ -104,9 +113,10 @@ func (s *Sequencer) Evaluate() SequencerResult {
 	}
 
 	return SequencerResult{
-		Deferred:    deferred,
-		Events:      events,
-		AnyDeferred: anyDeferred,
+		Deferred:     deferred,
+		Events:       events,
+		GatingDefers: gatingDefers,
+		AnyDeferred:  anyDeferred,
 	}
 }
 

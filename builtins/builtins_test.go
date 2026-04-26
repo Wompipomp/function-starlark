@@ -2029,3 +2029,88 @@ func TestApplyCompositeReady_PreservesExistingComposite(t *testing.T) {
 		t.Error("Composite.Resource was clobbered by ApplyCompositeReady")
 	}
 }
+
+func TestApplyCompositeReady_DefersOnly(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	c.AddGatingDefers([]GatingDefer{
+		{Name: "app", Reason: `waiting for "db" to have Ready=True`},
+	})
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	conds := cc.Conditions()
+	if len(conds) != 1 {
+		t.Fatalf("expected 1 condition, got %d", len(conds))
+	}
+	if conds[0].Type != CompositeReadyConditionType ||
+		conds[0].Status != "False" ||
+		conds[0].Reason != "WaitingForDependencies" {
+		t.Errorf("condition = %+v, want WaitingForDependencies/False", conds[0])
+	}
+	if !strings.Contains(conds[0].Message, "app") ||
+		!strings.Contains(conds[0].Message, "Waiting on dependencies") {
+		t.Errorf("condition message = %q, want it to mention 'app' under 'Waiting on dependencies'", conds[0].Message)
+	}
+}
+
+func TestApplyCompositeReady_SkipsAndDefers(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	c.recordSkip("backup", "feature pending", true)
+	c.AddGatingDefers([]GatingDefer{
+		{Name: "app", Reason: `waiting for "db" to have Ready=True`},
+	})
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+	conds := cc.Conditions()
+	if len(conds) != 1 {
+		t.Fatalf("expected 1 aggregated condition, got %d", len(conds))
+	}
+	if conds[0].Reason != "CompositeNotReady" {
+		t.Errorf("Reason = %q, want CompositeNotReady when both skips and defers are present", conds[0].Reason)
+	}
+	msg := conds[0].Message
+	if !strings.Contains(msg, "Pending resources") || !strings.Contains(msg, "backup") {
+		t.Errorf("message = %q, want to include 'Pending resources' and 'backup'", msg)
+	}
+	if !strings.Contains(msg, "Waiting on dependencies") || !strings.Contains(msg, "app") {
+		t.Errorf("message = %q, want to include 'Waiting on dependencies' and 'app'", msg)
+	}
+}
+
+func TestApplyCompositeReady_OverrideStillWinsOverDefers(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+
+	c.AddGatingDefers([]GatingDefer{{Name: "app", Reason: "waiting"}})
+
+	thread := new(starlark.Thread)
+	_, err := starlark.Call(thread, c.SetCompositeReadyBuiltin(), starlark.Tuple{
+		starlark.True,
+	}, nil)
+	if err != nil {
+		t.Fatalf("set_composite_ready() error: %v", err)
+	}
+
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyCompositeReady(rsp, c, cc)
+
+	if got := rsp.Desired.Composite.Ready; got != fnv1.Ready_READY_TRUE {
+		t.Errorf("Composite.Ready = %v, want READY_TRUE (override wins over defers)", got)
+	}
+	if got := cc.Conditions(); len(got) != 0 {
+		t.Errorf("expected no conditions (override True with no reason), got %+v", got)
+	}
+}

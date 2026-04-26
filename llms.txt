@@ -54,13 +54,15 @@ Register a desired composed resource. This is the primary function.
 - ready: None (auto-detect), True, or False.
 - labels: Omit for auto-injection of crossplane.io/* labels. Dict to merge custom labels. None to opt out.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
-- depends_on: List of ResourceRef, string, or tuple (ref, field_path) for creation sequencing. Plain refs/strings check existence. Tuples check that the specified field path has a non-empty value in the observed resource. Generates Crossplane Usage resources.
+- depends_on: List of dependency items. Accepted types: ResourceRef, SkippedRef, string, tuple (ref, field_path), or None (silently dropped). Non-optional SkippedRef triggers transitive skip of the dependent. Optional SkippedRef is dropped from the list. Plain refs/strings check existence. Tuples check that the field path has a non-empty value. Generates Crossplane Usage resources.
 - external_name: Sugar for crossplane.io/external-name annotation.
 - when: Bool gate (True/False only). False skips the resource (requires skip_reason). Non-bool values raise type error.
 - skip_reason: Human-readable skip reason. Required when when=False without preserve_observed. Appears in Warning event.
 - preserve_observed: When True and body is None (or when=False), emit the observed body verbatim if found. Cliff-guard for resources with temporarily unavailable config.
 - optional: When False (default), a skip (when=False without a successful preserve_observed) gates the XR to Ready=False and emits a ComposedResourcesReady=False condition. Set True for resources that are expected to be absent by design (feature flags, tier add-ons).
-- Returns: ResourceRef with .name attribute for use in depends_on.
+- Returns: ResourceRef when emitted (with .name attribute), or SkippedRef when any skip path was taken (with .name and .optional attrs; falsy in Starlark so `if ref:` works). SkippedRef can be passed to depends_on of downstream Resources for transitive skip.
+
+Sequencer-deferred resources (depends_on unmet) also flip ComposedResourcesReady=False with reason WaitingForDependencies. The old Synced=False/CreationSequencing signal has been removed -- composition-level gating lives on ComposedResourcesReady; Synced is reserved for provider/cloud sync.
 
 Example:
 ```python

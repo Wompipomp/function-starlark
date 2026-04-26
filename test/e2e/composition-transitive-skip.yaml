@@ -1,0 +1,82 @@
+# Composition for transitive-skip and depends_on tolerance tests. Two modes
+# driven by spec.mode on the XR:
+#   "transitive"       -- Resource("upstream", when=False) returns a SkippedRef.
+#                         Resource("downstream", depends_on=[upstream]) is
+#                         transitively skipped. Both end up out of desired state
+#                         and the XR stays Ready=False with a single
+#                         ComposedResourcesReady=False / PendingConditionalResources
+#                         condition mentioning both names.
+#   "optional-cascade" -- Resource("upstream", when=False, optional=True) returns
+#                         an *optional* SkippedRef. Passing it to depends_on of a
+#                         downstream resource does NOT cascade the skip; downstream
+#                         emits normally and the XR reaches Ready=True.
+#
+# Both modes also exercise depends_on tolerance for `None` items by including a
+# get-extra-resource call that resolves to None.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: transitive-skip-test
+  labels:
+    e2e-test: transitive-skip
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: transitive-skip-scenarios
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            mode = get(oxr, "spec.mode", "transitive")
+            set_xr_status("test.mode", mode)
+
+            # `maybe` is intentionally None to exercise depends_on=[None]
+            # tolerance below. Existing scripts that resolved a ref or None
+            # from a callsite expression now no longer need an `if` guard.
+            maybe = None
+
+            # Note: Starlark forbids reassigning module-level globals across
+            # parallel `if/elif` branches, so the upstream ref uses a different
+            # name per mode.
+            downstream_body = {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            }
+
+            if mode == "transitive":
+                # Non-optional skip: upstream gates the composite directly,
+                # and downstream is transitively skipped through depends_on.
+                upstream_gating = Resource("upstream", None,
+                    when=False,
+                    skip_reason="E2E: transitive-skip upstream pending")
+                Resource("downstream", downstream_body,
+                    depends_on=[upstream_gating, maybe])
+                set_xr_status("test.scenario", "transitive")
+
+            elif mode == "optional-cascade":
+                # Optional skip: upstream is "absent by design"; downstream
+                # passing the optional SkippedRef in depends_on is silently
+                # dropped, so downstream emits and the XR reaches Ready=True.
+                upstream_optional = Resource("upstream", None,
+                    when=False,
+                    skip_reason="E2E: optional upstream",
+                    optional=True)
+                Resource("downstream", downstream_body,
+                    depends_on=[upstream_optional, maybe])
+                set_xr_status("test.scenario", "optional-cascade")
+
+            else:
+                fatal("unknown mode %q, expected transitive|optional-cascade" % mode)
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

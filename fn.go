@@ -359,9 +359,12 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				// Override response TTL for faster requeue (SEQ-05).
 				rsp.Meta.Ttl = durationpb.New(seqTTLDuration)
 
-				// Set Synced=False to prevent premature Ready (per CONTEXT.md decision).
-				response.ConditionFalse(rsp, "Synced", "CreationSequencing").
-					WithMessage(fmt.Sprintf("%d resource(s) waiting for dependencies", len(result.Deferred)))
+				// Composition-level "not ready yet" signal: gates Composite.Ready
+				// to False via ApplyCompositeReady, which emits a single
+				// ComposedResourcesReady=False condition aggregating skips and
+				// defers. (Synced is provider-sync; not the right axis for
+				// composition-level gating.)
+				collector.AddGatingDefers(result.GatingDefers)
 			} else {
 				// Converged: clear TTL so Crossplane uses its own poll interval.
 				rsp.Meta.Ttl = nil

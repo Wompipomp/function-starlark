@@ -4258,16 +4258,34 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Errorf("TTL = %v, want 10s when resources are deferred", got)
 	}
 
-	// Synced=False condition should be set.
-	foundSyncedFalse := false
+	// Composition-level gating: ComposedResourcesReady=False with reason
+	// WaitingForDependencies. Synced is no longer touched by the sequencer.
+	foundComposedFalse := false
 	for _, c := range rsp.GetConditions() {
-		if c.GetType() == "Synced" && c.GetStatus() == fnv1.Status_STATUS_CONDITION_FALSE && c.GetReason() == "CreationSequencing" {
-			foundSyncedFalse = true
+		if c.GetType() == "ComposedResourcesReady" &&
+			c.GetStatus() == fnv1.Status_STATUS_CONDITION_FALSE &&
+			c.GetReason() == "WaitingForDependencies" {
+			foundComposedFalse = true
+			if !strings.Contains(c.GetMessage(), "app") {
+				t.Errorf("ComposedResourcesReady message %q should mention deferred resource 'app'", c.GetMessage())
+			}
 			break
 		}
 	}
-	if !foundSyncedFalse {
-		t.Error("expected Synced=False condition with reason CreationSequencing when resources are deferred")
+	if !foundComposedFalse {
+		t.Errorf("expected ComposedResourcesReady=False/WaitingForDependencies condition, got %+v", rsp.GetConditions())
+	}
+
+	// Composite.Ready should be flipped to READY_FALSE by ApplyCompositeReady.
+	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE on deferral", got)
+	}
+
+	// Sequencer must NOT emit Synced=False any more (regression guard).
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "Synced" && c.GetReason() == "CreationSequencing" {
+			t.Errorf("sequencer should not emit Synced=False/CreationSequencing any more, got %+v", c)
+		}
 	}
 }
 
@@ -5232,5 +5250,227 @@ else:
 					want.condType, want.condReason, mode, rsp.GetConditions())
 			}
 		})
+	}
+}
+
+// TestRunFunctionTransitiveSkipComposition mirrors the literal Starlark body
+// shipped in test/e2e/composition-transitive-skip.yaml so script errors or
+// contract regressions are caught by `go test` before the cluster roundtrip.
+func TestRunFunctionTransitiveSkipComposition(t *testing.T) {
+	script := `mode = get(oxr, "spec.mode", "transitive")
+set_xr_status("test.mode", mode)
+
+maybe = None
+
+downstream_body = {
+    "apiVersion": "nop.crossplane.io/v1alpha1",
+    "kind": "NopResource",
+    "spec": {"forProvider": {"conditionAfter": [
+        {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+        {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+    ]}},
+}
+
+if mode == "transitive":
+    upstream_gating = Resource("upstream", None,
+        when=False,
+        skip_reason="E2E: transitive-skip upstream pending")
+    Resource("downstream", downstream_body,
+        depends_on=[upstream_gating, maybe])
+    set_xr_status("test.scenario", "transitive")
+
+elif mode == "optional-cascade":
+    upstream_optional = Resource("upstream", None,
+        when=False,
+        skip_reason="E2E: optional upstream",
+        optional=True)
+    Resource("downstream", downstream_body,
+        depends_on=[upstream_optional, maybe])
+    set_xr_status("test.scenario", "optional-cascade")
+
+else:
+    fatal("unknown mode %q, expected transitive|optional-cascade" % mode)
+`
+
+	cases := map[string]struct {
+		downstreamPresent bool
+		wantReason        string // "" means no condition expected
+	}{
+		"transitive":       {downstreamPresent: false, wantReason: "PendingConditionalResources"},
+		"optional-cascade": {downstreamPresent: true, wantReason: ""},
+	}
+
+	for mode, want := range cases {
+		t.Run(mode, func(t *testing.T) {
+			rt := runtime.NewRuntime(logging.NewNopLogger())
+			f := &Function{log: logging.NewNopLogger(), runtime: rt}
+			oxr := resource.MustStructJSON(fmt.Sprintf(`{"spec":{"mode":%q}}`, mode))
+			req := &fnv1.RunFunctionRequest{
+				Input: resource.MustStructJSON(fmt.Sprintf(`{
+					"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+					"kind": "StarlarkInput",
+					"spec": {"source": %q}
+				}`, script)),
+				Observed: &fnv1.State{Composite: &fnv1.Resource{Resource: oxr}},
+			}
+
+			rsp, err := f.RunFunction(context.Background(), req)
+			if err != nil {
+				t.Fatalf("RunFunction error: %v", err)
+			}
+			assertNormalResult(t, rsp)
+
+			_, downstreamPresent := rsp.GetDesired().GetResources()["downstream"]
+			if downstreamPresent != want.downstreamPresent {
+				t.Errorf("downstream present = %v, want %v", downstreamPresent, want.downstreamPresent)
+			}
+
+			var found *fnv1.Condition
+			for _, c := range rsp.GetConditions() {
+				if c.GetType() == "ComposedResourcesReady" {
+					found = c
+				}
+			}
+			if want.wantReason == "" {
+				if found != nil {
+					t.Errorf("unexpected ComposedResourcesReady in %q mode: %+v", mode, found)
+				}
+				return
+			}
+			if found == nil {
+				t.Fatalf("missing ComposedResourcesReady condition in %q mode; got %+v", mode, rsp.GetConditions())
+			}
+			if found.GetReason() != want.wantReason {
+				t.Errorf("reason = %q, want %q", found.GetReason(), want.wantReason)
+			}
+			if mode == "transitive" {
+				if !strings.Contains(found.GetMessage(), "upstream") || !strings.Contains(found.GetMessage(), "downstream") {
+					t.Errorf("message %q should mention both upstream and downstream", found.GetMessage())
+				}
+			}
+		})
+	}
+}
+
+// TestRunFunctionTransitiveSkip_EndToEnd: a Resource(when=False) returns a
+// SkippedRef; passing it to depends_on of a downstream Resource transitively
+// skips that resource too, and the composite ends up Ready=False with one
+// aggregated ComposedResourcesReady=False condition.
+func TestRunFunctionTransitiveSkip_EndToEnd(t *testing.T) {
+	rsp := runStarlarkSource(t, `
+b = Resource("b", None, when=False, skip_reason="upstream pending")
+Resource("a", {"apiVersion": "v1", "kind": "App"}, depends_on=[b])
+`)
+
+	res := rsp.GetDesired().GetResources()
+	if _, ok := res["a"]; ok {
+		t.Error("transitively-skipped 'a' should not be in desired resources")
+	}
+	if _, ok := res["b"]; ok {
+		t.Error("'b' should not be in desired resources")
+	}
+
+	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_FALSE {
+		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+	}
+
+	var found *fnv1.Condition
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" {
+			if found != nil {
+				t.Errorf("multiple ComposedResourcesReady conditions: %+v then %+v", found, c)
+			}
+			found = c
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected ComposedResourcesReady condition, got %+v", rsp.GetConditions())
+	}
+	if found.GetReason() != "PendingConditionalResources" {
+		t.Errorf("Reason = %q, want PendingConditionalResources (skips only)", found.GetReason())
+	}
+	if !strings.Contains(found.GetMessage(), `"a"`) || !strings.Contains(found.GetMessage(), `"b"`) {
+		t.Errorf("message %q should mention both 'a' and 'b'", found.GetMessage())
+	}
+}
+
+// TestRunFunctionDependsOnNone_NoError: when the upstream Resource() is
+// emitted (when=True), depends_on works as before; when it is skipped
+// (when=False), the dependent is transitively skipped without erroring.
+// Demonstrates that callers can write `depends_on=[ref]` unconditionally
+// where they previously had to guard `if ref:`.
+func TestRunFunctionDependsOnNone_NoError(t *testing.T) {
+	tmpl := `
+ref = Resource("upstream", %s, when=%s, skip_reason="x")
+Resource("downstream", {"apiVersion": "v1", "kind": "X"}, depends_on=[ref])
+`
+
+	t.Run("upstream emitted", func(t *testing.T) {
+		// Both upstream and downstream are first-reconciliation; downstream
+		// is sequencer-deferred until upstream is observed Ready+Synced.
+		// The test just proves the script runs without error and downstream
+		// did not get short-circuited as a transitive skip.
+		body := `{"apiVersion": "v1", "kind": "X"}`
+		rsp := runStarlarkSource(t, fmt.Sprintf(tmpl, body, "True"))
+		assertNormalResult(t, rsp)
+		// upstream must be in desired (it isn't deferred -- it has no deps).
+		if _, ok := rsp.GetDesired().GetResources()["upstream"]; !ok {
+			t.Error("upstream should be in desired resources when when=True")
+		}
+	})
+
+	t.Run("upstream skipped", func(t *testing.T) {
+		rsp := runStarlarkSource(t, fmt.Sprintf(tmpl, "None", "False"))
+		res := rsp.GetDesired().GetResources()
+		if _, ok := res["downstream"]; ok {
+			t.Error("downstream should be transitively skipped when upstream is skipped")
+		}
+		if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_FALSE {
+			t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
+		}
+	})
+}
+
+// TestRunFunctionSyncedNotEmittedBySequencer is a regression guard: the
+// sequencer no longer emits Synced=False/CreationSequencing -- composition
+// gating now lives on ComposedResourcesReady.
+func TestRunFunctionSyncedNotEmittedBySequencer(t *testing.T) {
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		// db is NOT observed, so app is deferred.
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("RunFunction error: %v", err)
+	}
+
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "Synced" && c.GetReason() == "CreationSequencing" {
+			t.Errorf("sequencer must not emit Synced=False/CreationSequencing any more, got %+v", c)
+		}
+	}
+
+	var foundComposed bool
+	for _, c := range rsp.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" &&
+			c.GetReason() == "WaitingForDependencies" {
+			foundComposed = true
+		}
+	}
+	if !foundComposed {
+		t.Errorf("expected ComposedResourcesReady=False/WaitingForDependencies, got %+v", rsp.GetConditions())
 	}
 }

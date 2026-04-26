@@ -2186,9 +2186,9 @@ func TestCollector_WhenFalse_SkipsResource(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	// Return value must be None (not ResourceRef).
-	if val != starlark.None {
-		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	// Return value is a *SkippedRef carrying the resource name (falsy in Starlark).
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
 	}
 
 	// Resource must NOT appear in collected resources.
@@ -2355,9 +2355,9 @@ func TestCollector_BodyNone_NoPreserve_WarnsAndSkips(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	// Return value must be None.
-	if val != starlark.None {
-		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	// Return value is a *SkippedRef (falsy in Starlark).
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
 	}
 
 	// Resource must NOT appear in collected resources.
@@ -2676,9 +2676,9 @@ func TestCollector_PreserveObserved_BodyNone_NotFound(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	// Return value must be None (not ResourceRef).
-	if val != starlark.None {
-		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	// Return value is a *SkippedRef carrying the resource name (falsy in Starlark).
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
 	}
 
 	// Resource must NOT appear in collected resources.
@@ -2715,8 +2715,8 @@ func TestCollector_PreserveObserved_BodyNone_NilObserved(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	if val != starlark.None {
-		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
 	}
 
 	res := c.Resources()
@@ -3051,9 +3051,9 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	// Return value must be None.
-	if val != starlark.None {
-		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	// Return value is a *SkippedRef (falsy in Starlark).
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
 	}
 
 	// Resource must NOT appear.
@@ -3094,8 +3094,8 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound_CustomReason(t *testing.T
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	if val != starlark.None {
-		t.Errorf("Resource() = %v (%s), want None", val, val.Type())
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
 	}
 
 	events := cc.Events()
@@ -3589,5 +3589,308 @@ func TestCollector_SetCompositeReady_WrongType(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("expected type error for non-bool ready arg, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SkippedRef + transitive skip + depends_on tolerance
+// ---------------------------------------------------------------------------
+
+// callResource is a small helper that invokes Resource(name, body, <kwargs>).
+// Returns (val, err).
+func callResource(c *Collector, name string, body starlark.Value, extra []starlark.Tuple) (starlark.Value, error) {
+	thread := new(starlark.Thread)
+	return starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String(name),
+		body,
+	}, extra)
+}
+
+func TestSkippedRef_Attributes(t *testing.T) {
+	sr := &SkippedRef{name: "db", optional: false}
+
+	if got := sr.Type(); got != "SkippedRef" {
+		t.Errorf("Type() = %q, want SkippedRef", got)
+	}
+	if sr.Truth() != starlark.False {
+		t.Error("SkippedRef.Truth() = True, want False (must be falsy)")
+	}
+	if sr.String() != "db" {
+		t.Errorf("String() = %q, want db", sr.String())
+	}
+	nameAttr, err := sr.Attr("name")
+	if err != nil || nameAttr != starlark.String("db") {
+		t.Errorf(".name = %v, %v; want String(db)", nameAttr, err)
+	}
+	optAttr, err := sr.Attr("optional")
+	if err != nil || optAttr != starlark.False {
+		t.Errorf(".optional = %v, %v; want False", optAttr, err)
+	}
+}
+
+func TestSkippedRef_ReturnedFromWhenFalse(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	val, err := callResource(c, "db", starlark.None, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("skip_reason"), starlark.String("waiting")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	sr, ok := val.(*SkippedRef)
+	if !ok {
+		t.Fatalf("Resource() = %T, want *SkippedRef", val)
+	}
+	if sr.name != "db" || sr.optional {
+		t.Errorf("SkippedRef = %+v, want {name:db, optional:false}", sr)
+	}
+}
+
+func TestSkippedRef_ReturnedFromWhenFalseOptional(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	val, err := callResource(c, "backup", starlark.None, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("skip_reason"), starlark.String("disabled")},
+		{starlark.String("optional"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	sr, ok := val.(*SkippedRef)
+	if !ok {
+		t.Fatalf("Resource() = %T, want *SkippedRef", val)
+	}
+	if !sr.optional {
+		t.Errorf("SkippedRef.optional = false, want true")
+	}
+}
+
+func TestSkippedRef_ReturnedFromBodyNone(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	val, err := callResource(c, "db", starlark.None, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*SkippedRef); !ok {
+		t.Errorf("Resource() = %T, want *SkippedRef", val)
+	}
+}
+
+func TestSkippedRef_ReturnedFromPreserveMiss(t *testing.T) {
+	observed := convert.NewStarlarkDict(0)
+	observed.Freeze()
+	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
+	val, err := callResource(c, "db", starlark.None, []starlark.Tuple{
+		{starlark.String("preserve_observed"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*SkippedRef); !ok {
+		t.Errorf("Resource() = %T, want *SkippedRef", val)
+	}
+}
+
+func TestDependsOn_AcceptsNone(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("X"))
+
+	depList := starlark.NewList([]starlark.Value{starlark.None})
+	_, err := callResource(c, "a", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error (None in depends_on should be tolerated): %v", err)
+	}
+	if got := c.Dependencies(); len(got) != 0 {
+		t.Errorf("Dependencies() = %+v, want empty (None entry should not record a dep)", got)
+	}
+	if _, ok := c.Resources()["a"]; !ok {
+		t.Error("expected 'a' to be emitted normally despite None in depends_on")
+	}
+}
+
+func TestDependsOn_AcceptsOptionalSkippedRef(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("X"))
+
+	optSkipped := &SkippedRef{name: "backup", optional: true}
+	depList := starlark.NewList([]starlark.Value{optSkipped})
+	val, err := callResource(c, "a", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*ResourceRef); !ok {
+		t.Errorf("Resource() = %T, want *ResourceRef (optional skip should not block emission)", val)
+	}
+	if got := c.Dependencies(); len(got) != 0 {
+		t.Errorf("Dependencies() = %+v, want empty (optional skip should not record a dep)", got)
+	}
+}
+
+func TestDependsOn_TransitiveSkip_NonOptional(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	gating := &SkippedRef{name: "db", optional: false}
+	depList := starlark.NewList([]starlark.Value{gating})
+	val, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	sr, ok := val.(*SkippedRef)
+	if !ok {
+		t.Fatalf("Resource() = %T, want *SkippedRef (transitive skip)", val)
+	}
+	if sr.name != "app" {
+		t.Errorf("SkippedRef.name = %q, want app", sr.name)
+	}
+	if _, emitted := c.Resources()["app"]; emitted {
+		t.Error("transitively skipped 'app' should not be in Resources()")
+	}
+	skips := c.GatingSkips()
+	if len(skips) != 1 || skips[0].Name != "app" {
+		t.Errorf("GatingSkips() = %+v, want one entry for 'app'", skips)
+	}
+	if !strings.Contains(skips[0].Reason, "depends on skipped") ||
+		!strings.Contains(skips[0].Reason, `"db"`) {
+		t.Errorf("skip reason = %q, want it to mention `depends on skipped \"db\"`", skips[0].Reason)
+	}
+}
+
+func TestDependsOn_TransitiveSkip_DependentOptional(t *testing.T) {
+	// app is itself optional=True, so the transitive skip should NOT gate.
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	gating := &SkippedRef{name: "db", optional: false}
+	depList := starlark.NewList([]starlark.Value{gating})
+	val, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+		{starlark.String("optional"), starlark.True},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	sr, ok := val.(*SkippedRef)
+	if !ok || !sr.optional {
+		t.Errorf("Resource() = %v, want *SkippedRef{optional:true}", val)
+	}
+	if got := c.GatingSkips(); len(got) != 0 {
+		t.Errorf("GatingSkips() = %+v, want empty (dependent is optional)", got)
+	}
+}
+
+func TestDependsOn_MixedSkippedAndReal_NonOptionalWins(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	real := &ResourceRef{name: "cache"}
+	skipped := &SkippedRef{name: "db", optional: false}
+	depList := starlark.NewList([]starlark.Value{real, skipped})
+
+	val, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*SkippedRef); !ok {
+		t.Errorf("Resource() = %T, want *SkippedRef (any non-optional skip triggers transitive skip)", val)
+	}
+	if got := c.Dependencies(); len(got) != 0 {
+		t.Errorf("Dependencies() = %+v, want empty (transitive skip aborts before recording any deps)", got)
+	}
+}
+
+func TestDependsOn_MixedSkippedAndReal_AllOptional(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	real := &ResourceRef{name: "cache"}
+	optSkipped := &SkippedRef{name: "backup", optional: true}
+	depList := starlark.NewList([]starlark.Value{real, optSkipped, starlark.None})
+
+	val, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*ResourceRef); !ok {
+		t.Errorf("Resource() = %T, want *ResourceRef", val)
+	}
+	deps := c.Dependencies()
+	if len(deps) != 1 || deps[0].Dependency != "cache" {
+		t.Errorf("Dependencies() = %+v, want one dep on cache", deps)
+	}
+}
+
+func TestDependsOn_TupleWithSkippedRefFirst_TransitiveSkip(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	gating := &SkippedRef{name: "db", optional: false}
+	tup := starlark.Tuple{gating, starlark.String("status.atProvider.host")}
+	depList := starlark.NewList([]starlark.Value{tup})
+
+	val, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*SkippedRef); !ok {
+		t.Errorf("Resource() = %T, want *SkippedRef (tuple-with-non-optional-SkippedRef triggers transitive skip)", val)
+	}
+}
+
+func TestDependsOn_TupleWithOptionalSkippedRefFirst_DropEntry(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	optSkipped := &SkippedRef{name: "backup", optional: true}
+	tup := starlark.Tuple{optSkipped, starlark.String("x.y")}
+	depList := starlark.NewList([]starlark.Value{tup})
+
+	val, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+	if _, ok := val.(*ResourceRef); !ok {
+		t.Errorf("Resource() = %T, want *ResourceRef", val)
+	}
+	if got := c.Dependencies(); len(got) != 0 {
+		t.Errorf("Dependencies() = %+v, want empty (optional-SkippedRef tuple should be dropped)", got)
+	}
+}
+
+func TestDependsOn_TupleWithNoneFirst_StillErrors(t *testing.T) {
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("App"))
+
+	tup := starlark.Tuple{starlark.None, starlark.String("x.y")}
+	depList := starlark.NewList([]starlark.Value{tup})
+
+	_, err := callResource(c, "app", body, []starlark.Tuple{
+		{starlark.String("depends_on"), depList},
+	})
+	if err == nil {
+		t.Fatal("(None, \"path\") tuple should still error; bare None tolerance is intentional, tuples are too explicit to silently drop")
 	}
 }

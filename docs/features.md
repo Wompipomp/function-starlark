@@ -266,8 +266,43 @@ if phase != "Running":
 ```
 
 Precedence: an explicit `set_composite_ready()` call always wins over
-auto-gating from `Resource(when=False)` skips (last call wins if invoked more
-than once).
+auto-gating from `Resource(when=False)` skips and from sequencer deferrals
+(last call wins if invoked more than once).
+
+### Dependency-driven gating (transitive skip + sequencer deferral)
+
+Two adjacent paths also feed into composite readiness so operators only ever
+need to look at one condition (`ComposedResourcesReady`):
+
+**Sequencer deferral.** When `Resource("a", body, depends_on=[b])` references
+a `b` that is not yet observed Ready+Synced (or whose tuple field path is not
+yet truthy), `a` is removed from desired state and recorded as a gating
+defer. The composite gets `Ready=False` with reason `WaitingForDependencies`.
+This replaces the old `Synced=False/CreationSequencing` signal -- `Synced` is
+the provider/cloud-sync axis, `ComposedResourcesReady` is the composition
+axis.
+
+**Transitive skip.** A `Resource(when=False)` returns a `SkippedRef` (with
+`.name`, falsy in Starlark). Passing that `SkippedRef` to `depends_on` of a
+downstream resource transitively skips the downstream too -- no manual
+`if ref:` guard required:
+
+```python
+db = Resource("db", body, when=cluster_ready, skip_reason="cluster pending")
+# When cluster_ready is False, both db and app are skipped and the composite
+# stays Ready=False with one ComposedResourcesReady=False condition listing
+# both names.
+Resource("app", body, depends_on=[db])
+```
+
+Use `optional=True` on the upstream to opt out of the transitive cascade
+(downstream emits normally, the dropped optional dep is dropped from the
+list). `depends_on=[None]` is also tolerated for callsites that may resolve
+to `None` for unrelated reasons.
+
+When **both** skips and defers are present in the same response, a single
+`ComposedResourcesReady=False` condition is emitted with reason
+`CompositeNotReady` and a message listing both categories.
 
 ### Condition surface
 

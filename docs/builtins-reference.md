@@ -213,15 +213,18 @@ Kubernetes resources in a composition.
 | `ready` | None \| True \| False | None | Readiness signal. See below. |
 | `labels` | dict \| None \| omitted | auto-inject | Label behavior. See below. |
 | `connection_details` | dict \| None | None | Per-resource connection details (string key-value pairs). |
-| `depends_on` | list \| None | None | List of ResourceRef, string, or `(ref, "field.path")` tuple for creation sequencing. |
+| `depends_on` | list \| None | None | List of dependency items for creation sequencing. Accepted item types: `ResourceRef`, `SkippedRef`, `string`, `(ref, "field.path")` tuple, or `None` (silently ignored). A non-optional `SkippedRef` triggers transitive skip of the dependent (see below). |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
 | `when` | bool | `True` | Gate resource emission. `False` skips the resource (requires `skip_reason`). Only accepts `True` or `False` -- non-bool values raise a type error. |
 | `skip_reason` | string | `""` | Human-readable reason for skipping. Required when `when=False` (without `preserve_observed`). Appears in a Warning event on skip paths. Always legal to set (unused on non-skip paths); useful when `when` is a runtime expression that may flip between `True` and `False` across reconciliations. |
 | `preserve_observed` | bool | `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. |
 | `optional` | bool | `False` | When a skip path is taken (e.g. `when=False` without a successful `preserve_observed`), the default (`optional=False`) gates the **composite resource** Ready state to `False` so the XR does not appear ready while a conditional dependency is missing. Set `optional=True` for resources that are legitimately absent by design (feature flags, tier-gated add-ons) so their absence does not block the XR from being ready. |
 
-**Returns:** ResourceRef with a `.name` attribute (the composition resource
-name). Use in `depends_on` for other resources.
+**Returns:** `ResourceRef` (when emitted) or `SkippedRef` (when any skip path
+was taken). Both expose a `.name` attribute holding the composition resource
+name; `SkippedRef` additionally exposes `.optional` (mirrors the `optional=`
+kwarg) and is **falsy** in boolean context, so existing `if ref:` patterns
+continue to work. `SkippedRef` is also accepted in `depends_on` (see below).
 
 **ready -- three-state readiness:**
 
@@ -320,11 +323,29 @@ such skips are still recorded as Warning events but do **not** gate XR ready.
 | Scenario | `optional` | XR `Ready` effect | Condition emitted |
 |---|---|---|---|
 | `when=True` or emitted body | any | unchanged (auto-ready decides) | none |
-| `when=False` skipped, default | `False` | `READY_FALSE` | `ComposedResourcesReady=False` |
+| `when=False` skipped, default | `False` | `READY_FALSE` | `ComposedResourcesReady=False` (reason `PendingConditionalResources`) |
 | `when=False` skipped, opted out | `True` | unchanged | none |
 | `preserve_observed=True`, found | any | unchanged | none |
 | `preserve_observed=True`, miss | `False` | `READY_FALSE` | `ComposedResourcesReady=False` |
 | `preserve_observed=True`, miss | `True` | unchanged | none |
+| Sequencer-deferred (`depends_on` unmet) | n/a | `READY_FALSE` | `ComposedResourcesReady=False` (reason `WaitingForDependencies`) |
+| Skips and defers both present | mixed | `READY_FALSE` | `ComposedResourcesReady=False` (reason `CompositeNotReady`) |
+
+**depends_on -- accepted item types and transitive skip:**
+
+`depends_on` items can be:
+
+| Item | Behavior |
+|---|---|
+| `ResourceRef` (from a real `Resource()` call) | Recorded as a creation-sequencing dependency (waits for Ready+Synced). |
+| `string` | Recorded as a string-named dependency (no name validation; useful for cross-step refs). |
+| `(ref, "field.path")` tuple | Waits for the dot-path to have a truthy value on the dependency. The first element accepts `ResourceRef`, `SkippedRef`, or `string`. |
+| `SkippedRef`, non-optional | **Transitive skip.** The dependent is itself skipped (and gates the composite per its own `optional=` setting). The skip reason is auto-set to `depends on skipped "<name>"` -- no `skip_reason=` required. |
+| `SkippedRef`, optional | Silently dropped from the dependency list; the dependent is emitted normally. |
+| `None` | Silently dropped. Allows callers to write `depends_on=[ref]` unconditionally where `ref` may be a real ref or `None` from a callsite expression. |
+
+`(None, "path")` tuples still error -- tuples are explicit enough that
+silently dropping them would mask bugs.
 
 **Example:**
 

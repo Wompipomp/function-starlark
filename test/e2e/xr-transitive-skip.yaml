@@ -1,0 +1,15 @@
+# Transitive skip: Resource(when=False) returns a SkippedRef; passing it to
+# depends_on of a downstream Resource transitively skips the downstream.
+# Expected outcome: XR stays Ready=False with a single
+# ComposedResourcesReady=False condition naming both 'upstream' and 'downstream'.
+# Also exercises depends_on=[None] tolerance (the script includes a None entry).
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-transitive-skip
+  labels:
+    e2e-test: transitive-skip
+spec:
+  compositionRef:
+    name: transitive-skip-test
+  mode: transitive

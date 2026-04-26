@@ -1,0 +1,15 @@
+# Optional cascade: Resource(when=False, optional=True) returns an optional
+# SkippedRef. A downstream Resource passing it in depends_on does NOT cascade
+# the skip; the optional dep is silently dropped from the dependency list and
+# downstream emits normally.
+# Expected outcome: XR reaches Ready=True (only downstream matters).
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-transitive-skip-optional
+  labels:
+    e2e-test: transitive-skip
+spec:
+  compositionRef:
+    name: transitive-skip-test
+  mode: optional-cascade

@@ -485,18 +485,21 @@ func readyToProto(r resource.Ready) fnv1.Ready {
 }
 
 const (
-	CompositeReadyConditionType = "ComposedResourcesReady"
-	compositeReadyReasonPending = "PendingConditionalResources"
+	CompositeReadyConditionType    = "ComposedResourcesReady"
+	compositeReadyReasonPending    = "PendingConditionalResources"
+	compositeReadyReasonWaitingDep = "WaitingForDependencies"
+	compositeReadyReasonComposite  = "CompositeNotReady"
 )
 
 // ApplyCompositeReady sets rsp.Desired.Composite.Ready. An explicit
-// set_composite_ready() call wins; otherwise any non-optional Resource(when=False)
-// skip flips Ready to False and emits a ComposedResourcesReady=False condition.
-// With neither, Ready is left UNSPECIFIED.
+// set_composite_ready() call wins. Otherwise any non-optional
+// Resource(when=False) skip OR sequencer-deferred resource flips Ready to
+// False and emits a ComposedResourcesReady=False condition. With none of
+// these, Ready is left UNSPECIFIED.
 func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc *ConditionCollector) {
-	override, skips := collector.compositeReadyState()
+	override, skips, defers := collector.compositeReadyState()
 
-	if !override.Set && len(skips) == 0 {
+	if !override.Set && len(skips) == 0 && len(defers) == 0 {
 		return
 	}
 
@@ -531,6 +534,37 @@ func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc
 
 	rsp.Desired.Composite.Ready = fnv1.Ready_READY_FALSE
 
+	reason, message := buildGatingConditionFields(skips, defers)
+	cc.AddCondition(CollectedCondition{
+		Type:    CompositeReadyConditionType,
+		Status:  "False",
+		Reason:  reason,
+		Message: message,
+		Target:  "CompositeAndClaim",
+	})
+}
+
+// buildGatingConditionFields composes the reason and message for the
+// auto-emitted ComposedResourcesReady=False condition based on which gating
+// categories are populated.
+func buildGatingConditionFields(skips []GatingSkip, defers []GatingDefer) (string, string) {
+	skipPart := formatGatingSkips(skips)
+	deferPart := formatGatingDefers(defers)
+
+	switch {
+	case len(skips) > 0 && len(defers) > 0:
+		return compositeReadyReasonComposite, skipPart + "; " + deferPart
+	case len(skips) > 0:
+		return compositeReadyReasonPending, skipPart
+	default:
+		return compositeReadyReasonWaitingDep, deferPart
+	}
+}
+
+func formatGatingSkips(skips []GatingSkip) string {
+	if len(skips) == 0 {
+		return ""
+	}
 	parts := make([]string, 0, len(skips))
 	for _, s := range skips {
 		if s.Reason != "" {
@@ -539,11 +573,20 @@ func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc
 			parts = append(parts, fmt.Sprintf("%q", s.Name))
 		}
 	}
-	cc.AddCondition(CollectedCondition{
-		Type:    CompositeReadyConditionType,
-		Status:  "False",
-		Reason:  compositeReadyReasonPending,
-		Message: fmt.Sprintf("Pending resources: %s", strings.Join(parts, "; ")),
-		Target:  "CompositeAndClaim",
-	})
+	return "Pending resources: " + strings.Join(parts, "; ")
+}
+
+func formatGatingDefers(defers []GatingDefer) string {
+	if len(defers) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(defers))
+	for _, d := range defers {
+		if d.Reason != "" {
+			parts = append(parts, fmt.Sprintf("%q (%s)", d.Name, d.Reason))
+		} else {
+			parts = append(parts, fmt.Sprintf("%q", d.Name))
+		}
+	}
+	return "Waiting on dependencies: " + strings.Join(parts, "; ")
 }
