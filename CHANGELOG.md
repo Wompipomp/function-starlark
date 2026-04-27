@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.11.0](https://github.com/Wompipomp/function-starlark/compare/v0.10.0...v0.11.0) (2026-04-27)
+
+
+### Features
+
+* **11:** add package-local OCI detector and scanner wiring ([e35672d](https://github.com/Wompipomp/function-starlark/commit/e35672dfb51e53fc7980357ddf1042f61e82656a))
+* **11:** document package-local load scheme and add e2e fixture ([19e86e4](https://github.com/Wompipomp/function-starlark/commit/19e86e42be363d19c512b5cca898c4026c37e54c))
+* **11:** wire package-local loads into loader and resolver ([728e390](https://github.com/Wompipomp/function-starlark/commit/728e39002d6da156ff5afde3325c5b8231496537))
+* **36-01:** implement recursive dict.compact with depth guard ([b9a3411](https://github.com/Wompipomp/function-starlark/commit/b9a3411d277907a4f22c61d48ce8376e87903977))
+* **37-01:** add observed dict to Collector and update all call sites ([03911c4](https://github.com/Wompipomp/function-starlark/commit/03911c4842c122be399aa95110ee546301626141))
+* **37-01:** extract recordSkip method and refactor skipResourceFn ([99d24f4](https://github.com/Wompipomp/function-starlark/commit/99d24f435136dfe82f22e7331ac37ab584cbc613))
+* **38-01:** implement when/skip_reason/preserve_observed gate logic ([82b8b5e](https://github.com/Wompipomp/function-starlark/commit/82b8b5e749de50c0352fd46f739199ca0c81c5bc))
+* **38-02:** implement preserve_observed path with observed body lookup ([a4f3b2e](https://github.com/Wompipomp/function-starlark/commit/a4f3b2e4926132876b718c6df5692d4218301120))
+* **39-01:** add dict.compact reference documentation ([9c2df82](https://github.com/Wompipomp/function-starlark/commit/9c2df82276fa64f6e71ed49d36816f9cc05a83d9))
+* **39-01:** add Resource() gating kwargs documentation with state table ([2dbd09b](https://github.com/Wompipomp/function-starlark/commit/2dbd09bf478dee1d8c2482194aff7ec51c6c130c))
+* **39-03:** add dict.compact and when=False E2E test scenarios ([c2cd5e9](https://github.com/Wompipomp/function-starlark/commit/c2cd5e9576b2028e141b0e6e3c10612409695172))
+* **39-03:** add preserve_observed two-phase reconciliation E2E test ([4a39859](https://github.com/Wompipomp/function-starlark/commit/4a39859ea9ed94cc1949932c53e0a29dfa297937))
+* add dict.compact builtin to remove None-valued entries from dictionaries ([386adfb](https://github.com/Wompipomp/function-starlark/commit/386adfbb40bda537952db51ee0949a7f8f8d0c6f))
+* add OCI pull policy support to control tag revalidation behavior ([a14e741](https://github.com/Wompipomp/function-starlark/commit/a14e741055aa38015652a265fc53f37d80d4c867))
+* implement composite readiness gating with optional resource support and set_composite_ready builtin ([0d205dd](https://github.com/Wompipomp/function-starlark/commit/0d205dd4cd0ba0266c42b41f78161f6bb39b9f2f))
+* implement transitive skipping and deferred dependency gating for conditional resources ([52889eb](https://github.com/Wompipomp/function-starlark/commit/52889eb7a3c8bc732fa08c6f69fce4ff8680bad8))
+* **quick-13:** auto-compact Resource() body to strip None-valued entries ([6cdfae4](https://github.com/Wompipomp/function-starlark/commit/6cdfae4d78e239ded5dd109d62b09e5ee50cdeb2))
+* **quick-14:** allow skip_reason with when=True in Resource() ([886e9d7](https://github.com/Wompipomp/function-starlark/commit/886e9d7552bbb20d46573a277adda736251e0274))
+
+
+### Bug Fixes
+
+* **11:** replace if-else chain with switch in ExpandPackageLocal ([f04257f](https://github.com/Wompipomp/function-starlark/commit/f04257fff143d22543d310a3b3f0ca7e2de56b38))
+* filter out version-dependent unready resource messages in render-check and update expected output accordingly ([8812579](https://github.com/Wompipomp/function-starlark/commit/8812579e556a7f3d191862d8b84387a26c70b007))
+* implement callable module wrapper for dict to support both namespace access and constructor calls ([2550aa8](https://github.com/Wompipomp/function-starlark/commit/2550aa8d9e82c1005ea1d911c7389dd20ece2dae))
+* strip read-only metadata fields for preserve_observed and sanitize module scan thread names for package-local imports ([4aa7309](https://github.com/Wompipomp/function-starlark/commit/4aa73092b24c133351ef61a72d182d49808ec60b))
+
+
+### Performance Improvements
+
+* implement lazy allocation in compactDict and compactList to avoid unnecessary copying ([f97aaf1](https://github.com/Wompipomp/function-starlark/commit/f97aaf12392794beb65f1f40b0f0e134b3aaaa06))
+
 ## [0.10.0](https://github.com/Wompipomp/function-starlark/compare/v0.9.0...v0.10.0) (2026-04-13)
 
 
