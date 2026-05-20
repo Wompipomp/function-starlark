@@ -4691,6 +4691,241 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 }
 
 // ---------------------------------------------------------------------------
+// Kubernetes Object nested condition checking E2E tests
+// ---------------------------------------------------------------------------
+
+// TestRunFunctionCreationSequencing_K8sObjectNestedReady verifies that when
+// a dependency is a Kubernetes Object (kubernetes.crossplane.io) with all
+// nested resource conditions True, the dependent is NOT deferred.
+func TestRunFunctionCreationSequencing_K8sObjectNestedReady(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `obj = Resource("k8s-deploy", {"apiVersion": "kubernetes.crossplane.io/v1alpha2", "kind": "Object", "spec": {"forProvider": {"manifest": {"apiVersion": "apps/v1", "kind": "Deployment"}}}})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[obj])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"k8s-deploy": {Resource: resource.MustStructJSON(`{
+					"apiVersion": "kubernetes.crossplane.io/v1alpha2",
+					"kind": "Object",
+					"status": {
+						"conditions": [
+							{"type": "Ready", "status": "True"},
+							{"type": "Synced", "status": "True"}
+						],
+						"atProvider": {
+							"manifest": {
+								"apiVersion": "apps/v1",
+								"kind": "Deployment",
+								"status": {
+									"conditions": [
+										{"type": "Available", "status": "True"},
+										{"type": "Progressing", "status": "True"}
+									]
+								}
+							}
+						}
+					}
+				}`)},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+	if _, ok := resources["app"]; !ok {
+		t.Error("expected 'app' in desired state — K8s Object nested conditions are all True")
+	}
+
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING && strings.Contains(r.GetMessage(), "Creation sequencing:") {
+			t.Errorf("unexpected sequencing warning when nested conditions are met: %s", r.GetMessage())
+		}
+	}
+}
+
+// TestRunFunctionCreationSequencing_K8sObjectNestedNotReady verifies that when
+// a dependency is a Kubernetes Object with the wrapper Ready=True but a nested
+// resource condition NOT True, the dependent IS deferred.
+func TestRunFunctionCreationSequencing_K8sObjectNestedNotReady(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `obj = Resource("k8s-deploy", {"apiVersion": "kubernetes.crossplane.io/v1alpha2", "kind": "Object", "spec": {"forProvider": {"manifest": {"apiVersion": "apps/v1", "kind": "Deployment"}}}})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[obj])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"k8s-deploy": {Resource: resource.MustStructJSON(`{
+					"apiVersion": "kubernetes.crossplane.io/v1alpha2",
+					"kind": "Object",
+					"status": {
+						"conditions": [
+							{"type": "Ready", "status": "True"},
+							{"type": "Synced", "status": "True"}
+						],
+						"atProvider": {
+							"manifest": {
+								"apiVersion": "apps/v1",
+								"kind": "Deployment",
+								"status": {
+									"conditions": [
+										{"type": "Available", "status": "False"},
+										{"type": "Progressing", "status": "True"}
+									]
+								}
+							}
+						}
+					}
+				}`)},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+	if _, ok := resources["app"]; ok {
+		t.Error("'app' should be deferred — K8s Object nested Available=False even though wrapper Ready=True")
+	}
+
+	assertWarningResult(t, rsp, "Creation sequencing:", "1 resource(s) deferred: app")
+}
+
+// TestRunFunctionCreationSequencing_K8sObjectNoNestedFallback verifies that
+// when a K8s Object has no nested conditions (e.g., a Service with no status),
+// the sequencer falls back to the wrapper's own Ready+Synced conditions.
+func TestRunFunctionCreationSequencing_K8sObjectNoNestedFallback(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `obj = Resource("k8s-svc", {"apiVersion": "kubernetes.crossplane.io/v1alpha2", "kind": "Object", "spec": {"forProvider": {"manifest": {"apiVersion": "v1", "kind": "Service"}}}})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[obj])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"k8s-svc": {Resource: resource.MustStructJSON(`{
+					"apiVersion": "kubernetes.crossplane.io/v1alpha2",
+					"kind": "Object",
+					"status": {
+						"conditions": [
+							{"type": "Ready", "status": "True"},
+							{"type": "Synced", "status": "True"}
+						],
+						"atProvider": {
+							"manifest": {
+								"apiVersion": "v1",
+								"kind": "Service",
+								"status": {}
+							}
+						}
+					}
+				}`)},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+	if _, ok := resources["app"]; !ok {
+		t.Error("expected 'app' in desired state — K8s Object has no nested conditions, fallback to wrapper Ready=True")
+	}
+}
+
+// TestRunFunctionCreationSequencing_K8sObjectFieldPathPrecedence verifies that
+// tuple-syntax field path takes precedence over nested condition checking for
+// Kubernetes Objects.
+func TestRunFunctionCreationSequencing_K8sObjectFieldPathPrecedence(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `obj = Resource("k8s-deploy", {"apiVersion": "kubernetes.crossplane.io/v1alpha2", "kind": "Object", "spec": {"forProvider": {"manifest": {"apiVersion": "apps/v1", "kind": "Deployment"}}}})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[(obj, "status.atProvider.manifest.status.readyReplicas")])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"k8s-deploy": {Resource: resource.MustStructJSON(`{
+					"apiVersion": "kubernetes.crossplane.io/v1alpha2",
+					"kind": "Object",
+					"status": {
+						"conditions": [
+							{"type": "Ready", "status": "True"},
+							{"type": "Synced", "status": "True"}
+						],
+						"atProvider": {
+							"manifest": {
+								"apiVersion": "apps/v1",
+								"kind": "Deployment",
+								"status": {
+									"conditions": [
+										{"type": "Available", "status": "False"}
+									],
+									"readyReplicas": 3
+								}
+							}
+						}
+					}
+				}`)},
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	resources := rsp.GetDesired().GetResources()
+	if _, ok := resources["app"]; !ok {
+		t.Error("expected 'app' in desired state — field path readyReplicas=3 is truthy, overrides nested condition check")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Labels E2E integration tests (LBL-01 through LBL-07)
 // ---------------------------------------------------------------------------
 
