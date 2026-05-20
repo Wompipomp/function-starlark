@@ -490,7 +490,7 @@ func (c *Collector) resourceFn(
 
 	// --- Gate logic: evaluate when, preserve_observed, skip_reason BEFORE body type-switch ---
 
-	whenFalse, _, err := validateBoolKwarg(whenVal, "when", name)
+	whenFalse, whenProvided, err := validateBoolKwarg(whenVal, "when", name)
 	if err != nil {
 		return nil, err
 	}
@@ -500,14 +500,19 @@ func (c *Collector) resourceFn(
 		return nil, err
 	}
 	preserveActive := preserveProvided && preserveVal == starlark.True
+	// When `when` is provided, default preserve_observed to True (safe by default).
+	// User can opt out with preserve_observed=False for intentional deletion.
+	if whenProvided && !preserveProvided {
+		preserveActive = true
+	}
 
 	gate := !optional
 
 	// Validate skip_reason is provided when gating off.
 	// skip_reason is always legal (stable across reconciliations where `when`
 	// may flip between True and False); it is only consulted on skip paths.
-	if whenFalse && !preserveActive && skipReason == "" {
-		return nil, fmt.Errorf("Resource(%q): skip_reason is required when when=False", name)
+	if whenProvided && skipReason == "" {
+		return nil, fmt.Errorf("Resource(%q): skip_reason is required when when is used", name)
 	}
 
 	// GATE-01: when=False without preserve -> skip.
