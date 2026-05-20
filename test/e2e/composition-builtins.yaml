@@ -245,7 +245,7 @@ spec:
                optional=True)
             set_xr_status("test.gatedSkipped", True)
 
-            # --- preserve_observed test ---
+            # --- keep_if_exists (cliff guard) test ---
             # Read optional config from XR spec (will be removed in phase 2 by patching XR)
             external_config = get(oxr, "spec.externalConfig", None)
 
