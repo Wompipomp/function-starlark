@@ -26,6 +26,46 @@ func readyStruct() *structpb.Struct {
 	return s
 }
 
+// k8sObjectStruct builds a structpb.Struct representing a Kubernetes Object
+// with top-level apiVersion/kind, wrapper conditions, and optional nested
+// resource conditions at status.atProvider.manifest.status.conditions.
+func k8sObjectStruct(apiVersion string, wrapperReady bool, nestedConditions []map[string]interface{}) *structpb.Struct {
+	wrapperStatus := "False"
+	if wrapperReady {
+		wrapperStatus = "True"
+	}
+
+	statusMap := map[string]interface{}{
+		"conditions": []interface{}{
+			map[string]interface{}{"type": "Ready", "status": wrapperStatus},
+			map[string]interface{}{"type": "Synced", "status": "True"},
+		},
+	}
+
+	if nestedConditions != nil {
+		condList := make([]interface{}, len(nestedConditions))
+		for i, c := range nestedConditions {
+			condList[i] = c
+		}
+		statusMap["atProvider"] = map[string]interface{}{
+			"manifest": map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"status": map[string]interface{}{
+					"conditions": condList,
+				},
+			},
+		}
+	}
+
+	s, _ := structpb.NewStruct(map[string]interface{}{
+		"apiVersion": apiVersion,
+		"kind":       "Object",
+		"status":     statusMap,
+	})
+	return s
+}
+
 func TestSequencer(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -510,6 +550,180 @@ func TestSequencer(t *testing.T) {
 			wantEventMsgs: []string{
 				`1 resource(s) deferred: app`,
 			},
+		},
+		// --- Kubernetes Object nested condition tests ---
+		{
+			name: "KubernetesObjectNestedAllTrue",
+			// K8s Object with nested Deployment conditions all True -> dependency met.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+					{"type": "Available", "status": "True"},
+					{"type": "Progressing", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "KubernetesObjectNestedOneFalse",
+			// K8s Object with nested Deployment Available=False -> deferred.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+					{"type": "Available", "status": "False"},
+					{"type": "Progressing", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  1,
+			wantEventMsgs: []string{
+				`1 resource(s) deferred: app`,
+			},
+		},
+		{
+			name: "KubernetesObjectNoNestedConditionsFallback",
+			// K8s Object with no nested conditions (nestedConditions=nil) ->
+			// falls back to wrapper's own Ready=True+Synced=True.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-svc", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-svc": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-svc": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, nil),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "KubernetesObjectMixedConditionsDeferred",
+			// K8s Object with nested conditions where one is False and one is True -> deferred (AllTrue semantics).
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+					{"type": "Available", "status": "True"},
+					{"type": "Progressing", "status": "False"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  1,
+		},
+		{
+			name: "KubernetesObjectEmptyNestedConditionsFallback",
+			// K8s Object with empty nested conditions list -> falls back to wrapper conditions.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-obj", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-obj": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-obj": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "KubernetesObjectMissingAtProviderFallback",
+			// K8s Object with missing status.atProvider.manifest path -> falls back to wrapper conditions.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-obj", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-obj": true},
+			observedResources: func() map[string]*structpb.Struct {
+				// Build a K8s Object without the atProvider path at all.
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"apiVersion": "kubernetes.crossplane.io/v1alpha2",
+					"kind":       "Object",
+					"status": map[string]interface{}{
+						"conditions": []interface{}{
+							map[string]interface{}{"type": "Ready", "status": "True"},
+							map[string]interface{}{"type": "Synced", "status": "True"},
+						},
+					},
+				})
+				return map[string]*structpb.Struct{"k8s-obj": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "NonObjectResourceUnchanged",
+			// Non-Object resource (regular MR) still uses Ready=True+Synced=True (no regression).
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "rds", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "rds": true},
+			observedResources: func() map[string]*structpb.Struct {
+				s, _ := structpb.NewStruct(map[string]interface{}{
+					"apiVersion": "rds.aws.upbound.io/v1beta1",
+					"kind":       "Instance",
+					"status": map[string]interface{}{
+						"conditions": []interface{}{
+							map[string]interface{}{"type": "Ready", "status": "True"},
+							map[string]interface{}{"type": "Synced", "status": "True"},
+						},
+					},
+				})
+				return map[string]*structpb.Struct{"rds": s}
+			}(),
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "KubernetesObjectV1alpha1Detected",
+			// K8s Object with apiVersion=kubernetes.crossplane.io/v1alpha1 (different version) still detected.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha1", true, []map[string]interface{}{
+					{"type": "Available", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "KubernetesObjectFieldPathPrecedence",
+			// K8s Object with FieldPath dependency -> FieldPath takes precedence (no change in behavior).
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true, FieldPath: "status.atProvider.manifest.status.conditions"},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+					{"type": "Available", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
 		},
 	}
 
