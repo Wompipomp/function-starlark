@@ -45,7 +45,17 @@ spec:
 
 ## Predeclared functions
 
-### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=True, skip_reason="", preserve_observed=False, optional=False)
+### When(condition, reason, keep_if_exists)
+
+Create a gating struct for Resource(). All three parameters mandatory.
+
+- condition: bool (strict). False skips the resource.
+- reason: string, non-empty. Human-readable reason for skipping.
+- keep_if_exists: bool (strict). When True and condition is False, emit observed body if found (cliff guard).
+
+Returns a When struct with .condition, .reason, .keep_if_exists attributes. Truthy when condition is True.
+
+### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=None, optional=False)
 
 Register a desired composed resource. This is the primary function.
 
@@ -56,10 +66,8 @@ Register a desired composed resource. This is the primary function.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
 - depends_on: List of dependency items. Accepted types: ResourceRef, SkippedRef, string, tuple (ref, field_path), or None (silently dropped). Non-optional SkippedRef triggers transitive skip of the dependent. Optional SkippedRef is dropped from the list. Plain refs/strings check existence. Tuples check that the field path has a non-empty value. Generates Crossplane Usage resources.
 - external_name: Sugar for crossplane.io/external-name annotation.
-- when: Bool gate (True/False only). False skips the resource (requires skip_reason). Non-bool values raise type error.
-- skip_reason: Human-readable skip reason. Required when when=False without preserve_observed. Appears in Warning event.
-- preserve_observed: When True and body is None (or when=False), emit the observed body verbatim if found. Cliff-guard for resources with temporarily unavailable config.
-- optional: When False (default), a skip (when=False without a successful preserve_observed) gates the XR to Ready=False and emits a ComposedResourcesReady=False condition. Set True for resources that are expected to be absent by design (feature flags, tier add-ons).
+- when: Optional When() struct. Omit for unconditional emission. When(condition, reason, keep_if_exists) controls gating: condition=False skips with reason; keep_if_exists=True emits observed body if found (cliff guard). Bare bools rejected -- must use When().
+- optional: When False (default), a skip (When(False, ...) without a successful cliff guard) gates the XR to Ready=False and emits a ComposedResourcesReady=False condition. Set True for resources that are expected to be absent by design (feature flags, tier add-ons).
 - Returns: ResourceRef when emitted (with .name attribute), or SkippedRef when any skip path was taken (with .name and .optional attrs; falsy in Starlark so `if ref:` works). SkippedRef can be passed to depends_on of downstream Resources for transitive skip.
 
 Sequencer-deferred resources (depends_on unmet) also flip ComposedResourcesReady=False with reason WaitingForDependencies. The old Synced=False/CreationSequencing signal has been removed -- composition-level gating lives on ComposedResourcesReady; Synced is reserved for provider/cloud sync.
@@ -169,7 +177,7 @@ set_xr_status("atProvider", {"bucketCount": len(buckets), "environment": env})
 
 ### skip_resource(name, reason)
 
-Remove a resource from desired state (e.g., conditionally skip a resource from a previous pipeline step). Pure observability primitive: emits a Warning event, does NOT gate composite readiness. For new code prefer Resource(..., when=False) which also gates the XR; skip_resource is mainly for removing a resource that a prior pipeline step added.
+Remove a resource from desired state (e.g., conditionally skip a resource from a previous pipeline step). Pure observability primitive: emits a Warning event, does NOT gate composite readiness. For new code prefer Resource(..., when=When(False, ...)) which also gates the XR; skip_resource is mainly for removing a resource that a prior pipeline step added.
 ```python
 skip_resource("monitoring", "monitoring only in prod")
 ```
