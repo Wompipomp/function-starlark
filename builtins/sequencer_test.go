@@ -15,11 +15,11 @@ func emptyStruct() *structpb.Struct {
 // readyStruct returns a *structpb.Struct with Ready=True and Synced=True
 // conditions, representing a fully ready Crossplane resource.
 func readyStruct() *structpb.Struct {
-	s, _ := structpb.NewStruct(map[string]interface{}{
-		"status": map[string]interface{}{
-			"conditions": []interface{}{
-				map[string]interface{}{"type": "Ready", "status": "True"},
-				map[string]interface{}{"type": "Synced", "status": "True"},
+	s, _ := structpb.NewStruct(map[string]any{
+		"status": map[string]any{
+			"conditions": []any{
+				map[string]any{"type": "Ready", "status": "True"},
+				map[string]any{"type": "Synced", "status": "True"},
 			},
 		},
 	})
@@ -29,36 +29,36 @@ func readyStruct() *structpb.Struct {
 // k8sObjectStruct builds a structpb.Struct representing a Kubernetes Object
 // with top-level apiVersion/kind, wrapper conditions, and optional nested
 // resource conditions at status.atProvider.manifest.status.conditions.
-func k8sObjectStruct(apiVersion string, wrapperReady bool, nestedConditions []map[string]interface{}) *structpb.Struct {
+func k8sObjectStruct(apiVersion string, wrapperReady bool, nestedConditions []map[string]any) *structpb.Struct {
 	wrapperStatus := "False"
 	if wrapperReady {
 		wrapperStatus = "True"
 	}
 
-	statusMap := map[string]interface{}{
-		"conditions": []interface{}{
-			map[string]interface{}{"type": "Ready", "status": wrapperStatus},
-			map[string]interface{}{"type": "Synced", "status": "True"},
+	statusMap := map[string]any{
+		"conditions": []any{
+			map[string]any{"type": "Ready", "status": wrapperStatus},
+			map[string]any{"type": "Synced", "status": "True"},
 		},
 	}
 
 	if nestedConditions != nil {
-		condList := make([]interface{}, len(nestedConditions))
+		condList := make([]any, len(nestedConditions))
 		for i, c := range nestedConditions {
 			condList[i] = c
 		}
-		statusMap["atProvider"] = map[string]interface{}{
-			"manifest": map[string]interface{}{
+		statusMap["atProvider"] = map[string]any{
+			"manifest": map[string]any{
 				"apiVersion": "apps/v1",
 				"kind":       "Deployment",
-				"status": map[string]interface{}{
+				"status": map[string]any{
 					"conditions": condList,
 				},
 			},
 		}
 	}
 
-	s, _ := structpb.NewStruct(map[string]interface{}{
+	s, _ := structpb.NewStruct(map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       "Object",
 		"status":     statusMap,
@@ -279,10 +279,10 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{
-						"conditions": []interface{}{
-							map[string]interface{}{"type": "Ready", "status": "True"},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{
+						"conditions": []any{
+							map[string]any{"type": "Ready", "status": "True"},
 						},
 					},
 				})
@@ -346,8 +346,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"id": ""},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"id": ""},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -363,8 +363,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"id": "abc123"},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"id": "abc123"},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -380,8 +380,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"count": 0},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"count": 0},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -397,8 +397,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"count": 42},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"count": 42},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -414,8 +414,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"id": nil},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"id": nil},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -431,8 +431,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"ready": true},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"ready": true},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -448,8 +448,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"ready": false},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"ready": false},
 				})
 				return map[string]*structpb.Struct{"db": s}
 			}(),
@@ -465,9 +465,9 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{
-						"atProvider": map[string]interface{}{
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{
+						"atProvider": map[string]any{
 							"id": "proj-123",
 						},
 					},
@@ -501,8 +501,8 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "db": true, "project": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
-					"status": map[string]interface{}{"id": "proj-123"},
+				s, _ := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"id": "proj-123"},
 				})
 				return map[string]*structpb.Struct{
 					"db":      readyStruct(),
@@ -560,7 +560,7 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
 			observedResources: map[string]*structpb.Struct{
-				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
 					{"type": "Available", "status": "True"},
 					{"type": "Progressing", "status": "True"},
 				}),
@@ -578,7 +578,7 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
 			observedResources: map[string]*structpb.Struct{
-				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
 					{"type": "Available", "status": "False"},
 					{"type": "Progressing", "status": "True"},
 				}),
@@ -615,7 +615,7 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
 			observedResources: map[string]*structpb.Struct{
-				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
 					{"type": "Available", "status": "True"},
 					{"type": "Progressing", "status": "False"},
 				}),
@@ -633,7 +633,7 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "k8s-obj": true},
 			observedResources: map[string]*structpb.Struct{
-				"k8s-obj": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{}),
+				"k8s-obj": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{}),
 			},
 			ttlSeconds:      10,
 			wantDeferred:    nil,
@@ -649,13 +649,13 @@ func TestSequencer(t *testing.T) {
 			resourceNames: map[string]bool{"app": true, "k8s-obj": true},
 			observedResources: func() map[string]*structpb.Struct {
 				// Build a K8s Object without the atProvider path at all.
-				s, _ := structpb.NewStruct(map[string]interface{}{
+				s, _ := structpb.NewStruct(map[string]any{
 					"apiVersion": "kubernetes.crossplane.io/v1alpha2",
 					"kind":       "Object",
-					"status": map[string]interface{}{
-						"conditions": []interface{}{
-							map[string]interface{}{"type": "Ready", "status": "True"},
-							map[string]interface{}{"type": "Synced", "status": "True"},
+					"status": map[string]any{
+						"conditions": []any{
+							map[string]any{"type": "Ready", "status": "True"},
+							map[string]any{"type": "Synced", "status": "True"},
 						},
 					},
 				})
@@ -674,13 +674,13 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "rds": true},
 			observedResources: func() map[string]*structpb.Struct {
-				s, _ := structpb.NewStruct(map[string]interface{}{
+				s, _ := structpb.NewStruct(map[string]any{
 					"apiVersion": "rds.aws.upbound.io/v1beta1",
 					"kind":       "Instance",
-					"status": map[string]interface{}{
-						"conditions": []interface{}{
-							map[string]interface{}{"type": "Ready", "status": "True"},
-							map[string]interface{}{"type": "Synced", "status": "True"},
+					"status": map[string]any{
+						"conditions": []any{
+							map[string]any{"type": "Ready", "status": "True"},
+							map[string]any{"type": "Synced", "status": "True"},
 						},
 					},
 				})
@@ -699,7 +699,7 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
 			observedResources: map[string]*structpb.Struct{
-				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha1", true, []map[string]interface{}{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha1", true, []map[string]any{
 					{"type": "Available", "status": "True"},
 				}),
 			},
@@ -716,7 +716,7 @@ func TestSequencer(t *testing.T) {
 			},
 			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
 			observedResources: map[string]*structpb.Struct{
-				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]interface{}{
+				"k8s-deploy": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
 					{"type": "Available", "status": "True"},
 				}),
 			},
