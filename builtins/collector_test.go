@@ -2260,8 +2260,72 @@ func TestCollector_WhenFalse_NoSkipReason_Errors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for when=False without skip_reason")
 	}
-	if !strings.Contains(err.Error(), "skip_reason is required when when=False") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason is required when when=False")
+	if !strings.Contains(err.Error(), "skip_reason is required when when is used") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason is required when when is used")
+	}
+}
+
+func TestCollector_WhenTrue_NoSkipReason_Errors(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.True},
+	})
+	if err == nil {
+		t.Fatal("expected error for when=True without skip_reason")
+	}
+	if !strings.Contains(err.Error(), "skip_reason is required when when is used") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason is required when when is used")
+	}
+}
+
+func TestCollector_WhenFalse_PreserveObserved_OptOut(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "optout.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
+
+	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("db"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("when"), starlark.False},
+		{starlark.String("preserve_observed"), starlark.False},
+		{starlark.String("skip_reason"), starlark.String("intentional removal")},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	// Return value is a *SkippedRef (intentional deletion).
+	if sr, ok := val.(*SkippedRef); !ok || sr.name != "db" {
+		t.Errorf("Resource() = %v (%s), want *SkippedRef{name:\"db\"}", val, val.Type())
+	}
+
+	// Resource must NOT appear (intentional deletion, not preserved).
+	res := c.Resources()
+	if _, ok := res["db"]; ok {
+		t.Error("opted-out resource should not appear in Resources()")
+	}
+
+	// Warning event with user skip reason.
+	events := cc.Events()
+	if len(events) != 1 {
+		t.Fatalf("Events() len = %d, want 1", len(events))
+	}
+	wantMsg := `Skipping resource "db": intentional removal`
+	if events[0].Message != wantMsg {
+		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
 }
 
@@ -2468,6 +2532,7 @@ func TestCollector_WhenTrue_NormalPath(t *testing.T) {
 		body,
 	}, []starlark.Tuple{
 		{starlark.String("when"), starlark.True},
+		{starlark.String("skip_reason"), starlark.String("not needed in prod")},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2815,6 +2880,7 @@ func TestCollector_PreserveObserved_Dormant_WhenTrue(t *testing.T) {
 	}, []starlark.Tuple{
 		{starlark.String("when"), starlark.True},
 		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("skip_reason"), starlark.String("dormant test")},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3046,6 +3112,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
 	}, []starlark.Tuple{
 		{starlark.String("when"), starlark.False},
 		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("skip_reason"), starlark.String("feature gated")},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3067,7 +3134,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	wantMsg := `Skipping resource "db": gated by when=False, not found in observed state (preserve_observed=True)`
+	wantMsg := `Skipping resource "db": feature gated`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
