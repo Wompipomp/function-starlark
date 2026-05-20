@@ -2287,7 +2287,7 @@ func TestCollector_WhenTrue_NoSkipReason_Errors(t *testing.T) {
 	}
 }
 
-func TestCollector_WhenFalse_PreserveObserved_OptOut(t *testing.T) {
+func TestCollector_WhenFalse_PreserveObserved_ExplicitFalse(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "optout.star", nil, nil)
 	thread := new(starlark.Thread)

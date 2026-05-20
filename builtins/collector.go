@@ -500,11 +500,6 @@ func (c *Collector) resourceFn(
 		return nil, err
 	}
 	preserveActive := preserveProvided && preserveVal == starlark.True
-	// When `when` is provided, default preserve_observed to True (safe by default).
-	// User can opt out with preserve_observed=False for intentional deletion.
-	if whenProvided && !preserveProvided {
-		preserveActive = true
-	}
 
 	gate := !optional
 

@@ -198,7 +198,7 @@ protobuf structures for Kubernetes resource access.
 ```python
 ref = Resource(name, body, ready=None, labels=<auto>, connection_details=None,
                depends_on=None, external_name=None,
-               when=True, skip_reason="", preserve_observed=<auto>, optional=False)
+               when=True, skip_reason="", preserve_observed=None, optional=False)
 ```
 
 Register a desired composed resource. This is the primary function for creating
@@ -217,7 +217,7 @@ Kubernetes resources in a composition.
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
 | `when` | bool | `True` | Gate resource emission. `False` skips the resource. Only accepts `True` or `False` -- non-bool values raise a type error. Requires `skip_reason` whenever used (even with `True`) so the reason is available if `when` later flips to `False`. |
 | `skip_reason` | string | `""` | Human-readable reason for skipping. **Required whenever `when` is used** (even `when=True`), so the reason is always available when `when` is a runtime expression that may flip between `True` and `False` across reconciliations. Appears in a Warning event on skip paths. |
-| `preserve_observed` | bool | `True` when `when` is used, else `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. Defaults to `True` when `when` is provided (safe by default); set `preserve_observed=False` explicitly for intentional deletion. |
+| `preserve_observed` | bool | `None` (`False`) | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. `None` and `False` behave identically. |
 | `optional` | bool | `False` | When a skip path is taken (e.g. `when=False` without a successful `preserve_observed`), the default (`optional=False`) gates the **composite resource** Ready state to `False` so the XR does not appear ready while a conditional dependency is missing. Set `optional=True` for resources that are legitimately absent by design (feature flags, tier-gated add-ons) so their absence does not block the XR from being ready. |
 
 **Returns:** `ResourceRef` (when emitted) or `SkippedRef` (when any skip path
