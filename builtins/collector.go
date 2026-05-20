@@ -111,14 +111,14 @@ func whenBuiltin(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, k
 	}
 	cond, ok := condVal.(starlark.Bool)
 	if !ok {
-		return nil, fmt.Errorf("When: condition must be bool, got %s", condVal.Type())
+		return nil, fmt.Errorf("when: condition must be bool, got %s", condVal.Type())
 	}
 	keep, ok := keepVal.(starlark.Bool)
 	if !ok {
-		return nil, fmt.Errorf("When: keep_if_exists must be bool, got %s", keepVal.Type())
+		return nil, fmt.Errorf("when: keep_if_exists must be bool, got %s", keepVal.Type())
 	}
 	if reason == "" {
-		return nil, fmt.Errorf("When: reason must not be empty")
+		return nil, fmt.Errorf("when: reason must not be empty")
 	}
 	return &WhenValue{condition: bool(cond), reason: reason, keepIfExists: bool(keep)}, nil
 }
