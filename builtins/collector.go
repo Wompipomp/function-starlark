@@ -58,12 +58,77 @@ func (r *ResourceRef) Attr(name string) (starlark.Value, error) {
 
 func (r *ResourceRef) AttrNames() []string { return []string{"name"} }
 
+// WhenValue is the Starlark struct returned by When(condition, reason, keep_if_exists).
+// It is immutable by construction and implements starlark.Value + starlark.HasAttrs.
+type WhenValue struct {
+	condition    bool
+	reason       string
+	keepIfExists bool
+}
+
+// Compile-time interface checks for WhenValue.
+var (
+	_ starlark.Value    = (*WhenValue)(nil)
+	_ starlark.HasAttrs = (*WhenValue)(nil)
+)
+
+func (w *WhenValue) String() string {
+	return fmt.Sprintf("When(%s, %q, keep_if_exists=%s)",
+		starlark.Bool(w.condition), w.reason, starlark.Bool(w.keepIfExists))
+}
+func (w *WhenValue) Type() string         { return "When" }
+func (w *WhenValue) Freeze()              {} // immutable by construction
+func (w *WhenValue) Truth() starlark.Bool { return starlark.Bool(w.condition) }
+func (w *WhenValue) Hash() (uint32, error) {
+	return 0, fmt.Errorf("unhashable type: When")
+}
+
+func (w *WhenValue) Attr(name string) (starlark.Value, error) {
+	switch name {
+	case "condition":
+		return starlark.Bool(w.condition), nil
+	case "keep_if_exists":
+		return starlark.Bool(w.keepIfExists), nil
+	case "reason":
+		return starlark.String(w.reason), nil
+	}
+	return nil, nil
+}
+
+func (w *WhenValue) AttrNames() []string {
+	return []string{"condition", "keep_if_exists", "reason"}
+}
+
+// whenBuiltin implements the When(condition, reason, keep_if_exists) Starlark builtin.
+// All three parameters are mandatory. condition and keep_if_exists must be strict
+// starlark.Bool (no truthiness). reason must be a non-empty string.
+func whenBuiltin(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var condVal, keepVal starlark.Value
+	var reason string
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
+		"condition", &condVal, "reason", &reason, "keep_if_exists", &keepVal); err != nil {
+		return nil, err
+	}
+	cond, ok := condVal.(starlark.Bool)
+	if !ok {
+		return nil, fmt.Errorf("When: condition must be bool, got %s", condVal.Type())
+	}
+	keep, ok := keepVal.(starlark.Bool)
+	if !ok {
+		return nil, fmt.Errorf("When: keep_if_exists must be bool, got %s", keepVal.Type())
+	}
+	if reason == "" {
+		return nil, fmt.Errorf("When: reason must not be empty")
+	}
+	return &WhenValue{condition: bool(cond), reason: reason, keepIfExists: bool(keep)}, nil
+}
+
 // SkippedRef is the value returned by Resource() when the resource was skipped
-// (when=False, body=None without preserve, preserve_observed miss, or
-// transitively skipped via depends_on). It exposes .name and .optional like
-// ResourceRef but its truth value is False so `if ref:` continues to gate
-// callers correctly. Passing a SkippedRef to depends_on triggers transitive
-// skip when optional=False, or is silently ignored when optional=True.
+// (When(condition=False), body=None without When, or transitively skipped via
+// depends_on). It exposes .name and .optional like ResourceRef but its truth
+// value is False so `if ref:` continues to gate callers correctly. Passing a
+// SkippedRef to depends_on triggers transitive skip when optional=False, or is
+// silently ignored when optional=True.
 type SkippedRef struct {
 	name     string
 	optional bool
@@ -441,22 +506,7 @@ func (c *Collector) addDependency(dependent, dependency string, isRef bool, fiel
 	})
 }
 
-// validateBoolKwarg validates that a starlark.Value is either nil (omitted) or
-// a starlark.Bool. Returns (isFalse, wasProvided, error). When val is nil
-// (kwarg omitted), returns (false, false, nil).
-func validateBoolKwarg(val starlark.Value, paramName, resourceName string) (bool, bool, error) {
-	if val == nil {
-		return false, false, nil
-	}
-	b, ok := val.(starlark.Bool)
-	if !ok {
-		return false, true, fmt.Errorf("Resource(%q): %s must be bool, got %s",
-			resourceName, paramName, val.Type())
-	}
-	return !bool(b), true, nil
-}
-
-// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None, skip_reason="", preserve_observed=None, optional=False) Starlark builtin.
+// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None, optional=False) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -471,8 +521,6 @@ func (c *Collector) resourceFn(
 	var labelsVal starlark.Value
 	var externalNameVal starlark.Value
 	var whenVal starlark.Value
-	var skipReason string
-	var preserveVal starlark.Value
 	var optional bool
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
@@ -482,42 +530,31 @@ func (c *Collector) resourceFn(
 		"depends_on??", &dependsOn,
 		"external_name??", &externalNameVal,
 		"when?", &whenVal,
-		"skip_reason?", &skipReason,
-		"preserve_observed?", &preserveVal,
 		"optional?", &optional); err != nil {
 		return nil, err
 	}
 
-	// --- Gate logic: evaluate when, preserve_observed, skip_reason BEFORE body type-switch ---
+	// --- Gate logic: evaluate When struct BEFORE body type-switch ---
 
-	whenFalse, whenProvided, err := validateBoolKwarg(whenVal, "when", name)
-	if err != nil {
-		return nil, err
+	var w *WhenValue
+	if whenVal != nil {
+		var ok bool
+		w, ok = whenVal.(*WhenValue)
+		if !ok {
+			return nil, fmt.Errorf("Resource(%q): when must be a When() value, e.g. When(True, \"reason\", keep_if_exists=False), got %s", name, whenVal.Type())
+		}
 	}
-
-	_, preserveProvided, err := validateBoolKwarg(preserveVal, "preserve_observed", name)
-	if err != nil {
-		return nil, err
-	}
-	preserveActive := preserveProvided && preserveVal == starlark.True
 
 	gate := !optional
 
-	// Validate skip_reason is provided when gating off.
-	// skip_reason is always legal (stable across reconciliations where `when`
-	// may flip between True and False); it is only consulted on skip paths.
-	if whenProvided && skipReason == "" {
-		return nil, fmt.Errorf("Resource(%q): skip_reason is required when when is used", name)
-	}
-
-	// GATE-01: when=False without preserve -> skip.
-	if whenFalse && !preserveActive {
-		c.recordSkip(name, skipReason, gate)
+	// GATE-01: when provided and condition=false, keep_if_exists=false -> skip.
+	if w != nil && !w.condition && !w.keepIfExists {
+		c.recordSkip(name, w.reason, gate)
 		return &SkippedRef{name: name, optional: optional}, nil
 	}
 
-	// when=False + preserve_observed=True: cliff guard — emit observed body if found.
-	if whenFalse && preserveActive {
+	// GATE-01b: when provided, condition=false, keep_if_exists=true -> cliff guard.
+	if w != nil && !w.condition && w.keepIfExists {
 		s, found, err := c.lookupObservedBody(name)
 		if err != nil {
 			return nil, fmt.Errorf("Resource(%q): %w", name, err)
@@ -526,32 +563,13 @@ func (c *Collector) resourceFn(
 			c.recordPreserve(name, s, "observed body emitted, gated by when=False")
 			return &ResourceRef{name: name}, nil
 		}
-		// Not found in observed — skip.
-		reason := "gated by when=False, not found in observed state (preserve_observed=True)"
-		if skipReason != "" {
-			reason = skipReason
-		}
-		c.recordSkip(name, reason, gate)
+		c.recordSkip(name, w.reason, gate)
 		return &SkippedRef{name: name, optional: optional}, nil
 	}
 
-	// GATE-05: body=None without preserve -> warn and skip.
-	if bodyVal == starlark.None && !preserveActive {
-		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.", gate)
-		return &SkippedRef{name: name, optional: optional}, nil
-	}
-
-	// body=None + preserve_observed=True: emit observed body if found, skip otherwise.
-	if bodyVal == starlark.None && preserveActive {
-		s, found, err := c.lookupObservedBody(name)
-		if err != nil {
-			return nil, fmt.Errorf("Resource(%q): %w", name, err)
-		}
-		if found {
-			c.recordPreserve(name, s, "body=None, emitting observed body")
-			return &ResourceRef{name: name}, nil
-		}
-		c.recordSkip(name, "not found in observed state", gate)
+	// GATE-05: body=None without When -> warn and skip.
+	if bodyVal == starlark.None {
+		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Use When() with keep_if_exists=True to re-emit the observed body.", gate)
 		return &SkippedRef{name: name, optional: optional}, nil
 	}
 

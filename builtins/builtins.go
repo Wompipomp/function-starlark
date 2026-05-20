@@ -83,6 +83,7 @@ func BuildGlobals(
 		"environment":            envDict,
 		"extra_resources":        extraRes,
 		"Resource":               collector.Builtin(),
+		"When":                   starlark.NewBuiltin("When", whenBuiltin),
 		"skip_resource":          collector.SkipResourceBuiltin(),
 		"get":                    starlark.NewBuiltin("get", getFnImpl),
 		"get_label":              starlark.NewBuiltin("get_label", getLabelImpl),
