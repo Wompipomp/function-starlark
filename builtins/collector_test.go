@@ -2163,8 +2163,13 @@ func TestCollector_RecordSkip_Concurrent(t *testing.T) {
 	}
 }
 
+// whenVal constructs a *WhenValue for use in test kwargs.
+func whenVal(condition bool, reason string, keepIfExists bool) *WhenValue {
+	return &WhenValue{condition: condition, reason: reason, keepIfExists: keepIfExists}
+}
+
 // ---------------------------------------------------------------------------
-// GATE-01: Resource(when=False, skip_reason="reason") skips resource
+// GATE-01: Resource(when=When(False, "reason", keep_if_exists=False)) skips
 // ---------------------------------------------------------------------------
 
 func TestCollector_WhenFalse_SkipsResource(t *testing.T) {
@@ -2179,8 +2184,7 @@ func TestCollector_WhenFalse_SkipsResource(t *testing.T) {
 		starlark.String("db"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("skip_reason"), starlark.String("not needed")},
+		{starlark.String("when"), whenVal(false, "not needed", false)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2226,8 +2230,7 @@ func TestCollector_WhenFalse_SkipsResource_Metrics(t *testing.T) {
 		starlark.String("bucket"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("skip_reason"), starlark.String("disabled")},
+		{starlark.String("when"), whenVal(false, "disabled", false)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2240,10 +2243,10 @@ func TestCollector_WhenFalse_SkipsResource_Metrics(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// GATE-02: Resource(when=False) without skip_reason -> error
+// GATE-02: Resource(when=<bare bool>) -> type error (must use When())
 // ---------------------------------------------------------------------------
 
-func TestCollector_WhenFalse_NoSkipReason_Errors(t *testing.T) {
+func TestCollector_WhenBareBool_False_Errors(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2258,14 +2261,14 @@ func TestCollector_WhenFalse_NoSkipReason_Errors(t *testing.T) {
 		{starlark.String("when"), starlark.False},
 	})
 	if err == nil {
-		t.Fatal("expected error for when=False without skip_reason")
+		t.Fatal("expected error for when=False (bare bool)")
 	}
-	if !strings.Contains(err.Error(), "skip_reason is required when when is used") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason is required when when is used")
+	if !strings.Contains(err.Error(), "when must be a When() value") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "when must be a When() value")
 	}
 }
 
-func TestCollector_WhenTrue_NoSkipReason_Errors(t *testing.T) {
+func TestCollector_WhenBareBool_True_Errors(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2280,14 +2283,14 @@ func TestCollector_WhenTrue_NoSkipReason_Errors(t *testing.T) {
 		{starlark.String("when"), starlark.True},
 	})
 	if err == nil {
-		t.Fatal("expected error for when=True without skip_reason")
+		t.Fatal("expected error for when=True (bare bool)")
 	}
-	if !strings.Contains(err.Error(), "skip_reason is required when when is used") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "skip_reason is required when when is used")
+	if !strings.Contains(err.Error(), "when must be a When() value") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "when must be a When() value")
 	}
 }
 
-func TestCollector_WhenFalse_PreserveObserved_ExplicitFalse(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExistsFalse(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "optout.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2299,9 +2302,7 @@ func TestCollector_WhenFalse_PreserveObserved_ExplicitFalse(t *testing.T) {
 		starlark.String("db"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("preserve_observed"), starlark.False},
-		{starlark.String("skip_reason"), starlark.String("intentional removal")},
+		{starlark.String("when"), whenVal(false, "intentional removal", false)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2329,7 +2330,7 @@ func TestCollector_WhenFalse_PreserveObserved_ExplicitFalse(t *testing.T) {
 	}
 }
 
-func TestCollector_SkipReason_WithoutWhenFalse_Allowed(t *testing.T) {
+func TestCollector_WhenTrue_NormalEmission(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2341,44 +2342,7 @@ func TestCollector_SkipReason_WithoutWhenFalse_Allowed(t *testing.T) {
 		starlark.String("bucket"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("skip_reason"), starlark.String("some reason")},
-	})
-	if err != nil {
-		t.Fatalf("Resource() error: %v", err)
-	}
-
-	// Return value must be a ResourceRef (resource emitted as desired).
-	if _, ok := val.(*ResourceRef); !ok {
-		t.Errorf("Resource() = %v (%s), want *ResourceRef", val, val.Type())
-	}
-
-	// Resource MUST appear in collected resources (not skipped).
-	res := c.Resources()
-	if _, ok := res["bucket"]; !ok {
-		t.Error("expected resource \"bucket\" in Resources(), not found")
-	}
-
-	// No skip event must have been recorded.
-	events := cc.Events()
-	if len(events) != 0 {
-		t.Errorf("Events() len = %d, want 0 (no skip event should be emitted)", len(events))
-	}
-}
-
-func TestCollector_SkipReason_WithWhenTrue_Allowed(t *testing.T) {
-	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star", nil, nil)
-	thread := new(starlark.Thread)
-
-	body := new(starlark.Dict)
-	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
-
-	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
-		starlark.String("bucket"),
-		body,
-	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.True},
-		{starlark.String("skip_reason"), starlark.String("some reason")},
+		{starlark.String("when"), whenVal(true, "some reason", false)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2403,7 +2367,7 @@ func TestCollector_SkipReason_WithWhenTrue_Allowed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// GATE-05: Resource(body=None) without preserve_observed -> Warning + skip
+// GATE-05: Resource(body=None) without When -> Warning + skip
 // ---------------------------------------------------------------------------
 
 func TestCollector_BodyNone_NoPreserve_WarnsAndSkips(t *testing.T) {
@@ -2435,7 +2399,7 @@ func TestCollector_BodyNone_NoPreserve_WarnsAndSkips(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	wantMsg := `Skipping resource "db": body is None. If this resource exists, it will be removed from desired state. Set preserve_observed=True to re-emit the observed body when body is None.`
+	wantMsg := `Skipping resource "db": body is None. If this resource exists, it will be removed from desired state. Use When() with keep_if_exists=True to re-emit the observed body.`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
@@ -2448,7 +2412,7 @@ func TestCollector_BodyNone_NoPreserve_WarnsAndSkips(t *testing.T) {
 // GATE-07: when kwarg rejects non-bool values
 // ---------------------------------------------------------------------------
 
-func TestCollector_WhenKwarg_StrictBool_Int(t *testing.T) {
+func TestCollector_WhenKwarg_StrictType_Int(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2463,14 +2427,14 @@ func TestCollector_WhenKwarg_StrictBool_Int(t *testing.T) {
 		{starlark.String("when"), starlark.MakeInt(1)},
 	})
 	if err == nil {
-		t.Fatal("expected error for when=1 (non-bool)")
+		t.Fatal("expected error for when=1 (non-When)")
 	}
-	if !strings.Contains(err.Error(), "when must be bool, got int") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "when must be bool, got int")
+	if !strings.Contains(err.Error(), "when must be a When() value") || !strings.Contains(err.Error(), "got int") {
+		t.Errorf("error = %q, want to contain 'when must be a When() value' and 'got int'", err.Error())
 	}
 }
 
-func TestCollector_WhenKwarg_StrictBool_String(t *testing.T) {
+func TestCollector_WhenKwarg_StrictType_String(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 	thread := new(starlark.Thread)
@@ -2485,32 +2449,10 @@ func TestCollector_WhenKwarg_StrictBool_String(t *testing.T) {
 		{starlark.String("when"), starlark.String("true")},
 	})
 	if err == nil {
-		t.Fatal("expected error for when=\"true\" (non-bool)")
+		t.Fatal("expected error for when=\"true\" (non-When)")
 	}
-	if !strings.Contains(err.Error(), "when must be bool, got string") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "when must be bool, got string")
-	}
-}
-
-func TestCollector_PreserveObserved_StrictBool_Int(t *testing.T) {
-	cc := NewConditionCollector()
-	c := NewCollector(cc, "test.star", nil, nil)
-	thread := new(starlark.Thread)
-
-	body := new(starlark.Dict)
-	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
-
-	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
-		starlark.String("bucket"),
-		body,
-	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.MakeInt(1)},
-	})
-	if err == nil {
-		t.Fatal("expected error for preserve_observed=1 (non-bool)")
-	}
-	if !strings.Contains(err.Error(), "preserve_observed must be bool, got int") {
-		t.Errorf("error = %q, want to contain %q", err.Error(), "preserve_observed must be bool, got int")
+	if !strings.Contains(err.Error(), "when must be a When() value") || !strings.Contains(err.Error(), "got string") {
+		t.Errorf("error = %q, want to contain 'when must be a When() value' and 'got string'", err.Error())
 	}
 }
 
@@ -2531,8 +2473,7 @@ func TestCollector_WhenTrue_NormalPath(t *testing.T) {
 		starlark.String("bucket"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.True},
-		{starlark.String("skip_reason"), starlark.String("not needed in prod")},
+		{starlark.String("when"), whenVal(true, "not needed in prod", false)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2583,7 +2524,7 @@ func TestCollector_WhenOmitted_NormalPath(t *testing.T) {
 
 // stripObservedReadOnlyFields removes read-only metadata fields (managedFields,
 // resourceVersion, uid, generation, creationTimestamp) and status from a
-// struct so that a preserve_observed re-emission is accepted by server-side
+// struct so that a keep_if_exists re-emission is accepted by server-side
 // apply.
 func TestStripObservedReadOnlyFields(t *testing.T) {
 	s := &structpb.Struct{
@@ -2651,11 +2592,11 @@ func makeObservedDict(t *testing.T, entries map[string]map[string]string) *conve
 }
 
 // ---------------------------------------------------------------------------
-// GATE-03: Resource(body=None, preserve_observed=True) with resource in
-// observed state -> emits observed body verbatim.
+// GATE-03: Resource(when=When(False, ..., keep_if_exists=True)) with resource
+// in observed state -> emits observed body verbatim.
 // ---------------------------------------------------------------------------
 
-func TestCollector_PreserveObserved_BodyNone_Found(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExists_Found(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"db": {"apiVersion": "v1", "kind": "Database"},
 	})
@@ -2667,7 +2608,7 @@ func TestCollector_PreserveObserved_BodyNone_Found(t *testing.T) {
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "config unavailable", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2708,7 +2649,7 @@ func TestCollector_PreserveObserved_BodyNone_Found(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	wantMsg := `Preserving resource "db": body=None, emitting observed body`
+	wantMsg := `Preserving resource "db": observed body emitted, gated by when=False`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
@@ -2718,11 +2659,11 @@ func TestCollector_PreserveObserved_BodyNone_Found(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// GATE-04: Resource(body=None, preserve_observed=True) with resource NOT in
-// observed state -> skip with Warning.
+// GATE-04: Resource(when=When(False, ..., keep_if_exists=True)) with resource
+// NOT in observed state -> skip with Warning.
 // ---------------------------------------------------------------------------
 
-func TestCollector_PreserveObserved_BodyNone_NotFound(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExists_NotFound(t *testing.T) {
 	// Observed dict exists but does NOT contain "db".
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"other": {"kind": "Bucket"},
@@ -2735,7 +2676,7 @@ func TestCollector_PreserveObserved_BodyNone_NotFound(t *testing.T) {
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "config unavailable", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2752,20 +2693,20 @@ func TestCollector_PreserveObserved_BodyNone_NotFound(t *testing.T) {
 		t.Error("not-found preserve resource should not appear in Resources()")
 	}
 
-	// Warning event must use "not found in observed state" message.
+	// Warning event must use the When reason.
 	events := cc.Events()
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	wantMsg := `Skipping resource "db": not found in observed state`
+	wantMsg := `Skipping resource "db": config unavailable`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
 }
 
-// GATE-04 (nil observed): Resource(body=None, preserve_observed=True) with
+// GATE-04 (nil observed): When(False, ..., keep_if_exists=True) with
 // c.observed == nil -> same as not-found.
-func TestCollector_PreserveObserved_BodyNone_NilObserved(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExists_NilObserved(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "gate04-nil.star", nil, nil) // nil observed
 	thread := new(starlark.Thread)
@@ -2774,7 +2715,7 @@ func TestCollector_PreserveObserved_BodyNone_NilObserved(t *testing.T) {
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "config unavailable", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2793,18 +2734,18 @@ func TestCollector_PreserveObserved_BodyNone_NilObserved(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	wantMsg := `Skipping resource "db": not found in observed state`
+	wantMsg := `Skipping resource "db": config unavailable`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// GATE-06: Resource(body=dict, preserve_observed=True) -> normal path
-// (preserve_observed is dormant, body processed normally with injection).
+// When(True, ..., keep_if_exists=True) with body dict -> normal path
+// (keep_if_exists is dormant when condition=True).
 // ---------------------------------------------------------------------------
 
-func TestCollector_PreserveObserved_Dormant_BodyProvided(t *testing.T) {
+func TestCollector_WhenTrue_KeepIfExists_BodyProvided(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"db": {"apiVersion": "observed-v1"},
 	})
@@ -2820,7 +2761,7 @@ func TestCollector_PreserveObserved_Dormant_BodyProvided(t *testing.T) {
 		starlark.String("db"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(true, "dormant test", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2858,40 +2799,10 @@ func TestCollector_PreserveObserved_Dormant_BodyProvided(t *testing.T) {
 		t.Errorf("ResourceNameLabel = %q, want %q", got, "db")
 	}
 
-	// No preservation Warning events expected (dormant preserve).
+	// No preservation Warning events expected (dormant -- condition is true).
 	events := cc.Events()
 	if len(events) != 0 {
 		t.Errorf("Events() len = %d, want 0 (dormant preserve should emit no warnings)", len(events))
-	}
-}
-
-// GATE-06 (when=False dormant): Resource(body=dict, when=True, preserve_observed=True) -> normal path.
-func TestCollector_PreserveObserved_Dormant_WhenTrue(t *testing.T) {
-	cc := NewConditionCollector()
-	c := NewCollector(cc, "gate06-when.star", nil, nil)
-	thread := new(starlark.Thread)
-
-	body := new(starlark.Dict)
-	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
-
-	val, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
-		starlark.String("item"),
-		body,
-	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.True},
-		{starlark.String("preserve_observed"), starlark.True},
-		{starlark.String("skip_reason"), starlark.String("dormant test")},
-	})
-	if err != nil {
-		t.Fatalf("Resource() error: %v", err)
-	}
-
-	ref, ok := val.(*ResourceRef)
-	if !ok {
-		t.Fatalf("Resource() = %v (%s), want ResourceRef", val, val.Type())
-	}
-	if ref.name != "item" {
-		t.Errorf("ResourceRef.name = %q, want %q", ref.name, "item")
 	}
 }
 
@@ -2900,7 +2811,7 @@ func TestCollector_PreserveObserved_Dormant_WhenTrue(t *testing.T) {
 // labels injected, NO external_name annotation added.
 // ---------------------------------------------------------------------------
 
-func TestCollector_PreserveObserved_NoLabelInjection(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExists_NoLabelInjection(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"db": {"apiVersion": "v1", "kind": "Database"},
 	})
@@ -2918,7 +2829,7 @@ func TestCollector_PreserveObserved_NoLabelInjection(t *testing.T) {
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "dormant", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -2974,7 +2885,7 @@ func TestCollector_PreserveObserved_NoLabelInjection(t *testing.T) {
 // convert.StarlarkToStruct internally.
 // ---------------------------------------------------------------------------
 
-func TestCollector_PreserveObserved_StarlarkDictConversion(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExists_StarlarkDictConversion(t *testing.T) {
 	// Build observed with nested dict to verify StarlarkToStruct handles it.
 	obs := convert.NewStarlarkDict(1)
 	inner := convert.NewStarlarkDict(2)
@@ -2997,7 +2908,7 @@ func TestCollector_PreserveObserved_StarlarkDictConversion(t *testing.T) {
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "dormant", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3028,11 +2939,11 @@ func TestCollector_PreserveObserved_StarlarkDictConversion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Cliff guard: Resource(when=False, preserve_observed=True) with resource in
+// Cliff guard: When(False, ..., keep_if_exists=True) with resource in
 // observed state -> emit observed body.
 // ---------------------------------------------------------------------------
 
-func TestCollector_WhenFalse_PreserveObserved_Found(t *testing.T) {
+func TestCollector_WhenFalse_KeepIfExists_CliffGuard_Found(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"db": {"apiVersion": "v1", "kind": "Database"},
 	})
@@ -3047,9 +2958,7 @@ func TestCollector_WhenFalse_PreserveObserved_Found(t *testing.T) {
 		starlark.String("db"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("preserve_observed"), starlark.True},
-		{starlark.String("skip_reason"), starlark.String("optional")},
+		{starlark.String("when"), whenVal(false, "optional", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3093,9 +3002,9 @@ func TestCollector_WhenFalse_PreserveObserved_Found(t *testing.T) {
 	}
 }
 
-// Cliff guard: Resource(when=False, preserve_observed=True) with resource NOT
-// in observed state -> skip.
-func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
+// Cliff guard: When(False, ..., keep_if_exists=True) with resource NOT
+// in observed state -> skip with reason from When.
+func TestCollector_WhenFalse_KeepIfExists_CliffGuard_NotFound(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"other": {"kind": "Bucket"},
 	})
@@ -3110,9 +3019,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
 		starlark.String("db"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("preserve_observed"), starlark.True},
-		{starlark.String("skip_reason"), starlark.String("feature gated")},
+		{starlark.String("when"), whenVal(false, "feature gated", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3129,7 +3036,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
 		t.Error("not-found cliff guard resource should not appear in Resources()")
 	}
 
-	// Warning event for cliff guard skip.
+	// Warning event uses the When reason.
 	events := cc.Events()
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
@@ -3140,8 +3047,9 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound(t *testing.T) {
 	}
 }
 
-// Cliff guard with user-provided skip_reason: used as message when not found.
-func TestCollector_WhenFalse_PreserveObserved_NotFound_CustomReason(t *testing.T) {
+// Cliff guard with nil observed: When(False, ..., keep_if_exists=True) uses
+// the When reason when not found.
+func TestCollector_WhenFalse_KeepIfExists_CliffGuard_NilObserved(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "cliff-reason.star", nil, nil) // nil observed
 	thread := new(starlark.Thread)
@@ -3153,9 +3061,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound_CustomReason(t *testing.T
 		starlark.String("db"),
 		body,
 	}, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("preserve_observed"), starlark.True},
-		{starlark.String("skip_reason"), starlark.String("feature disabled")},
+		{starlark.String("when"), whenVal(false, "feature disabled", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3169,7 +3075,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound_CustomReason(t *testing.T
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	// User-provided skip_reason should be used.
+	// When reason should be used.
 	wantMsg := `Skipping resource "db": feature disabled`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
@@ -3177,7 +3083,7 @@ func TestCollector_WhenFalse_PreserveObserved_NotFound_CustomReason(t *testing.T
 }
 
 // Preservation is NOT a skip — c.skipped should NOT be set.
-func TestCollector_PreserveObserved_NotInSkipped(t *testing.T) {
+func TestCollector_KeepIfExists_NotInSkipped(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"db": {"apiVersion": "v1"},
 	})
@@ -3185,12 +3091,12 @@ func TestCollector_PreserveObserved_NotInSkipped(t *testing.T) {
 	c := NewCollector(cc, "preserve-not-skip.star", nil, observed)
 	thread := new(starlark.Thread)
 
-	// First preserve the resource.
+	// Preserve via cliff guard.
 	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "dormant", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3213,7 +3119,7 @@ func TestCollector_PreserveObserved_NotInSkipped(t *testing.T) {
 
 // Preservation skip metric: preserved resources should NOT increment
 // ResourcesSkippedTotal metric.
-func TestCollector_PreserveObserved_NoSkipMetric(t *testing.T) {
+func TestCollector_KeepIfExists_NoSkipMetric(t *testing.T) {
 	observed := makeObservedDict(t, map[string]map[string]string{
 		"db": {"apiVersion": "v1"},
 	})
@@ -3228,7 +3134,7 @@ func TestCollector_PreserveObserved_NoSkipMetric(t *testing.T) {
 		starlark.String("db"),
 		starlark.None,
 	}, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "dormant", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3401,13 +3307,12 @@ func TestCollector_BodyAutoCompact_SchemaDict(t *testing.T) {
 // Composite readiness gating: optional= kwarg and set_composite_ready()
 // ---------------------------------------------------------------------------
 
-// callResourceWhenFalse is a helper to invoke Resource(name, body=None, when=False, skip_reason=..., <extra kwargs>).
+// callResourceWhenFalse is a helper to invoke Resource(name, body=None, when=When(False, reason, keepIfExists), <extra kwargs>).
 // Returns any error from the call.
-func callResourceWhenFalse(c *Collector, name, skipReason string, extra []starlark.Tuple) error {
+func callResourceWhenFalse(c *Collector, name string, w *WhenValue, extra []starlark.Tuple) error {
 	thread := new(starlark.Thread)
 	kwargs := []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("skip_reason"), starlark.String(skipReason)},
+		{starlark.String("when"), w},
 	}
 	kwargs = append(kwargs, extra...)
 	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
@@ -3420,7 +3325,7 @@ func callResourceWhenFalse(c *Collector, name, skipReason string, extra []starla
 func TestCollector_Gating_WhenFalseDefaultGates(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
-	if err := callResourceWhenFalse(c, "r1", "not yet", nil); err != nil {
+	if err := callResourceWhenFalse(c, "r1", whenVal(false, "not yet", false), nil); err != nil {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
@@ -3436,7 +3341,7 @@ func TestCollector_Gating_WhenFalseDefaultGates(t *testing.T) {
 func TestCollector_Gating_OptionalTrueDoesNotGate(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
-	err := callResourceWhenFalse(c, "backup", "backups disabled", []starlark.Tuple{
+	err := callResourceWhenFalse(c, "backup", whenVal(false, "backups disabled", false), []starlark.Tuple{
 		{starlark.String("optional"), starlark.True},
 	})
 	if err != nil {
@@ -3456,7 +3361,7 @@ func TestCollector_Gating_OptionalTrueDoesNotGate(t *testing.T) {
 func TestCollector_Gating_OptionalFalseExplicitGates(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
-	err := callResourceWhenFalse(c, "r1", "explicit", []starlark.Tuple{
+	err := callResourceWhenFalse(c, "r1", whenVal(false, "explicit", false), []starlark.Tuple{
 		{starlark.String("optional"), starlark.False},
 	})
 	if err != nil {
@@ -3470,7 +3375,7 @@ func TestCollector_Gating_OptionalFalseExplicitGates(t *testing.T) {
 func TestCollector_Gating_InvalidOptionalType(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
-	err := callResourceWhenFalse(c, "r1", "reason", []starlark.Tuple{
+	err := callResourceWhenFalse(c, "r1", whenVal(false, "reason", false), []starlark.Tuple{
 		{starlark.String("optional"), starlark.String("yes")},
 	})
 	if err == nil {
@@ -3484,11 +3389,11 @@ func TestCollector_Gating_InvalidOptionalType(t *testing.T) {
 func TestCollector_Gating_Dedup(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 
-	if err := callResourceWhenFalse(c, "r1", "first", nil); err != nil {
+	if err := callResourceWhenFalse(c, "r1", whenVal(false, "first", false), nil); err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
 	// Second call for the same name should be a no-op (skipped map dedups).
-	if err := callResourceWhenFalse(c, "r1", "second", nil); err != nil {
+	if err := callResourceWhenFalse(c, "r1", whenVal(false, "second", false), nil); err != nil {
 		t.Fatalf("second call error: %v", err)
 	}
 
@@ -3509,9 +3414,7 @@ func TestCollector_Gating_PreserveObservedFoundDoesNotGate(t *testing.T) {
 
 	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
 
-	err := callResourceWhenFalse(c, "r1", "preserved", []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
-	})
+	err := callResourceWhenFalse(c, "r1", whenVal(false, "preserved", true), nil)
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
 	}
@@ -3531,9 +3434,7 @@ func TestCollector_Gating_PreserveObservedMissGates(t *testing.T) {
 	observed.Freeze()
 	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
 
-	err := callResourceWhenFalse(c, "r1", "preserved-miss", []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
-	})
+	err := callResourceWhenFalse(c, "r1", whenVal(false, "preserved-miss", true), nil)
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
 	}
@@ -3547,8 +3448,7 @@ func TestCollector_Gating_PreserveObservedMissOptionalDoesNotGate(t *testing.T) 
 	observed.Freeze()
 	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
 
-	err := callResourceWhenFalse(c, "r1", "preserved-miss", []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+	err := callResourceWhenFalse(c, "r1", whenVal(false, "preserved-miss", true), []starlark.Tuple{
 		{starlark.String("optional"), starlark.True},
 	})
 	if err != nil {
@@ -3698,8 +3598,7 @@ func TestSkippedRef_Attributes(t *testing.T) {
 func TestSkippedRef_ReturnedFromWhenFalse(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	val, err := callResource(c, "db", starlark.None, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("skip_reason"), starlark.String("waiting")},
+		{starlark.String("when"), whenVal(false, "waiting", false)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3716,8 +3615,7 @@ func TestSkippedRef_ReturnedFromWhenFalse(t *testing.T) {
 func TestSkippedRef_ReturnedFromWhenFalseOptional(t *testing.T) {
 	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
 	val, err := callResource(c, "backup", starlark.None, []starlark.Tuple{
-		{starlark.String("when"), starlark.False},
-		{starlark.String("skip_reason"), starlark.String("disabled")},
+		{starlark.String("when"), whenVal(false, "disabled", false)},
 		{starlark.String("optional"), starlark.True},
 	})
 	if err != nil {
@@ -3748,7 +3646,7 @@ func TestSkippedRef_ReturnedFromPreserveMiss(t *testing.T) {
 	observed.Freeze()
 	c := NewCollector(NewConditionCollector(), "test.star", nil, observed)
 	val, err := callResource(c, "db", starlark.None, []starlark.Tuple{
-		{starlark.String("preserve_observed"), starlark.True},
+		{starlark.String("when"), whenVal(false, "keep if exists miss", true)},
 	})
 	if err != nil {
 		t.Fatalf("Resource() error: %v", err)
@@ -3959,5 +3857,142 @@ func TestDependsOn_TupleWithNoneFirst_StillErrors(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("(None, \"path\") tuple should still error; bare None tolerance is intentional, tuples are too explicit to silently drop")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WhenValue type tests
+// ---------------------------------------------------------------------------
+
+func TestWhenValue_String(t *testing.T) {
+	w := &WhenValue{condition: true, reason: "test", keepIfExists: false}
+	want := `When(True, "test", keep_if_exists=False)`
+	if got := w.String(); got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+
+	w2 := &WhenValue{condition: false, reason: "reason", keepIfExists: true}
+	want2 := `When(False, "reason", keep_if_exists=True)`
+	if got := w2.String(); got != want2 {
+		t.Errorf("String() = %q, want %q", got, want2)
+	}
+}
+
+func TestWhenValue_Attrs(t *testing.T) {
+	w := &WhenValue{condition: true, reason: "test reason", keepIfExists: false}
+
+	cond, err := w.Attr("condition")
+	if err != nil {
+		t.Fatalf("Attr(condition) error: %v", err)
+	}
+	if cond != starlark.True {
+		t.Errorf("Attr(condition) = %v, want True", cond)
+	}
+
+	reason, err := w.Attr("reason")
+	if err != nil {
+		t.Fatalf("Attr(reason) error: %v", err)
+	}
+	if reason != starlark.String("test reason") {
+		t.Errorf("Attr(reason) = %v, want %q", reason, "test reason")
+	}
+
+	keep, err := w.Attr("keep_if_exists")
+	if err != nil {
+		t.Fatalf("Attr(keep_if_exists) error: %v", err)
+	}
+	if keep != starlark.False {
+		t.Errorf("Attr(keep_if_exists) = %v, want False", keep)
+	}
+
+	// Unknown attr returns nil.
+	v, err := w.Attr("unknown")
+	if err != nil {
+		t.Fatalf("Attr(unknown) error: %v", err)
+	}
+	if v != nil {
+		t.Errorf("Attr(unknown) = %v, want nil", v)
+	}
+
+	// AttrNames must be sorted.
+	names := w.AttrNames()
+	if len(names) != 3 || names[0] != "condition" || names[1] != "keep_if_exists" || names[2] != "reason" {
+		t.Errorf("AttrNames() = %v, want [condition keep_if_exists reason]", names)
+	}
+}
+
+func TestWhenValue_Truth(t *testing.T) {
+	if got := (&WhenValue{condition: true}).Truth(); got != starlark.True {
+		t.Errorf("Truth() for condition=true = %v, want True", got)
+	}
+	if got := (&WhenValue{condition: false}).Truth(); got != starlark.False {
+		t.Errorf("Truth() for condition=false = %v, want False", got)
+	}
+}
+
+func TestWhenValue_Hash(t *testing.T) {
+	w := &WhenValue{condition: true, reason: "x", keepIfExists: false}
+	_, err := w.Hash()
+	if err == nil {
+		t.Fatal("Hash() should return error (unhashable)")
+	}
+	if !strings.Contains(err.Error(), "unhashable type: When") {
+		t.Errorf("Hash() error = %q, want to contain %q", err.Error(), "unhashable type: When")
+	}
+}
+
+func TestWhenBuiltin_AllMandatory(t *testing.T) {
+	fn := starlark.NewBuiltin("When", whenBuiltin)
+	thread := new(starlark.Thread)
+
+	// Missing all args.
+	_, err := starlark.Call(thread, fn, nil, nil)
+	if err == nil {
+		t.Fatal("When() with no args should error")
+	}
+
+	// Missing keep_if_exists.
+	_, err = starlark.Call(thread, fn, starlark.Tuple{starlark.False, starlark.String("reason")}, nil)
+	if err == nil {
+		t.Fatal("When(False, 'reason') with missing keep_if_exists should error")
+	}
+}
+
+func TestWhenBuiltin_StrictBool_Condition(t *testing.T) {
+	fn := starlark.NewBuiltin("When", whenBuiltin)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, fn, starlark.Tuple{starlark.MakeInt(1), starlark.String("reason"), starlark.False}, nil)
+	if err == nil {
+		t.Fatal("When(1, ...) should error (condition must be bool)")
+	}
+	if !strings.Contains(err.Error(), "condition must be bool, got int") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "condition must be bool, got int")
+	}
+}
+
+func TestWhenBuiltin_StrictBool_KeepIfExists(t *testing.T) {
+	fn := starlark.NewBuiltin("When", whenBuiltin)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, fn, starlark.Tuple{starlark.False, starlark.String("reason"), starlark.MakeInt(1)}, nil)
+	if err == nil {
+		t.Fatal("When(False, 'reason', 1) should error (keep_if_exists must be bool)")
+	}
+	if !strings.Contains(err.Error(), "keep_if_exists must be bool, got int") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "keep_if_exists must be bool, got int")
+	}
+}
+
+func TestWhenBuiltin_EmptyReason(t *testing.T) {
+	fn := starlark.NewBuiltin("When", whenBuiltin)
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, fn, starlark.Tuple{starlark.False, starlark.String(""), starlark.False}, nil)
+	if err == nil {
+		t.Fatal("When(False, '', False) should error (reason must not be empty)")
+	}
+	if !strings.Contains(err.Error(), "reason must not be empty") {
+		t.Errorf("error = %q, want to contain %q", err.Error(), "reason must not be empty")
 	}
 }

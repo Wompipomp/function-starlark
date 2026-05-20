@@ -241,7 +241,7 @@ spec:
                 "spec": {"forProvider": {"conditionAfter": [
                     {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
                 ]}},
-            }, when=False, skip_reason="E2E test: gating with when=False",
+            }, when=When(False, "E2E test: gating with when=False", keep_if_exists=False),
                optional=True)
             set_xr_status("test.gatedSkipped", True)
 
@@ -260,7 +260,7 @@ spec:
                 }},
             } if external_config else None
 
-            Resource("preservable-resource", body, preserve_observed=True)
+            Resource("preservable-resource", body, when=When(body != None, "config unavailable", keep_if_exists=True))
             set_xr_status("test.preserveConfigPresent", external_config != None)
     - step: auto-ready
       functionRef:

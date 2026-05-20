@@ -5087,7 +5087,7 @@ func runStarlarkSource(t *testing.T, script string) *fnv1.RunFunctionResponse {
 // Resource with when=False (default optional=False) flips the composite's
 // Ready to READY_FALSE and emits an informational condition.
 func TestRunFunctionCompositeReady_WhenFalseAutoGates(t *testing.T) {
-	rsp := runStarlarkSource(t, `Resource("db-replica", None, when=False, skip_reason="cluster not ready")`)
+	rsp := runStarlarkSource(t, `Resource("db-replica", None, when=When(False, "cluster not ready", keep_if_exists=False))`)
 
 	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_FALSE {
 		t.Errorf("Composite.Ready = %v, want READY_FALSE", got)
@@ -5110,7 +5110,7 @@ func TestRunFunctionCompositeReady_WhenFalseAutoGates(t *testing.T) {
 // TestRunFunctionCompositeReady_OptionalDoesNotGate verifies optional=True
 // skips do not flip the composite's Ready state.
 func TestRunFunctionCompositeReady_OptionalDoesNotGate(t *testing.T) {
-	rsp := runStarlarkSource(t, `Resource("backup", None, when=False, skip_reason="backups disabled", optional=True)`)
+	rsp := runStarlarkSource(t, `Resource("backup", None, when=When(False, "backups disabled", keep_if_exists=False), optional=True)`)
 
 	if got := rsp.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_UNSPECIFIED {
 		t.Errorf("Composite.Ready = %v, want READY_UNSPECIFIED (optional skip)", got)
@@ -5126,7 +5126,7 @@ func TestRunFunctionCompositeReady_OptionalDoesNotGate(t *testing.T) {
 // wins over auto-gating.
 func TestRunFunctionCompositeReady_ExplicitOverride(t *testing.T) {
 	rsp := runStarlarkSource(t, `
-Resource("db-replica", None, when=False, skip_reason="pending")
+Resource("db-replica", None, when=When(False, "pending", keep_if_exists=False))
 set_composite_ready(True)
 `)
 
@@ -5175,13 +5175,11 @@ Resource("dummy", {
 
 if mode == "gate":
     Resource("pending-dep", None,
-        when=False,
-        skip_reason="E2E: auto-gating test, dependency not yet provisioned")
+        when=When(False, "E2E: auto-gating test, dependency not yet provisioned", keep_if_exists=False))
     set_xr_status("test.scenario", "auto-gate")
 elif mode == "optional":
     Resource("optional-feature", None,
-        when=False,
-        skip_reason="E2E: optional feature disabled",
+        when=When(False, "E2E: optional feature disabled", keep_if_exists=False),
         optional=True)
     set_xr_status("test.scenario", "optional-optout")
 elif mode == "explicit":
@@ -5273,16 +5271,14 @@ downstream_body = {
 
 if mode == "transitive":
     upstream_gating = Resource("upstream", None,
-        when=False,
-        skip_reason="E2E: transitive-skip upstream pending")
+        when=When(False, "E2E: transitive-skip upstream pending", keep_if_exists=False))
     Resource("downstream", downstream_body,
         depends_on=[upstream_gating, maybe])
     set_xr_status("test.scenario", "transitive")
 
 elif mode == "optional-cascade":
     upstream_optional = Resource("upstream", None,
-        when=False,
-        skip_reason="E2E: optional upstream",
+        when=When(False, "E2E: optional upstream", keep_if_exists=False),
         optional=True)
     Resource("downstream", downstream_body,
         depends_on=[upstream_optional, maybe])
@@ -5358,7 +5354,7 @@ else:
 // aggregated ComposedResourcesReady=False condition.
 func TestRunFunctionTransitiveSkip_EndToEnd(t *testing.T) {
 	rsp := runStarlarkSource(t, `
-b = Resource("b", None, when=False, skip_reason="upstream pending")
+b = Resource("b", None, when=When(False, "upstream pending", keep_if_exists=False))
 Resource("a", {"apiVersion": "v1", "kind": "App"}, depends_on=[b])
 `)
 
@@ -5401,7 +5397,7 @@ Resource("a", {"apiVersion": "v1", "kind": "App"}, depends_on=[b])
 // where they previously had to guard `if ref:`.
 func TestRunFunctionDependsOnNone_NoError(t *testing.T) {
 	tmpl := `
-ref = Resource("upstream", %s, when=%s, skip_reason="x")
+ref = Resource("upstream", %s, when=When(%s, "x", keep_if_exists=False))
 Resource("downstream", {"apiVersion": "v1", "kind": "X"}, depends_on=[ref])
 `
 

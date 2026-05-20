@@ -48,15 +48,13 @@ spec:
             if mode == "gate":
                 # Auto-gate: skip without optional=True → XR Ready=False + condition.
                 Resource("pending-dep", None,
-                    when=False,
-                    skip_reason="E2E: auto-gating test, dependency not yet provisioned")
+                    when=When(False, "E2E: auto-gating test, dependency not yet provisioned", keep_if_exists=False))
                 set_xr_status("test.scenario", "auto-gate")
 
             elif mode == "optional":
                 # Opt-out: skip with optional=True → XR still reaches Ready.
                 Resource("optional-feature", None,
-                    when=False,
-                    skip_reason="E2E: optional feature disabled",
+                    when=When(False, "E2E: optional feature disabled", keep_if_exists=False),
                     optional=True)
                 set_xr_status("test.scenario", "optional-optout")
 

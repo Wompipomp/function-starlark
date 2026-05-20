@@ -57,8 +57,7 @@ spec:
                 # Non-optional skip: upstream gates the composite directly,
                 # and downstream is transitively skipped through depends_on.
                 upstream_gating = Resource("upstream", None,
-                    when=False,
-                    skip_reason="E2E: transitive-skip upstream pending")
+                    when=When(False, "E2E: transitive-skip upstream pending", keep_if_exists=False))
                 Resource("downstream", downstream_body,
                     depends_on=[upstream_gating, maybe])
                 set_xr_status("test.scenario", "transitive")
@@ -68,8 +67,7 @@ spec:
                 # passing the optional SkippedRef in depends_on is silently
                 # dropped, so downstream emits and the XR reaches Ready=True.
                 upstream_optional = Resource("upstream", None,
-                    when=False,
-                    skip_reason="E2E: optional upstream",
+                    when=When(False, "E2E: optional upstream", keep_if_exists=False),
                     optional=True)
                 Resource("downstream", downstream_body,
                     depends_on=[upstream_optional, maybe])
