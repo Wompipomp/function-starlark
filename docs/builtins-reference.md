@@ -198,7 +198,7 @@ protobuf structures for Kubernetes resource access.
 ```python
 ref = Resource(name, body, ready=None, labels=<auto>, connection_details=None,
                depends_on=None, external_name=None,
-               when=True, skip_reason="", preserve_observed=False, optional=False)
+               when=True, skip_reason="", preserve_observed=<auto>, optional=False)
 ```
 
 Register a desired composed resource. This is the primary function for creating
@@ -215,9 +215,9 @@ Kubernetes resources in a composition.
 | `connection_details` | dict \| None | None | Per-resource connection details (string key-value pairs). |
 | `depends_on` | list \| None | None | List of dependency items for creation sequencing. Accepted item types: `ResourceRef`, `SkippedRef`, `string`, `(ref, "field.path")` tuple, or `None` (silently ignored). A non-optional `SkippedRef` triggers transitive skip of the dependent (see below). |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
-| `when` | bool | `True` | Gate resource emission. `False` skips the resource (requires `skip_reason`). Only accepts `True` or `False` -- non-bool values raise a type error. |
-| `skip_reason` | string | `""` | Human-readable reason for skipping. Required when `when=False` (without `preserve_observed`). Appears in a Warning event on skip paths. Always legal to set (unused on non-skip paths); useful when `when` is a runtime expression that may flip between `True` and `False` across reconciliations. |
-| `preserve_observed` | bool | `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. |
+| `when` | bool | `True` | Gate resource emission. `False` skips the resource. Only accepts `True` or `False` -- non-bool values raise a type error. Requires `skip_reason` whenever used (even with `True`) so the reason is available if `when` later flips to `False`. |
+| `skip_reason` | string | `""` | Human-readable reason for skipping. **Required whenever `when` is used** (even `when=True`), so the reason is always available when `when` is a runtime expression that may flip between `True` and `False` across reconciliations. Appears in a Warning event on skip paths. |
+| `preserve_observed` | bool | `True` when `when` is used, else `False` | When `True` and body is `None` (or `when=False`), emit the observed body verbatim if the resource exists in observed state. Used for cliff-guard patterns to prevent resource deletion when config is temporarily unavailable. Defaults to `True` when `when` is provided (safe by default); set `preserve_observed=False` explicitly for intentional deletion. |
 | `optional` | bool | `False` | When a skip path is taken (e.g. `when=False` without a successful `preserve_observed`), the default (`optional=False`) gates the **composite resource** Ready state to `False` so the XR does not appear ready while a conditional dependency is missing. Set `optional=True` for resources that are legitimately absent by design (feature flags, tier-gated add-ons) so their absence does not block the XR from being ready. |
 
 **Returns:** `ResourceRef` (when emitted) or `SkippedRef` (when any skip path
@@ -280,9 +280,9 @@ patterns. The `when` gate is evaluated first (before body type-checking), so whe
 | True/omitted | dict | True | **Normal:** emit body (preserve_observed is a no-op when body is a dict) |
 | True/omitted | None | False/omitted | **Warn + skip:** body is None; warns and skips, message suggests `preserve_observed=True` |
 | True/omitted | None | True | **Preserve:** emit observed body verbatim if found, skip with Warning if not |
-| False | dict/None | False/omitted | **Skip:** `skip_reason` required; resource not emitted; Warning event with skip_reason |
-| False | dict/None | True, found | **Cliff guard (found):** emit observed body verbatim; body kwarg ignored |
-| False | dict/None | True, not found | **Cliff guard (miss):** skip with Warning; body kwarg ignored |
+| False | dict/None | True/omitted | **Cliff guard (found):** emit observed body verbatim; body kwarg ignored |
+| False | dict/None | True/omitted, not found | **Cliff guard (miss):** skip with Warning; body kwarg ignored |
+| False | dict/None | False (explicit) | **Skip:** `skip_reason` required; resource not emitted; Warning event with skip_reason |
 
 **Events emitted:**
 
@@ -296,8 +296,9 @@ patterns. The `when` gate is evaluated first (before body type-checking), so whe
 
 **Errors:**
 
-- `when=False` without `skip_reason` (and without `preserve_observed=True`)
-  raises an error. A reason must be provided when skipping a resource.
+- Using `when` (either `True` or `False`) without `skip_reason` raises an
+  error. The reason must be provided at definition time so it is always
+  available when `when` flips at runtime.
 - Non-bool value for `when` raises a type error. Only `True` or `False` are
   accepted (e.g., `when=1` or `when="yes"` will fail).
 - Non-bool value for `optional` raises a type error.
