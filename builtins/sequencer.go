@@ -66,14 +66,36 @@ func (s *Sequencer) Evaluate() SequencerResult {
 					fmt.Sprintf("%q field %q to be ready", d.Dependency, d.FieldPath))
 			}
 		} else {
-			// Plain ref: check Ready=True and Synced=True conditions.
-			if !hasCondition(res, "Ready", "True") {
-				unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-					fmt.Sprintf("%q to have Ready=True", d.Dependency))
-			}
-			if !hasCondition(res, "Synced", "True") {
-				unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-					fmt.Sprintf("%q to have Synced=True", d.Dependency))
+			// Plain ref: check readiness conditions.
+			if isKubernetesObject(res) {
+				// Kubernetes Object: check nested resource conditions first.
+				met, hasNested := nestedAllConditionsTrue(res)
+				if hasNested {
+					if !met {
+						unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+							fmt.Sprintf("%q nested resource conditions not all True", d.Dependency))
+					}
+				} else {
+					// No nested conditions: fall back to wrapper's own conditions.
+					if !hasCondition(res, "Ready", "True") {
+						unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+							fmt.Sprintf("%q to have Ready=True", d.Dependency))
+					}
+					if !hasCondition(res, "Synced", "True") {
+						unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+							fmt.Sprintf("%q to have Synced=True", d.Dependency))
+					}
+				}
+			} else {
+				// Non-Object resource: check Ready=True and Synced=True conditions.
+				if !hasCondition(res, "Ready", "True") {
+					unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+						fmt.Sprintf("%q to have Ready=True", d.Dependency))
+				}
+				if !hasCondition(res, "Synced", "True") {
+					unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
+						fmt.Sprintf("%q to have Synced=True", d.Dependency))
+				}
 			}
 		}
 	}
@@ -118,6 +140,93 @@ func (s *Sequencer) Evaluate() SequencerResult {
 		GatingDefers: gatingDefers,
 		AnyDeferred:  anyDeferred,
 	}
+}
+
+// isKubernetesObject returns true if the resource is a Kubernetes Object
+// (apiVersion contains "kubernetes.crossplane.io/" and kind == "Object").
+func isKubernetesObject(s *structpb.Struct) bool {
+	if s == nil {
+		return false
+	}
+	av := s.GetFields()["apiVersion"]
+	if av == nil || !strings.Contains(av.GetStringValue(), "kubernetes.crossplane.io/") {
+		return false
+	}
+	k := s.GetFields()["kind"]
+	return k != nil && k.GetStringValue() == "Object"
+}
+
+// getNestedConditions navigates status.atProvider.manifest.status.conditions
+// and returns the condition list values. Returns nil if any intermediate
+// path segment is missing.
+func getNestedConditions(s *structpb.Struct) []*structpb.Value {
+	if s == nil {
+		return nil
+	}
+	// Navigate: status -> atProvider -> manifest -> status -> conditions
+	status := s.GetFields()["status"]
+	if status == nil {
+		return nil
+	}
+	statusStruct := status.GetStructValue()
+	if statusStruct == nil {
+		return nil
+	}
+	atProvider := statusStruct.GetFields()["atProvider"]
+	if atProvider == nil {
+		return nil
+	}
+	atProviderStruct := atProvider.GetStructValue()
+	if atProviderStruct == nil {
+		return nil
+	}
+	manifest := atProviderStruct.GetFields()["manifest"]
+	if manifest == nil {
+		return nil
+	}
+	manifestStruct := manifest.GetStructValue()
+	if manifestStruct == nil {
+		return nil
+	}
+	nestedStatus := manifestStruct.GetFields()["status"]
+	if nestedStatus == nil {
+		return nil
+	}
+	nestedStatusStruct := nestedStatus.GetStructValue()
+	if nestedStatusStruct == nil {
+		return nil
+	}
+	conditions := nestedStatusStruct.GetFields()["conditions"]
+	if conditions == nil {
+		return nil
+	}
+	condList := conditions.GetListValue()
+	if condList == nil {
+		return nil
+	}
+	return condList.GetValues()
+}
+
+// nestedAllConditionsTrue checks whether all nested resource conditions have
+// status "True". Returns (met, hasConditions). If the nested condition list
+// is nil or empty, returns (false, false) so the caller can fall back to
+// wrapper conditions.
+func nestedAllConditionsTrue(s *structpb.Struct) (met bool, hasConditions bool) {
+	conds := getNestedConditions(s)
+	if len(conds) == 0 {
+		return false, false
+	}
+	for _, item := range conds {
+		cond := item.GetStructValue()
+		if cond == nil {
+			return false, true
+		}
+		st := cond.GetFields()["status"]
+		if st == nil || st.GetStringValue() != "True" {
+			return false, true
+		}
+	}
+	return true, true
 }
 
 // hasCondition checks whether a resource has a condition with the given type
