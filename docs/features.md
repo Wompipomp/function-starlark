@@ -236,21 +236,19 @@ Resource("db-replica", replica_body,
     skip_reason="waiting for cluster to provision")
 ```
 
-Set `optional=True` for resources that are *expected* to be absent under
-certain configurations (feature flags, tier-gated add-ons); such skips are
-still recorded as Warning events but do not gate the XR:
+Set `optional=True` on `When()` for resources that are *expected* to be absent
+under certain configurations (feature flags, tier-gated add-ons); such skips
+are still recorded as Warning events but do not gate the XR:
 
 ```python
 # Absent by design -- the XR should still reach Ready.
 Resource("backup-schedule", backup_body,
-    when=backups_enabled,
-    skip_reason="backups disabled by spec",
-    optional=True)
+    when=When(backups_enabled, "backups disabled by spec", keep_if_exists=False, optional=True))
 ```
 
-`preserve_observed=True` interacts as follows: if the observed body is found
+`keep_if_exists=True` interacts as follows: if the observed body is found
 and re-emitted, there is no skip and no gating; if it is missing, the skip
-path applies the `optional` rule.
+path applies the `optional` rule from `When()`.
 
 ### Explicit `set_composite_ready`
 
@@ -282,23 +280,22 @@ This replaces the old `Synced=False/CreationSequencing` signal -- `Synced` is
 the provider/cloud-sync axis, `ComposedResourcesReady` is the composition
 axis.
 
-**Transitive skip.** A `Resource(when=False)` returns a `SkippedRef` (with
-`.name`, falsy in Starlark). Passing that `SkippedRef` to `depends_on` of a
-downstream resource transitively skips the downstream too -- no manual
+**Transitive skip.** A `Resource(when=When(False, ...))` returns a `SkippedRef`
+(with `.name`, falsy in Starlark). Passing that `SkippedRef` to `depends_on`
+of a downstream resource transitively skips the downstream too -- no manual
 `if ref:` guard required:
 
 ```python
-db = Resource("db", body, when=cluster_ready, skip_reason="cluster pending")
+db = Resource("db", body, when=When(cluster_ready, "cluster pending", keep_if_exists=False))
 # When cluster_ready is False, both db and app are skipped and the composite
 # stays Ready=False with one ComposedResourcesReady=False condition listing
 # both names.
 Resource("app", body, depends_on=[db])
 ```
 
-Use `optional=True` on the upstream to opt out of the transitive cascade
-(downstream emits normally, the dropped optional dep is dropped from the
-list). `depends_on=[None]` is also tolerated for callsites that may resolve
-to `None` for unrelated reasons.
+All `SkippedRef`s in `depends_on` trigger transitive skip -- if a dependency
+is skipped, the dependent must be too. `depends_on=[None]` is tolerated for
+callsites that may resolve to `None` for unrelated reasons.
 
 When **both** skips and defers are present in the same response, a single
 `ComposedResourcesReady=False` condition is emitted with reason

@@ -231,18 +231,17 @@ spec:
             empties = dict.compact({"a": {"s": "", "l": [], "d": {}, "n": None}})
             set_xr_status("test.compactEmptyPreserved", len(empties["a"]) == 3)
 
-            # --- when=False emission-skip test (optional=True: do NOT gate XR ready) ---
+            # --- when=False emission-skip test (When optional=True: do NOT gate XR ready) ---
             # This exercises the skip path without blocking the XR from reaching
             # Ready. The dedicated composite-readiness composition covers the
-            # auto-gating (optional=False) and set_composite_ready() semantics.
+            # auto-gating and set_composite_ready() semantics.
             Resource("gated-resource", {
                 "apiVersion": "nop.crossplane.io/v1alpha1",
                 "kind": "NopResource",
                 "spec": {"forProvider": {"conditionAfter": [
                     {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
                 ]}},
-            }, when=When(False, "E2E test: gating with when=False", keep_if_exists=False),
-               optional=True)
+            }, when=When(False, "E2E test: gating with when=False", keep_if_exists=False, optional=True))
             set_xr_status("test.gatedSkipped", True)
 
             # --- keep_if_exists (cliff guard) test ---

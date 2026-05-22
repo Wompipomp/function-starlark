@@ -1,4 +1,4 @@
-# Auto-gating: Resource(when=False) with default optional=False gates the XR.
+# Auto-gating: When(condition=False) with default optional=False gates the XR.
 # Expected outcome: XR stays Ready=False with a ComposedResourcesReady=False
 # condition mentioning 'pending-dep'.
 apiVersion: e2e.fn-starlark.io/v1

@@ -196,22 +196,23 @@ protobuf structures for Kubernetes resource access.
 ### When
 
 ```python
-w = When(condition, reason, keep_if_exists)
+w = When(condition, reason, keep_if_exists, optional=False)
 ```
 
-Create a gating struct for `Resource()`. All three parameters are mandatory and
-can be passed positionally or as keyword arguments.
+Create a gating struct for `Resource()`. `condition`, `reason`, and
+`keep_if_exists` are mandatory. `optional` defaults to `False`.
 
 **Parameters:**
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `condition` | bool (strict) | Gate condition. `False` skips the resource. Only `True` or `False` accepted -- non-bool values raise a type error. |
-| `reason` | string | Human-readable reason for skipping. Must not be empty. Appears in Warning events when the resource is skipped. |
-| `keep_if_exists` | bool (strict) | When `True` and `condition` is `False`, emit the observed body verbatim if the resource exists in observed state (cliff guard). Only `True` or `False` accepted. |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `condition` | bool (strict) | required | Gate condition. `False` skips the resource. Only `True` or `False` accepted -- non-bool values raise a type error. |
+| `reason` | string | required | Human-readable reason for skipping. Must not be empty. Appears in Warning events when the resource is skipped. |
+| `keep_if_exists` | bool (strict) | required | When `True` and `condition` is `False`, emit the observed body verbatim if the resource exists in observed state (cliff guard). Only `True` or `False` accepted. |
+| `optional` | bool (strict) | `False` | When `True` and a skip path is taken, the skip does **not** gate composite readiness. Use for resources that are legitimately absent by design (feature flags, tier-gated add-ons). The skip is still recorded as a Warning event. |
 
-**Returns:** A `When` struct with `.condition`, `.reason`, `.keep_if_exists`
-attributes. Truthy when `condition` is `True`. Not hashable.
+**Returns:** A `When` struct with `.condition`, `.reason`, `.keep_if_exists`,
+`.optional` attributes. Truthy when `condition` is `True`. Not hashable.
 
 **Examples:**
 
@@ -219,6 +220,7 @@ attributes. Truthy when `condition` is `True`. Not hashable.
 When(False, "feature disabled", keep_if_exists=False)
 When(users > 0, "requires active users", keep_if_exists=False)
 When(body != None, "config unavailable", keep_if_exists=True)
+When(False, "no users in role", keep_if_exists=False, optional=True)
 ```
 
 **Errors:**
@@ -226,6 +228,7 @@ When(body != None, "config unavailable", keep_if_exists=True)
 - `When(1, "reason", False)` -- error: "condition must be bool, got int"
 - `When(False, "", False)` -- error: "reason must not be empty"
 - `When(False, "reason", 1)` -- error: "keep_if_exists must be bool, got int"
+- `When(False, "reason", False, optional="yes")` -- error: "optional must be bool, got string"
 
 ---
 
@@ -234,7 +237,7 @@ When(body != None, "config unavailable", keep_if_exists=True)
 ```python
 ref = Resource(name, body, ready=None, labels=<auto>, connection_details=None,
                depends_on=None, external_name=None,
-               when=None, optional=False)
+               when=None)
 ```
 
 Register a desired composed resource. This is the primary function for creating
@@ -249,16 +252,15 @@ Kubernetes resources in a composition.
 | `ready` | None \| True \| False | None | Readiness signal. See below. |
 | `labels` | dict \| None \| omitted | auto-inject | Label behavior. See below. |
 | `connection_details` | dict \| None | None | Per-resource connection details (string key-value pairs). |
-| `depends_on` | list \| None | None | List of dependency items for creation sequencing. Accepted item types: `ResourceRef`, `SkippedRef`, `string`, `(ref, "field.path")` tuple, or `None` (silently ignored). A non-optional `SkippedRef` triggers transitive skip of the dependent (see below). |
+| `depends_on` | list \| None | None | List of dependency items for creation sequencing. Accepted item types: `ResourceRef`, `SkippedRef`, `string`, `(ref, "field.path")` tuple, or `None` (silently ignored). Any `SkippedRef` triggers transitive skip of the dependent (see below). |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
-| `when` | When | `None` | Optional `When()` struct. Omit for unconditional emission. `.condition=False` skips the resource using `.reason`. `.keep_if_exists=True` emits observed body if found (cliff guard). Bare bools are rejected -- must use `When()`. |
-| `optional` | bool | `False` | When a skip path is taken (e.g. `When(False, ...)` without a successful cliff guard), the default (`optional=False`) gates the **composite resource** Ready state to `False` so the XR does not appear ready while a conditional dependency is missing. Set `optional=True` for resources that are legitimately absent by design (feature flags, tier-gated add-ons) so their absence does not block the XR from being ready. |
+| `when` | When | `None` | Optional `When()` struct. Omit for unconditional emission. `.condition=False` skips the resource using `.reason`. `.keep_if_exists=True` emits observed body if found (cliff guard). `.optional=True` makes the skip non-gating for composite readiness. Bare bools are rejected -- must use `When()`. |
 
 **Returns:** `ResourceRef` (when emitted) or `SkippedRef` (when any skip path
 was taken). Both expose a `.name` attribute holding the composition resource
-name; `SkippedRef` additionally exposes `.optional` (mirrors the `optional=`
-kwarg) and is **falsy** in boolean context, so existing `if ref:` patterns
-continue to work. `SkippedRef` is also accepted in `depends_on` (see below).
+name. `SkippedRef` is **falsy** in boolean context, so existing `if ref:`
+patterns continue to work. `SkippedRef` is also accepted in `depends_on` (see
+below).
 
 **ready -- three-state readiness:**
 
@@ -334,11 +336,11 @@ so when `When(False, ...)` the body kwarg is ignored.
 - `Resource("x", body, when=False)` -- error: "when must be a When() value, got bool"
 - `When(1, "reason", False)` -- error: "condition must be bool, got int"
 - `When(False, "", False)` -- error: "reason must not be empty"
-- Non-bool value for `optional` raises a type error.
+- `When(False, "reason", False, optional="yes")` -- error: "optional must be bool, got string"
 - `body=None` without `When()` is not a fatal error but logs a warning
   suggesting `When()` with `keep_if_exists=True` and skips the resource.
 
-**optional -- composite readiness gating:**
+**optional -- composite readiness gating (on When):**
 
 When a resource is skipped (`When(False, ..., keep_if_exists=False)`, cliff
 guard miss, or `body=None` without `When()`) the skip is *gating* by default:
@@ -347,20 +349,21 @@ the composite resource's `Ready` state is forced to `False` and a
 name and reason. This closes the classic Crossplane conditional-resource gap
 where the XR flips to `Ready=True` before all dependencies have been rendered.
 
-Set `optional=True` for resources that are *expected* to be absent under
-certain configurations (feature flags, tier-gated add-ons, environment opt-ins);
-such skips are still recorded as Warning events but do **not** gate XR ready.
+Set `optional=True` on `When()` for resources that are *expected* to be absent
+under certain configurations (feature flags, tier-gated add-ons, environment
+opt-ins); such skips are still recorded as Warning events but do **not** gate
+XR ready.
 
 `set_composite_ready()` always overrides auto-gating.
 
 | Scenario | `optional` | XR `Ready` effect | Condition emitted |
 |---|---|---|---|
 | `When(True, ...)` or emitted body | any | unchanged (auto-ready decides) | none |
-| `When(False, ..., keep_if_exists=False)` skipped, default | `False` | `READY_FALSE` | `ComposedResourcesReady=False` (reason `PendingConditionalResources`) |
-| `When(False, ..., keep_if_exists=False)` skipped, opted out | `True` | unchanged | none |
+| `When(False, ..., optional=False)` skipped | default | `READY_FALSE` | `ComposedResourcesReady=False` (reason `PendingConditionalResources`) |
+| `When(False, ..., optional=True)` skipped | opted out | unchanged | none |
 | `When(False, ..., keep_if_exists=True)`, found | any | unchanged | none |
-| `When(False, ..., keep_if_exists=True)`, miss | `False` | `READY_FALSE` | `ComposedResourcesReady=False` |
-| `When(False, ..., keep_if_exists=True)`, miss | `True` | unchanged | none |
+| `When(False, ..., keep_if_exists=True, optional=False)`, miss | default | `READY_FALSE` | `ComposedResourcesReady=False` |
+| `When(False, ..., keep_if_exists=True, optional=True)`, miss | opted out | unchanged | none |
 | Sequencer-deferred (`depends_on` unmet) | n/a | `READY_FALSE` | `ComposedResourcesReady=False` (reason `WaitingForDependencies`) |
 | Skips and defers both present | mixed | `READY_FALSE` | `ComposedResourcesReady=False` (reason `CompositeNotReady`) |
 
@@ -373,8 +376,7 @@ such skips are still recorded as Warning events but do **not** gate XR ready.
 | `ResourceRef` (from a real `Resource()` call) | Recorded as a creation-sequencing dependency (waits for Ready+Synced). |
 | `string` | Recorded as a string-named dependency (no name validation; useful for cross-step refs). |
 | `(ref, "field.path")` tuple | Waits for the dot-path to have a truthy value on the dependency. The first element accepts `ResourceRef`, `SkippedRef`, or `string`. |
-| `SkippedRef`, non-optional | **Transitive skip.** The dependent is itself skipped (and gates the composite per its own `optional=` setting). The skip reason is auto-set to `depends on skipped "<name>"`. |
-| `SkippedRef`, optional | Silently dropped from the dependency list; the dependent is emitted normally. |
+| `SkippedRef` | **Transitive skip.** The dependent is itself skipped and gates the composite. The skip reason is auto-set to `depends on skipped "<name>"`. |
 | `None` | Silently dropped. Allows callers to write `depends_on=[ref]` unconditionally where `ref` may be a real ref or `None` from a callsite expression. |
 
 `(None, "path")` tuples still error -- tuples are explicit enough that
@@ -439,8 +441,7 @@ Resource("db-replica", replica_body,
 
 # Truly-optional resource: its absence must NOT block the XR from being ready.
 Resource("backup-schedule", backup_body,
-    when=When(backups_enabled, "backups disabled by spec", keep_if_exists=False),
-    optional=True)
+    when=When(backups_enabled, "backups disabled by spec", keep_if_exists=False, optional=True))
 
 # Cliff guard: preserve observed resource when config is unavailable
 config = get(oxr, "spec.externalConfig", None)
@@ -638,8 +639,8 @@ than on conditional resource emission -- for example, waiting until a database
 cluster reaches `Running` before marking the XR ready.
 
 An explicit call **always overrides** auto-gating from
-`Resource(..., when=False)` skips (see the `optional` parameter on
-`Resource()`). Last call wins if invoked more than once.
+`When(condition=False)` skips (see the `optional` parameter on
+`When()`). Last call wins if invoked more than once.
 
 **Parameters:**
 

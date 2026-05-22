@@ -1824,7 +1824,7 @@ func TestApplyCompositeReady_AutoGatesOnGatingSkip(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 
-	// Simulate a Resource(when=False, skip_reason=..., optional=False) call.
+	// Simulate a When(condition=False, optional=False) skip.
 	c.recordSkip("db-replica", "cluster not yet ready", true)
 
 	rsp := &fnv1.RunFunctionResponse{}
@@ -1859,7 +1859,7 @@ func TestApplyCompositeReady_OptionalSkipDoesNotGate(t *testing.T) {
 	cc := NewConditionCollector()
 	c := NewCollector(cc, "test.star", nil, nil)
 
-	// optional=True skip: recorded but does NOT gate.
+	// When(optional=True) skip: recorded but does NOT gate.
 	c.recordSkip("backup", "backups disabled", false)
 
 	rsp := &fnv1.RunFunctionResponse{}

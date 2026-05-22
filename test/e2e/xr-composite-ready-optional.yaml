@@ -1,4 +1,4 @@
-# Opt-out: Resource(when=False, optional=True) does NOT gate the XR.
+# Opt-out: When(condition=False, optional=True) does NOT gate the XR.
 # Expected outcome: XR reaches Ready=True (only the "dummy" resource matters).
 apiVersion: e2e.fn-starlark.io/v1
 kind: XTest

@@ -58,12 +58,13 @@ func (r *ResourceRef) Attr(name string) (starlark.Value, error) {
 
 func (r *ResourceRef) AttrNames() []string { return []string{"name"} }
 
-// WhenValue is the Starlark struct returned by When(condition, reason, keep_if_exists).
+// WhenValue is the Starlark struct returned by When(condition, reason, keep_if_exists, optional).
 // It is immutable by construction and implements starlark.Value + starlark.HasAttrs.
 type WhenValue struct {
 	condition    bool
 	reason       string
 	keepIfExists bool
+	optional     bool
 }
 
 // Compile-time interface checks for WhenValue.
@@ -73,8 +74,8 @@ var (
 )
 
 func (w *WhenValue) String() string {
-	return fmt.Sprintf("When(%s, %q, keep_if_exists=%s)",
-		starlark.Bool(w.condition), w.reason, starlark.Bool(w.keepIfExists))
+	return fmt.Sprintf("When(%s, %q, keep_if_exists=%s, optional=%s)",
+		starlark.Bool(w.condition), w.reason, starlark.Bool(w.keepIfExists), starlark.Bool(w.optional))
 }
 func (w *WhenValue) Type() string         { return "When" }
 func (w *WhenValue) Freeze()              {} // immutable by construction
@@ -89,6 +90,8 @@ func (w *WhenValue) Attr(name string) (starlark.Value, error) {
 		return starlark.Bool(w.condition), nil
 	case "keep_if_exists":
 		return starlark.Bool(w.keepIfExists), nil
+	case "optional":
+		return starlark.Bool(w.optional), nil
 	case "reason":
 		return starlark.String(w.reason), nil
 	}
@@ -96,17 +99,19 @@ func (w *WhenValue) Attr(name string) (starlark.Value, error) {
 }
 
 func (w *WhenValue) AttrNames() []string {
-	return []string{"condition", "keep_if_exists", "reason"}
+	return []string{"condition", "keep_if_exists", "optional", "reason"}
 }
 
-// whenBuiltin implements the When(condition, reason, keep_if_exists) Starlark builtin.
-// All three parameters are mandatory. condition and keep_if_exists must be strict
-// starlark.Bool (no truthiness). reason must be a non-empty string.
+// whenBuiltin implements the When(condition, reason, keep_if_exists, optional=False) Starlark builtin.
+// condition, reason, and keep_if_exists are mandatory. optional defaults to False.
+// condition, keep_if_exists, and optional must be strict starlark.Bool (no truthiness).
+// reason must be a non-empty string.
 func whenBuiltin(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var condVal, keepVal starlark.Value
+	var optionalVal starlark.Value = starlark.False
 	var reason string
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"condition", &condVal, "reason", &reason, "keep_if_exists", &keepVal); err != nil {
+		"condition", &condVal, "reason", &reason, "keep_if_exists", &keepVal, "optional?", &optionalVal); err != nil {
 		return nil, err
 	}
 	cond, ok := condVal.(starlark.Bool)
@@ -117,21 +122,23 @@ func whenBuiltin(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, k
 	if !ok {
 		return nil, fmt.Errorf("when: keep_if_exists must be bool, got %s", keepVal.Type())
 	}
+	opt, ok := optionalVal.(starlark.Bool)
+	if !ok {
+		return nil, fmt.Errorf("when: optional must be bool, got %s", optionalVal.Type())
+	}
 	if reason == "" {
 		return nil, fmt.Errorf("when: reason must not be empty")
 	}
-	return &WhenValue{condition: bool(cond), reason: reason, keepIfExists: bool(keep)}, nil
+	return &WhenValue{condition: bool(cond), reason: reason, keepIfExists: bool(keep), optional: bool(opt)}, nil
 }
 
 // SkippedRef is the value returned by Resource() when the resource was skipped
 // (When(condition=False), body=None without When, or transitively skipped via
-// depends_on). It exposes .name and .optional like ResourceRef but its truth
-// value is False so `if ref:` continues to gate callers correctly. Passing a
-// SkippedRef to depends_on triggers transitive skip when optional=False, or is
-// silently ignored when optional=True.
+// depends_on). It exposes .name like ResourceRef but its truth value is False
+// so `if ref:` continues to gate callers correctly. Any SkippedRef in
+// depends_on triggers transitive skip of the dependent resource.
 type SkippedRef struct {
-	name     string
-	optional bool
+	name string
 }
 
 var (
@@ -156,13 +163,11 @@ func (r *SkippedRef) Attr(name string) (starlark.Value, error) {
 	switch name {
 	case "name":
 		return starlark.String(r.name), nil
-	case "optional":
-		return starlark.Bool(r.optional), nil
 	}
 	return nil, nil
 }
 
-func (r *SkippedRef) AttrNames() []string { return []string{"name", "optional"} }
+func (r *SkippedRef) AttrNames() []string { return []string{"name"} }
 
 // DependencyPair records a dependency between two resources.
 type DependencyPair struct {
@@ -181,7 +186,7 @@ type CollectedResource struct {
 }
 
 // GatingSkip records a skip that should block the composite resource from
-// being marked Ready. Resources skipped with optional=True do NOT appear here.
+// being marked Ready. Resources skipped via When(optional=True) do NOT appear here.
 type GatingSkip struct {
 	Name   string
 	Reason string
@@ -506,7 +511,7 @@ func (c *Collector) addDependency(dependent, dependency string, isRef bool, fiel
 	})
 }
 
-// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None, optional=False) Starlark builtin.
+// resourceFn implements the Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None) Starlark builtin.
 func (c *Collector) resourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -521,7 +526,6 @@ func (c *Collector) resourceFn(
 	var labelsVal starlark.Value
 	var externalNameVal starlark.Value
 	var whenVal starlark.Value
-	var optional bool
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
 		"name", &name, "body", &bodyVal, "ready?", &readyVal,
@@ -529,8 +533,7 @@ func (c *Collector) resourceFn(
 		"connection_details??", &connDetails,
 		"depends_on??", &dependsOn,
 		"external_name??", &externalNameVal,
-		"when?", &whenVal,
-		"optional?", &optional); err != nil {
+		"when?", &whenVal); err != nil {
 		return nil, err
 	}
 
@@ -545,12 +548,17 @@ func (c *Collector) resourceFn(
 		}
 	}
 
-	gate := !optional
+	// Gate defaults to true (skip blocks composite readiness). Only
+	// When(optional=True) with condition=False makes a skip non-gating.
+	gate := true
+	if w != nil && !w.condition && w.optional {
+		gate = false
+	}
 
 	// GATE-01: when provided and condition=false, keep_if_exists=false -> skip.
 	if w != nil && !w.condition && !w.keepIfExists {
 		c.recordSkip(name, w.reason, gate)
-		return &SkippedRef{name: name, optional: optional}, nil
+		return &SkippedRef{name: name}, nil
 	}
 
 	// GATE-01b: when provided, condition=false, keep_if_exists=true -> cliff guard.
@@ -564,19 +572,19 @@ func (c *Collector) resourceFn(
 			return &ResourceRef{name: name}, nil
 		}
 		c.recordSkip(name, w.reason, gate)
-		return &SkippedRef{name: name, optional: optional}, nil
+		return &SkippedRef{name: name}, nil
 	}
 
 	// GATE-05: body=None without When -> warn and skip.
 	if bodyVal == starlark.None {
-		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Use When() with keep_if_exists=True to re-emit the observed body.", gate)
-		return &SkippedRef{name: name, optional: optional}, nil
+		c.recordSkip(name, "body is None. If this resource exists, it will be removed from desired state. Use When() with keep_if_exists=True to re-emit the observed body.", true)
+		return &SkippedRef{name: name}, nil
 	}
 
 	// Pre-scan depends_on for transitive-skip triggers BEFORE body conversion
 	// so we don't waste work when an upstream skip will short-circuit us.
-	// A non-optional SkippedRef anywhere in depends_on (including as the first
-	// element of a tuple) propagates the skip to this resource.
+	// Any SkippedRef in depends_on (including as the first element of a tuple)
+	// propagates the skip to this resource.
 	if dependsOn != nil {
 		for i := 0; i < dependsOn.Len(); i++ {
 			var sr *SkippedRef
@@ -590,9 +598,9 @@ func (c *Collector) resourceFn(
 					}
 				}
 			}
-			if sr != nil && !sr.optional {
-				c.recordSkip(name, fmt.Sprintf("depends on skipped %q", sr.name), gate)
-				return &SkippedRef{name: name, optional: optional}, nil
+			if sr != nil {
+				c.recordSkip(name, fmt.Sprintf("depends on skipped %q", sr.name), true)
+				return &SkippedRef{name: name}, nil
 			}
 		}
 	}
@@ -663,10 +671,10 @@ func (c *Collector) resourceFn(
 	}
 
 	// Process depends_on list if provided. By this point the pre-scan has
-	// already applied transitive skip for any non-optional *SkippedRef items,
-	// so any *SkippedRef that survives here is optional and is silently
-	// dropped. starlark.None is also tolerated for back-compat with patterns
-	// like `depends_on=[ref if ref else None]`.
+	// already applied transitive skip for all *SkippedRef items, so any
+	// *SkippedRef that survives here is unreachable — kept defensively.
+	// starlark.None is tolerated for back-compat with patterns like
+	// `depends_on=[ref if ref else None]`.
 	if dependsOn != nil {
 		for i := 0; i < dependsOn.Len(); i++ {
 			item := dependsOn.Index(i)
@@ -677,7 +685,6 @@ func (c *Collector) resourceFn(
 			case *ResourceRef:
 				c.addDependency(name, v.name, true, "")
 			case *SkippedRef:
-				// Optional skip (non-optional was caught in the pre-scan).
 				continue
 			case starlark.String:
 				c.addDependency(name, string(v), false, "")
@@ -695,7 +702,6 @@ func (c *Collector) resourceFn(
 					depName = first.name
 					isRef = true
 				case *SkippedRef:
-					// Optional skip in tuple form: drop the whole entry.
 					dropTuple = true
 				case starlark.String:
 					depName = string(first)

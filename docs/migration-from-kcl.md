@@ -57,7 +57,7 @@ function-starlark provides these predeclared globals:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None, when=True, skip_reason="", preserve_observed=False, optional=False)` | Register a desired composed resource; returns ResourceRef. `depends_on` accepts ResourceRef, string, or `(ref, "field.path")` tuple. `when=False` auto-gates the XR to Ready=False (opt-out with `optional=True`). |
+| `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None, when=None)` | Register a desired composed resource; returns ResourceRef. `depends_on` accepts ResourceRef, string, or `(ref, "field.path")` tuple. `When(condition=False)` auto-gates the XR to Ready=False (opt-out with `When(optional=True)`). |
 | `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason. Pure observability -- does NOT gate the XR. For new code prefer `Resource(when=False, skip_reason=...)` which also handles composite-readiness gating. |
 | `get` | `get(obj, path, default=None)` | Safe nested dict access with dot-path or list-of-keys |
 | `set_condition` | `set_condition(type, status, reason, message, target="Composite")` | Set an XR condition |

@@ -1,6 +1,6 @@
-# Optional cascade: Resource(when=False, optional=True) returns an optional
+# Optional cascade: When(condition=False, optional=True) returns an optional
 # SkippedRef. A downstream Resource passing it in depends_on does NOT cascade
-# the skip; the optional dep is silently dropped from the dependency list and
+# the skip; the SkippedRef triggers transitive skip of
 # downstream emits normally.
 # Expected outcome: XR reaches Ready=True (only downstream matters).
 apiVersion: e2e.fn-starlark.io/v1

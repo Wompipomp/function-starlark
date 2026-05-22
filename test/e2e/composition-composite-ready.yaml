@@ -1,9 +1,9 @@
 # Composition for composite-readiness gating tests. Three modes driven by
 # spec.mode on the XR:
-#   "gate"     -- Resource(when=False) without optional=True. The skipped
+#   "gate"     -- When(condition=False) without optional. The skipped
 #                  resource gates the XR to Ready=False and an informational
 #                  ComposedResourcesReady=False condition is emitted.
-#   "optional" -- Resource(when=False, optional=True). The skipped resource
+#   "optional" -- When(condition=False, optional=True). The skipped resource
 #                  does NOT gate the XR; it still reaches Ready=True.
 #   "explicit" -- set_composite_ready(False, reason=..., message=...). The
 #                  XR stays Ready=False with the user-supplied reason, even
@@ -46,16 +46,15 @@ spec:
             })
 
             if mode == "gate":
-                # Auto-gate: skip without optional=True → XR Ready=False + condition.
+                # Auto-gate: skip without When(optional=True) → XR Ready=False + condition.
                 Resource("pending-dep", None,
                     when=When(False, "E2E: auto-gating test, dependency not yet provisioned", keep_if_exists=False))
                 set_xr_status("test.scenario", "auto-gate")
 
             elif mode == "optional":
-                # Opt-out: skip with optional=True → XR still reaches Ready.
+                # Opt-out: skip with When(optional=True) → XR still reaches Ready.
                 Resource("optional-feature", None,
-                    when=When(False, "E2E: optional feature disabled", keep_if_exists=False),
-                    optional=True)
+                    when=When(False, "E2E: optional feature disabled", keep_if_exists=False, optional=True))
                 set_xr_status("test.scenario", "optional-optout")
 
             elif mode == "explicit":

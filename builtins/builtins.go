@@ -493,10 +493,10 @@ const (
 )
 
 // ApplyCompositeReady sets rsp.Desired.Composite.Ready. An explicit
-// set_composite_ready() call wins. Otherwise any non-optional
-// Resource(when=False) skip OR sequencer-deferred resource flips Ready to
-// False and emits a ComposedResourcesReady=False condition. With none of
-// these, Ready is left UNSPECIFIED.
+// set_composite_ready() call wins. Otherwise any When(optional=False)
+// skip OR sequencer-deferred resource flips Ready to False and emits a
+// ComposedResourcesReady=False condition. With none of these, Ready is
+// left UNSPECIFIED.
 func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc *ConditionCollector) {
 	override, skips, defers := collector.compositeReadyState()
 

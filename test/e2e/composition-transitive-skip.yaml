@@ -6,10 +6,11 @@
 #                         and the XR stays Ready=False with a single
 #                         ComposedResourcesReady=False / PendingConditionalResources
 #                         condition mentioning both names.
-#   "optional-cascade" -- Resource("upstream", when=False, optional=True) returns
-#                         an *optional* SkippedRef. Passing it to depends_on of a
-#                         downstream resource does NOT cascade the skip; downstream
-#                         emits normally and the XR reaches Ready=True.
+#   "optional-cascade" -- When(condition=False, optional=True) returns a
+#                         SkippedRef. Passing it to depends_on of a downstream
+#                         resource transitively skips the downstream too.
+#                         The upstream skip is non-gating (optional), but the
+#                         downstream transitive skip gates the composite.
 #
 # Both modes also exercise depends_on tolerance for `None` items by including a
 # get-extra-resource call that resolves to None.
@@ -63,12 +64,10 @@ spec:
                 set_xr_status("test.scenario", "transitive")
 
             elif mode == "optional-cascade":
-                # Optional skip: upstream is "absent by design"; downstream
-                # passing the optional SkippedRef in depends_on is silently
-                # dropped, so downstream emits and the XR reaches Ready=True.
+                # Optional skip: upstream is non-gating (optional=True on When),
+                # but downstream is transitively skipped and gates the composite.
                 upstream_optional = Resource("upstream", None,
-                    when=When(False, "E2E: optional upstream", keep_if_exists=False),
-                    optional=True)
+                    when=When(False, "E2E: optional upstream", keep_if_exists=False, optional=True))
                 Resource("downstream", downstream_body,
                     depends_on=[upstream_optional, maybe])
                 set_xr_status("test.scenario", "optional-cascade")

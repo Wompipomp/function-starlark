@@ -43,16 +43,14 @@ Resource("db-replica", replica_body,
 
 For resources that are *expected* to be absent under some configurations
 (feature flags, tier-gated add-ons, environment opt-ins), use
-`optional=True` so the absence does not block the XR:
+`optional=True` on `When()` so the absence does not block the XR:
 
 ```python
 Resource("monitoring", {
     "apiVersion": "monitoring.example.io/v1",
     "kind": "Dashboard",
     "spec": {"forProvider": {"region": region, "enabled": True}},
-}, when=env == "prod",
-   skip_reason="monitoring only in prod",
-   optional=True)
+}, when=When(env == "prod", "monitoring only in prod", keep_if_exists=False, optional=True))
 ```
 
 Plain `if` guards are still fine for purely local control flow that does not
