@@ -1482,8 +1482,8 @@ func TestLoad_PackageLocal_FromNonOCICaller_Error(t *testing.T) {
 	if !strings.Contains(err.Error(), "composition.star") {
 		t.Errorf("error = %q, want it to contain 'composition.star'", err.Error())
 	}
-	if !strings.Contains(err.Error(), "not an OCI module") {
-		t.Errorf("error = %q, want it to contain 'not an OCI module'", err.Error())
+	if !strings.Contains(err.Error(), "requires a filesystem-sourced module") {
+		t.Errorf("error = %q, want it to contain 'requires a filesystem-sourced module'", err.Error())
 	}
 }
 
@@ -1531,8 +1531,8 @@ func TestResolveStarImports_PackageLocal_NonOCICaller_Error(t *testing.T) {
 	if !strings.Contains(err.Error(), "composition.star") {
 		t.Errorf("error = %q, want it to contain 'composition.star'", err.Error())
 	}
-	if !strings.Contains(err.Error(), "not an OCI module") {
-		t.Errorf("error = %q, want it to contain 'not an OCI module'", err.Error())
+	if !strings.Contains(err.Error(), "requires a filesystem-sourced module") {
+		t.Errorf("error = %q, want it to contain 'requires a filesystem-sourced module'", err.Error())
 	}
 }
 
@@ -1562,5 +1562,184 @@ out = message`
 	}
 	if !strings.Contains(rewritten, `"message"`) {
 		t.Errorf("rewritten source missing expanded exports: %s", rewritten)
+	}
+}
+
+// ========================
+// Filesystem Relative Load Tests
+// ========================
+
+func TestRelativeLoadSibling(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sibling.star"), []byte(`x = 42`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: filepath.Join(dir, "main.star"),
+		Load: loader.LoadFunc(),
+	}
+
+	loaded, err := thread.Load(thread, "./sibling.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	xVal, _ := starlark.AsInt32(loaded["x"].(starlark.Int))
+	if xVal != 42 {
+		t.Errorf("x = %d, want 42", xVal)
+	}
+}
+
+func TestRelativeLoadSubdir(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "helpers.star"), []byte(`y = 99`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: filepath.Join(dir, "main.star"),
+		Load: loader.LoadFunc(),
+	}
+
+	loaded, err := thread.Load(thread, "./sub/helpers.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	yVal, _ := starlark.AsInt32(loaded["y"].(starlark.Int))
+	if yVal != 99 {
+		t.Errorf("y = %d, want 99", yVal)
+	}
+}
+
+func TestRelativeLoadTraversalRejected(t *testing.T) {
+	dir := t.TempDir()
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: filepath.Join(dir, "main.star"),
+		Load: loader.LoadFunc(),
+	}
+
+	_, err := thread.Load(thread, "../escape.star")
+	if err == nil {
+		t.Fatal("expected error for path traversal, got nil")
+	}
+	if !strings.Contains(err.Error(), "must not escape") {
+		t.Errorf("error = %q, want it to contain 'must not escape'", err.Error())
+	}
+}
+
+func TestRelativeLoadNestedTraversal(t *testing.T) {
+	dir := t.TempDir()
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: filepath.Join(dir, "main.star"),
+		Load: loader.LoadFunc(),
+	}
+
+	_, err := thread.Load(thread, "./a/../../escape.star")
+	if err == nil {
+		t.Fatal("expected error for nested path traversal, got nil")
+	}
+	if !strings.Contains(err.Error(), "must not escape") {
+		t.Errorf("error = %q, want it to contain 'must not escape'", err.Error())
+	}
+}
+
+func TestRelativeLoadFromInlineCaller(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: "composition.star",
+		Load: loader.LoadFunc(),
+	}
+
+	_, err := thread.Load(thread, "./dep.star")
+	if err == nil {
+		t.Fatal("expected error for inline caller, got nil")
+	}
+	if !strings.Contains(err.Error(), "requires a filesystem-sourced module") {
+		t.Errorf("error = %q, want it to contain 'requires a filesystem-sourced module'", err.Error())
+	}
+}
+
+func TestRelativeLoadNested(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte(`load("./utils.star", "z")`+"\n"+`val = z`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "utils.star"), []byte(`z = 7`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: filepath.Join(dir, "main.star"),
+		Load: loader.LoadFunc(),
+	}
+
+	loaded, err := thread.Load(thread, "./helpers.star")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	zVal, _ := starlark.AsInt32(loaded["val"].(starlark.Int))
+	if zVal != 7 {
+		t.Errorf("val = %d, want 7", zVal)
+	}
+}
+
+func TestStarImportRelativeFilesystem(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte("a = 1\nb = 2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+
+	source := `load("./helpers.star", "*")
+result = a + b`
+	callerPath := filepath.Join(dir, "main.star")
+	rewritten, err := loader.ResolveStarImports(source, callerPath)
+	if err != nil {
+		t.Fatalf("ResolveStarImports error: %v", err)
+	}
+
+	if strings.Contains(rewritten, `"*"`) {
+		t.Errorf("rewritten source still contains \"*\": %s", rewritten)
+	}
+
+	thread := &starlark.Thread{Name: callerPath, Load: loader.LoadFunc()}
+	thread.SetMaxExecutionSteps(maxSteps)
+	globals, err := starlark.ExecFileOptions(fileOptions(), thread, callerPath, rewritten, starlark.StringDict{})
+	if err != nil {
+		t.Fatalf("executing rewritten source: %v", err)
+	}
+
+	result, _ := starlark.AsInt32(globals["result"].(starlark.Int))
+	if result != 3 {
+		t.Errorf("result = %d, want 3 (a+b)", result)
 	}
 }
