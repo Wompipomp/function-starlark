@@ -80,6 +80,19 @@ func validateModuleName(module string) error {
 	return nil
 }
 
+// isFilesystemRelativeTarget checks if a module name is a filesystem-relative
+// load target: starts with "./" and ends with ".star". Unlike
+// oci.IsPackageLocalTarget, subdirectories are allowed (e.g., "./sub/x.star").
+func isFilesystemRelativeTarget(module string) bool {
+	return strings.HasPrefix(module, "./") && strings.HasSuffix(module, ".star")
+}
+
+// isFilesystemCaller reports whether the thread's Name indicates a
+// filesystem-sourced module (contains "/" but does not start with "oci://").
+func isFilesystemCaller(threadName string) bool {
+	return strings.Contains(threadName, "/") && !strings.HasPrefix(threadName, "oci://")
+}
+
 // resolve returns the source for a module by checking inline modules first,
 // then searching filesystem paths in order.
 func (m *ModuleLoader) resolve(module string) (string, error) {
@@ -110,11 +123,15 @@ func (m *ModuleLoader) resolve(module string) (string, error) {
 // load implements the Thread.Load callback. It uses the sequential loader
 // pattern from starlark-go's example_test.go with nil-sentinel cycle detection.
 func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.StringDict, error) {
-	// Package-local ./file.star: expand against the caller's OCI parent.
-	// The parent is the thread's Name (set when a module thread is created
-	// in this method for loaded modules). Main-script threads have names
-	// like "composition.star" and cannot use package-local loads.
-	if oci.IsPackageLocalTarget(module) {
+	// Relative ./ and ../ loads: determine caller context and dispatch.
+	// Reject ../ early with a user-friendly path-traversal error.
+	if strings.HasPrefix(module, "../") {
+		return nil, fmt.Errorf(
+			"relative load %q rejected: path must not escape the caller's directory",
+			module,
+		)
+	}
+	if strings.HasPrefix(module, "./") {
 		parent := ""
 		if thread != nil {
 			// Strip the " (star-import-scan)" suffix that getModuleExports
@@ -122,21 +139,114 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 			// export scanning of modules that use package-local loads.
 			parent = strings.TrimSuffix(thread.Name, starImportScanSuffix)
 		}
-		if !strings.HasPrefix(parent, "oci://") {
+
+		if strings.HasPrefix(parent, "oci://") {
+			// OCI package-local: existing behavior (unchanged).
+			if !oci.IsPackageLocalTarget(module) {
+				return nil, fmt.Errorf(
+					"OCI package-local load %q must be a flat sibling (no subdirectories)",
+					module,
+				)
+			}
+			pt, err := oci.ParseOCILoadTarget(parent)
+			if err != nil {
+				return nil, fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parent, module, err)
+			}
+			expanded, err := oci.ExpandPackageLocal(module, pt.RefStr)
+			if err != nil {
+				return nil, err
+			}
+			module = expanded
+		} else if isFilesystemCaller(parent) {
+			// Filesystem relative resolution.
+			if !isFilesystemRelativeTarget(module) {
+				return nil, fmt.Errorf("relative load %q must end with .star", module)
+			}
+			callerDir := filepath.Dir(parent)
+			relPath := module[2:] // strip "./"
+			if !filepath.IsLocal(relPath) {
+				return nil, fmt.Errorf(
+					"relative load %q rejected: path must not escape the caller's directory",
+					module,
+				)
+			}
+			resolved := filepath.Join(callerDir, relPath)
+			data, err := os.ReadFile(resolved) //nolint:gosec // path validated by filepath.IsLocal
+			if err != nil {
+				if os.IsNotExist(err) {
+					return nil, fmt.Errorf(
+						"module %q not found; resolved to %s from caller %s",
+						module, resolved, filepath.Base(parent),
+					)
+				}
+				return nil, fmt.Errorf("reading module %q from %s: %w", module, resolved, err)
+			}
+			// Use resolved absolute path as cache key and module identity.
+			if e, ok := m.cache[resolved]; ok {
+				if e != nil {
+					return e.globals, e.err
+				}
+				return nil, fmt.Errorf("cycle in load graph: %s", resolved)
+			}
+			m.cache[resolved] = nil // nil sentinel for cycle detection
+
+			source := string(data)
+			source, err = m.ResolveStarImports(source, resolved)
+			if err != nil {
+				e := &moduleEntry{nil, fmt.Errorf("expanding star imports in module %s: %w", resolved, err)}
+				m.cache[resolved] = e
+				return nil, e.err
+			}
+			prog, err := m.rt.getOrCompile(source, m.predeclared, resolved)
+			if err != nil {
+				e := &moduleEntry{nil, fmt.Errorf("compiling module %s: %w", resolved, err)}
+				m.cache[resolved] = e
+				return nil, e.err
+			}
+			modThread := &starlark.Thread{
+				Name: resolved, // absolute path enables nested relative loads
+				Load: m.load,
+				Print: func(_ *starlark.Thread, msg string) {
+					m.rt.log.Debug("starlark print", "module", resolved, "msg", msg)
+				},
+			}
+			modThread.SetMaxExecutionSteps(maxSteps)
+			globals, execErr := prog.Init(modThread, m.predeclared)
+			if execErr != nil {
+				var wrappedErr error
+				if modThread.ExecutionSteps() >= maxSteps {
+					wrappedErr = fmt.Errorf("module %s exceeded execution limit (%d steps): possible infinite loop", resolved, maxSteps)
+				} else {
+					var evalErr *starlark.EvalError
+					if errors.As(execErr, &evalErr) {
+						wrappedErr = fmt.Errorf("error in module %s: %s: %w", resolved, evalErr.Backtrace(), execErr)
+					} else {
+						wrappedErr = fmt.Errorf("error in module %s: %w", resolved, execErr)
+					}
+				}
+				e := &moduleEntry{nil, wrappedErr}
+				m.cache[resolved] = e
+				return nil, wrappedErr
+			}
+			globals.Freeze()
+			exported := make(starlark.StringDict, len(globals))
+			for name, val := range globals {
+				if !strings.HasPrefix(name, "_") {
+					exported[name] = val
+				}
+			}
+			e := &moduleEntry{exported, nil}
+			m.cache[resolved] = e
+			return e.globals, nil
+		} else {
+			// Inline caller -- no directory context.
 			return nil, fmt.Errorf(
-				"package-local load %q is only valid from OCI modules; caller %q is not an OCI module",
-				module, parent,
+				"relative load %q requires a filesystem-sourced module; "+
+					"inline modules have no directory context. "+
+					"Use a flat module name or move to a ConfigMap.",
+				module,
 			)
 		}
-		pt, err := oci.ParseOCILoadTarget(parent)
-		if err != nil {
-			return nil, fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", parent, module, err)
-		}
-		expanded, err := oci.ExpandPackageLocal(module, pt.RefStr)
-		if err != nil {
-			return nil, err
-		}
-		module = expanded
 	} else if oci.IsDefaultRegistryTarget(module) {
 		// Expand short-form OCI targets before existing routing.
 		expanded, err := oci.ExpandDefaultRegistry(module, m.defaultRegistry)
@@ -317,25 +427,49 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 	for i := len(starLoads) - 1; i >= 0; i-- {
 		sl := starLoads[i]
 		mod := sl.stmt.ModuleName()
+		// loadMod is the module name used in the rewritten load() statement.
+		// For filesystem-relative modules we keep the original "./..." path
+		// so the runtime load() callback resolves it; for OCI we use the
+		// expanded URL.
+		loadMod := mod
 
-		// Package-local ./file.star: expand against the caller's OCI parent
-		// (filename). Only valid when the caller is an OCI module.
-		if oci.IsPackageLocalTarget(mod) {
-			if !strings.HasPrefix(filename, "oci://") {
+		// Relative ./ handling: dispatch based on caller type.
+		if strings.HasPrefix(mod, "./") {
+			if strings.HasPrefix(filename, "oci://") {
+				// Existing OCI package-local expansion (unchanged).
+				if !oci.IsPackageLocalTarget(mod) {
+					return "", fmt.Errorf("OCI package-local load %q must be a flat sibling", mod)
+				}
+				pt, err := oci.ParseOCILoadTarget(filename)
+				if err != nil {
+					return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", filename, mod, err)
+				}
+				expanded, err := oci.ExpandPackageLocal(mod, pt.RefStr)
+				if err != nil {
+					return "", fmt.Errorf("resolving star import from %q: %w", mod, err)
+				}
+				mod = expanded
+				loadMod = mod
+			} else if isFilesystemCaller(filename) {
+				// Filesystem relative: resolve to absolute path for export
+				// scanning but keep the original ./ path for the load statement.
+				callerDir := filepath.Dir(filename)
+				relPath := mod[2:]
+				if !filepath.IsLocal(relPath) {
+					return "", fmt.Errorf(
+						"relative load %q rejected: path must not escape the caller's directory",
+						mod,
+					)
+				}
+				mod = filepath.Join(callerDir, relPath)
+				// loadMod stays as the original "./..." relative path.
+			} else {
 				return "", fmt.Errorf(
-					"package-local load %q is only valid from OCI modules; caller %q is not an OCI module",
-					mod, filename,
+					"relative load %q requires a filesystem-sourced module; "+
+						"inline modules have no directory context.",
+					mod,
 				)
 			}
-			pt, err := oci.ParseOCILoadTarget(filename)
-			if err != nil {
-				return "", fmt.Errorf("parsing OCI parent %q for package-local load %q: %w", filename, mod, err)
-			}
-			expanded, err := oci.ExpandPackageLocal(mod, pt.RefStr)
-			if err != nil {
-				return "", fmt.Errorf("resolving star import from %q: %w", mod, err)
-			}
-			mod = expanded
 		} else if oci.IsDefaultRegistryTarget(mod) {
 			// Expand short-form OCI targets before routing.
 			expanded, err := oci.ExpandDefaultRegistry(mod, m.defaultRegistry)
@@ -343,9 +477,10 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 				return "", fmt.Errorf("resolving star import from %q: %w", mod, err)
 			}
 			mod = expanded
+			loadMod = mod
 		}
 
-		// Use full OCI URL as module key (matches resolver keying).
+		// Use resolved module path as key for getModuleExports.
 		resolvedMod := mod
 
 		exports, err := m.getModuleExports(resolvedMod)
@@ -428,7 +563,7 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 		// Build the replacement load + optional struct lines.
 		var replacement string
 		if len(allArgs) > 0 {
-			replacement = fmt.Sprintf("load(%q, %s)", mod, strings.Join(allArgs, ", "))
+			replacement = fmt.Sprintf("load(%q, %s)", loadMod, strings.Join(allArgs, ", "))
 		}
 		if len(structLines) > 0 {
 			if replacement != "" {
@@ -459,9 +594,20 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 // (the load() nil-sentinel prevents actual re-execution of those modules).
 func (m *ModuleLoader) getModuleExports(module string) ([]string, error) {
 	// Resolve module source.
-	src, err := m.resolve(module)
-	if err != nil {
-		return nil, err
+	var src string
+	var err error
+	if filepath.IsAbs(module) {
+		// Filesystem-relative module: read directly from absolute path.
+		data, readErr := os.ReadFile(module) //nolint:gosec // path validated by filepath.IsLocal in caller
+		if readErr != nil {
+			return nil, fmt.Errorf("reading module %q: %w", module, readErr)
+		}
+		src = string(data)
+	} else {
+		src, err = m.resolve(module)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Expand star imports in module source before compilation so that modules

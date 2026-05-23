@@ -1479,9 +1479,6 @@ func TestLoad_PackageLocal_FromNonOCICaller_Error(t *testing.T) {
 	if !strings.Contains(err.Error(), "./dep.star") {
 		t.Errorf("error = %q, want it to contain './dep.star'", err.Error())
 	}
-	if !strings.Contains(err.Error(), "composition.star") {
-		t.Errorf("error = %q, want it to contain 'composition.star'", err.Error())
-	}
 	if !strings.Contains(err.Error(), "requires a filesystem-sourced module") {
 		t.Errorf("error = %q, want it to contain 'requires a filesystem-sourced module'", err.Error())
 	}
@@ -1527,9 +1524,6 @@ func TestResolveStarImports_PackageLocal_NonOCICaller_Error(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "./dep.star") {
 		t.Errorf("error = %q, want it to contain './dep.star'", err.Error())
-	}
-	if !strings.Contains(err.Error(), "composition.star") {
-		t.Errorf("error = %q, want it to contain 'composition.star'", err.Error())
 	}
 	if !strings.Contains(err.Error(), "requires a filesystem-sourced module") {
 		t.Errorf("error = %q, want it to contain 'requires a filesystem-sourced module'", err.Error())

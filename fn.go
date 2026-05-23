@@ -84,7 +84,9 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	log.Debug("Parsed StarlarkInput", "source-length", len(in.Spec.Source))
 
 	// Resolve script source and filename.
-	// Inline scripts use "composition.star"; ConfigMap scripts use the real key.
+	// Inline scripts use "composition.star"; ConfigMap scripts use the full
+	// filesystem path so that load("./relative.star") can resolve against
+	// the caller's directory.
 	source := in.Spec.Source
 	filename = "composition.star"
 	if source == "" && in.Spec.ScriptConfigRef != nil {
@@ -92,7 +94,11 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 		if key == "" {
 			key = "main.star"
 		}
-		filename = key
+		dir := f.scriptDir
+		if dir == "" {
+			dir = "/scripts"
+		}
+		filename = filepath.Join(dir, in.Spec.ScriptConfigRef.Name, key)
 
 		var err error
 		source, err = f.loadScript(in.Spec.ScriptConfigRef)
