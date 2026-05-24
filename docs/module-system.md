@@ -183,10 +183,20 @@ same schemas as your deployed compositions.
 
 function-starlark determines the load type using these rules, applied in order:
 
-1. **Starts with `oci://`** -- explicit full OCI URL (no expansion, used as-is)
-2. **Contains `:` or `@sha256:`** -- short-form OCI reference, expanded via
+1. **Starts with `../`** -- rejected with a path-traversal error
+   (`path must not escape the caller's directory`)
+2. **Starts with `./`** -- relative load, dispatched by caller type:
+   - **Filesystem caller:** resolves relative to the caller's directory
+     (subdirectories supported, e.g., `./lib/utils.star`)
+   - **OCI caller:** package-local, resolves within the same OCI artifact
+     (flat paths only -- no subdirectories)
+   - **Inline caller:** error (`relative load requires a filesystem-sourced
+     module; inline modules have no directory context`)
+3. **Starts with `oci://`** -- explicit full OCI URL (no expansion, used as-is)
+4. **Contains `:` or `@sha256:`** -- short-form OCI reference, expanded via
    the default registry
-3. **Otherwise** -- local module (inline or filesystem)
+5. **Otherwise** -- local module (inline map lookup by key, then filesystem
+   search paths)
 
 ### Short-form patterns
 
@@ -226,6 +236,38 @@ load("source", "name1", "name2")
 - Remaining arguments are names to import.
 - Aliased imports are supported: `load("module.star", renamed = "original")`
 - Star imports bring in all public exports: `load("module.star", "*")`
+
+### Relative loads
+
+Modules can load siblings and subdirectory modules using the `./` prefix:
+
+```python
+load("./helpers.star", "my_func")           # sibling file
+load("./lib/utils.star", "validate")        # subdirectory file
+```
+
+The `./` prefix triggers relative resolution from the caller's directory.
+Subdirectories are fully supported for filesystem callers. OCI callers are
+restricted to flat sibling paths (no subdirectories).
+
+**Path traversal is rejected.** Loading with `../` produces a clear error:
+
+```
+relative load "../secrets.star" rejected: path must not escape the caller's directory
+```
+
+**Inline modules cannot use relative loads** because they have no directory
+context. Attempting a relative load from an inline module produces:
+
+```
+relative load "./helpers.star" requires a filesystem-sourced module;
+inline modules have no directory context. Use a flat module name or move to a ConfigMap.
+```
+
+**Test files cannot be loaded.** Any `_test.star` file -- whether loaded by
+flat name or relative path -- is rejected at runtime. This prevents test code
+from leaking into production modules. See the
+[testing guide](testing.md) for how `_test.star` files are used.
 
 ### Namespace alias imports
 
@@ -277,22 +319,26 @@ ns.OtherFunc()   # available via namespace
 When `load()` is called, function-starlark resolves the module source in this
 order:
 
-1. **Inline modules** (`spec.modules`) -- keyed by filename
-2. **Module paths** (`spec.modulePaths`) -- filesystem directories
-3. **Short-form OCI modules** (`package:tag/file.star`) -- expanded via default registry
-4. **Explicit OCI modules** (`oci://` prefix) -- full OCI URL
+1. **Relative `./` path** -- resolves relative to the caller's directory (filesystem or OCI)
+2. **Inline modules** (`spec.modules`) -- keyed by filename (supports path-based keys)
+3. **Module paths** (`spec.modulePaths`) -- filesystem directories
+4. **Short-form OCI modules** (`package:tag/file.star`) -- expanded via default registry
+5. **Explicit OCI modules** (`oci://` prefix) -- full OCI URL
 
 ```python
-# 1. Inline module (defined in spec.modules)
+# 1. Relative load (resolves from caller's directory)
+load("./helpers.star", "my_func")
+
+# 2. Inline module (defined in spec.modules)
 load("helpers.star", "my_func")
 
-# 2. Short-form OCI module (requires default registry configured)
+# 3. Short-form OCI module (requires default registry configured)
 load("function-starlark-stdlib:v1/naming.star", "resource_name")
 
-# 3. Explicit OCI module (full URL, no default registry needed)
+# 4. Explicit OCI module (full URL, no default registry needed)
 load("oci://ghcr.io/myorg/starlark-libs/networking:v1.0.0/helpers.star", "subnet_cidr")
 
-# 4. Standard library (using short-form with default registry)
+# 5. Standard library (using short-form with default registry)
 load("function-starlark-stdlib:v1/networking.star", "subnet_cidr")
 load("function-starlark-stdlib:v1/naming.star", "resource_name")
 load("function-starlark-stdlib:v1/labels.star", "standard_labels")
@@ -326,6 +372,26 @@ spec:
 
 Inline modules can load other inline modules. Circular load dependencies are
 detected and produce a clear error.
+
+**Path-based keys.** When modules are organized in subdirectories and bundled
+into `spec.modules` (e.g., by a CLI tool), the module map uses path-based keys:
+
+```yaml
+spec:
+  modules:
+    helpers.star: |
+      def make_tags(env): ...
+    lib/utils.star: |
+      def validate(x): ...
+```
+
+```python
+load("helpers.star", "make_tags")
+load("lib/utils.star", "validate")
+```
+
+Path-based keys bypass the usual name validation, so keys like `lib/utils.star`
+work as-is. The loader matches the key directly against the inline module map.
 
 ## Standard library
 
