@@ -12,8 +12,8 @@ def test_crypto():
     assert.eq(len(h), 64)
 
 def test_encoding():
-    encoded = encoding.base64_encode("hello")
-    assert.eq(encoding.base64_decode(encoded), "hello")
+    encoded = encoding.b64enc("hello")
+    assert.eq(encoding.b64dec(encoded), "hello")
 
 def test_regex():
     assert.true(regex.match(r"^hello", "hello world"))
