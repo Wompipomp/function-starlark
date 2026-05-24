@@ -353,11 +353,18 @@ load("function-starlark-stdlib:v1/naming.star", "resource_name")
 # Explicit full OCI URL (always works)
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
 
+# Filesystem relative load (ConfigMap or modulePaths callers)
+load("./helpers.star", "my_func")           # sibling file
+load("./lib/utils.star", "validate")        # subdirectory file
+
 # Package-local (inside a published OCI module, load a sibling in the SAME artifact)
 load("./sibling.star", "helper")  # OCI callers only; flat paths only
 
 # From inline modules defined in StarlarkInput spec.modules
 load("helpers.star", "make_tags")
+
+# Path-based inline module keys (from CLI bundling or manual spec.modules)
+load("lib/utils.star", "validate")  # key includes path separator
 
 # From ConfigMap-mounted filesystem
 load("shared/utils.star", "validate")
@@ -368,10 +375,11 @@ load("shared/utils.star", "validate")
 Pattern: `load("package:tag/file.star", "name")` -- the colon (`:`) or `@sha256:` in the target triggers default registry expansion.
 
 Detection rules (in order):
-1. Starts with `./` and ends with `.star` (flat, no subdirs) -- package-local, expanded against the caller's OCI artifact (OCI callers only)
-2. Starts with `oci://` -- explicit full OCI URL (used as-is)
-3. Contains `:` or `@sha256:` -- short-form, expanded via default registry
-4. Otherwise -- local module (inline or filesystem)
+1. Starts with `../` -- rejected (path traversal error)
+2. Starts with `./` -- relative load (filesystem caller: resolves relative to caller's directory with subdirectory support; OCI caller: package-local flat; inline caller: error)
+3. Starts with `oci://` -- explicit full OCI URL (used as-is)
+4. Contains `:` or `@sha256:` -- short-form, expanded via default registry
+5. Otherwise -- local module (inline map lookup, then filesystem search paths)
 
 Configuration (spec fields override env vars):
 - `spec.ociDefaultRegistry` / `STARLARK_OCI_DEFAULT_REGISTRY` env var
@@ -467,6 +475,50 @@ Resource("bucket", bucket_config)
 - Use get_condition() for reading observed resource conditions instead of navigating status.conditions arrays.
 - Use set_response_ttl() for custom requeue intervals instead of relying on sequencingTTL.
 - Use namespace modules (json, crypto, encoding, dict, regex, yaml) directly -- no import needed.
+- Test files (*_test.star) are rejected by the module loader -- they cannot be loaded as production modules.
+
+## Test framework
+
+Write unit tests for Starlark helper modules using `*_test.star` files.
+
+### Conventions
+- Test files: `*_test.star` suffix (e.g., `helpers_test.star`)
+- Test functions: `def test_*()` -- zero-arg, `test_` prefix
+- Functions with parameters are SKIPped (not failed)
+- Non-test functions are ignored by the runner
+- All assertions in a test function run (no short-circuit on first failure)
+- Exit code 0 on all-pass, 1 on any failure (CI-compatible)
+
+### assert API
+- assert.eq(x, y) -- assert x equals y (float-aware)
+- assert.ne(x, y) -- assert x does not equal y
+- assert.true(cond, msg="assertion failed") -- assert cond is truthy
+- assert.lt(x, y) -- assert x less than y
+- assert.contains(x, y) -- assert y is in x
+- assert.fails(f, pattern) -- assert f() fails with error matching regex
+- assert.fail(msg) -- unconditionally report error (does NOT halt)
+
+### Available builtins in tests
+All pure builtins available without import: json, crypto, encoding, dict, regex, yaml, schema, field, struct, get.
+NOT available: Resource, oxr, dxr, observed (require Crossplane reconciliation context).
+
+### Example
+```python
+load("assert.star", "assert")
+load("./helpers.star", "greet")
+
+def test_greet():
+    assert.eq(greet("world"), "hello world")
+
+def test_greet_empty():
+    assert.eq(greet(""), "hello ")
+```
+
+### Go test helper
+```go
+import "github.com/wompipomp/function-starlark/testrunner"
+err := testrunner.Run(t, "path/to/tests", &buf)
+```
 
 ## Schema validation
 
