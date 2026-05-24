@@ -1773,3 +1773,58 @@ result = a + b`
 		t.Errorf("result = %d, want 3 (a+b)", result)
 	}
 }
+
+// TestInlineModulePathKey verifies that a path-based key like "lib/helpers.star"
+// resolves successfully when present in the inline module map.
+func TestInlineModulePathKey(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"lib/helpers.star": `def greet(name): return "hello " + name`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	loaded, err := thread.Load(thread, "lib/helpers.star")
+	if err != nil {
+		t.Fatalf("unexpected error loading path-based inline module: %v", err)
+	}
+
+	greet, ok := loaded["greet"]
+	if !ok {
+		t.Fatal("expected 'greet' in loaded globals from path-based inline module")
+	}
+
+	result, err := starlark.Call(thread, greet, starlark.Tuple{starlark.String("world")}, nil)
+	if err != nil {
+		t.Fatalf("calling greet: %v", err)
+	}
+
+	if result.(starlark.String) != "hello world" {
+		t.Errorf("greet('world') = %q, want %q", result, "hello world")
+	}
+}
+
+// TestInlineModulePathKeyNotFound verifies that a path-based module name is still
+// rejected by validateModuleName when it is NOT present in the inline module map.
+func TestInlineModulePathKeyNotFound(t *testing.T) {
+	log := &testLogger{}
+	rt := NewRuntime(log)
+
+	inline := map[string]string{
+		"helpers.star": `def greet(name): return "hello " + name`,
+	}
+
+	loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{Name: "test", Load: loader.LoadFunc()}
+
+	_, err := thread.Load(thread, "lib/unknown.star")
+	if err == nil {
+		t.Fatal("expected error for path-based module name not in inline map, got nil")
+	}
+	if !strings.Contains(err.Error(), "path separator") {
+		t.Errorf("error = %q, want it to contain 'path separator'", err.Error())
+	}
+}
