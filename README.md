@@ -40,6 +40,14 @@ with zero external toolchain.
 - **Namespace alias imports** -- `load("module.star", ns="*")` wraps all exports
   in a struct, solving name conflicts when loading multiple provider schema
   packages. [Module system](docs/module-system.md)
+- **Relative loads** -- `load("./helpers.star", "fn")` resolves relative to the
+  caller's directory, enabling multi-file local development with subdirectory
+  support. Path traversal via `../` is rejected.
+  [Module system](docs/module-system.md)
+- **Unit testing** -- Write `*_test.star` files with `load("assert.star", "assert")`
+  for unit testing Starlark helper modules. Seven assert functions (eq, ne, true,
+  lt, contains, fails, fail), automatic test discovery, and CI-compatible exit
+  codes. [Testing guide](docs/testing.md)
 
 ## Comparison
 
@@ -272,6 +280,7 @@ spec:
 | [docs/builtins-reference.md](docs/builtins-reference.md) | Complete API reference for all globals and functions |
 | [docs/starlark-primer.md](docs/starlark-primer.md) | Starlark for Python developers |
 | [docs/module-system.md](docs/module-system.md) | load(), OCI modules, stdlib, caching |
+| [docs/testing.md](docs/testing.md) | Unit testing with assert.star |
 | [docs/features.md](docs/features.md) | depends_on, labels, connection details, skip_resource, metrics |
 | [docs/best-practices.md](docs/best-practices.md) | Composition patterns, label strategy, testing |
 | [docs/migration-from-kcl.md](docs/migration-from-kcl.md) | Migration guide from function-kcl |
