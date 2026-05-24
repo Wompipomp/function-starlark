@@ -276,6 +276,10 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 		}
 		// Skip validateModuleName — OCI URLs contain "/" and ":" which are
 		// already validated by the OCI parser.
+	} else if _, ok := m.inlineModules[module]; ok {
+		// Path-based inline module key found (e.g., "lib/helpers.star" from CLI bundling).
+		// Skip validateModuleName — the key is trusted because it came from the inline
+		// module map, which is populated by the runtime's caller (CLI or composition YAML).
 	} else if err := validateModuleName(module); err != nil {
 		return nil, err
 	}
