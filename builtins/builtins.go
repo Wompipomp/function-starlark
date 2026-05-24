@@ -85,7 +85,7 @@ func BuildGlobals(
 		"Resource":               collector.Builtin(),
 		"When":                   starlark.NewBuiltin("When", whenBuiltin),
 		"skip_resource":          collector.SkipResourceBuiltin(),
-		"get":                    starlark.NewBuiltin("get", getFnImpl),
+		"get":                    GetBuiltin(),
 		"get_label":              starlark.NewBuiltin("get_label", getLabelImpl),
 		"get_annotation":         starlark.NewBuiltin("get_annotation", getAnnotationImpl),
 		"set_condition":          condCollector.SetConditionBuiltin(),
@@ -145,6 +145,12 @@ func BuildObservedDict(req *fnv1.RunFunctionRequest) (*convert.StarlarkDict, err
 	}
 	observed.Freeze()
 	return observed, nil
+}
+
+// GetBuiltin returns a *starlark.Builtin implementing get(obj, path, default=None)
+// for use in test predeclared globals.
+func GetBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("get", getFnImpl)
 }
 
 // getFnImpl implements get(obj, path, default=None) for safe nested dict access.

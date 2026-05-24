@@ -77,6 +77,9 @@ func validateModuleName(module string) error {
 	if !strings.HasSuffix(module, ".star") {
 		return fmt.Errorf("module name %q must end with .star", module)
 	}
+	if strings.HasSuffix(module, "_test.star") {
+		return fmt.Errorf("module name %q is a test file and cannot be loaded as a module", module)
+	}
 	return nil
 }
 
@@ -164,6 +167,12 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 			}
 			callerDir := filepath.Dir(parent)
 			relPath := module[2:] // strip "./"
+			if strings.HasSuffix(relPath, "_test.star") {
+				return nil, fmt.Errorf(
+					"relative load %q rejected: test files (*_test.star) cannot be loaded as modules",
+					module,
+				)
+			}
 			if !filepath.IsLocal(relPath) {
 				return nil, fmt.Errorf(
 					"relative load %q rejected: path must not escape the caller's directory",

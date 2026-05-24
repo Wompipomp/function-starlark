@@ -1703,6 +1703,42 @@ func TestRelativeLoadNested(t *testing.T) {
 	}
 }
 
+func TestValidateModuleNameRejectsTestStar(t *testing.T) {
+	err := validateModuleName("helpers_test.star")
+	if err == nil {
+		t.Fatal("expected error for _test.star module name, got nil")
+	}
+	if !strings.Contains(err.Error(), "test file") {
+		t.Errorf("error = %q, want it to contain 'test file'", err.Error())
+	}
+	if !strings.Contains(err.Error(), "cannot be loaded") {
+		t.Errorf("error = %q, want it to contain 'cannot be loaded'", err.Error())
+	}
+}
+
+func TestRelativeLoadRejectsTestStar(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "helpers_test.star"), []byte(`x = 1`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	log := &testLogger{}
+	rt := NewRuntime(log)
+	loader := NewModuleLoader(nil, nil, starlark.StringDict{}, rt, "")
+	thread := &starlark.Thread{
+		Name: filepath.Join(dir, "main.star"),
+		Load: loader.LoadFunc(),
+	}
+
+	_, err := thread.Load(thread, "./helpers_test.star")
+	if err == nil {
+		t.Fatal("expected error for relative load of _test.star, got nil")
+	}
+	if !strings.Contains(err.Error(), "test files") {
+		t.Errorf("error = %q, want it to contain 'test files'", err.Error())
+	}
+}
+
 func TestStarImportRelativeFilesystem(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "helpers.star"), []byte("a = 1\nb = 2"), 0o600); err != nil {
