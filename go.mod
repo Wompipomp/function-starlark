@@ -9,6 +9,7 @@ require (
 	github.com/docker/cli v29.2.1+incompatible
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.21.2
+	github.com/mattn/go-isatty v0.0.20
 	github.com/prometheus/client_golang v1.23.2
 	github.com/zeebo/blake3 v0.2.4
 	go.starlark.net v0.0.0-20260210143700-b62fd896b91b
@@ -59,7 +60,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
