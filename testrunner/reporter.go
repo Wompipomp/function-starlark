@@ -10,7 +10,7 @@ type testReporter struct {
 	errors []string
 }
 
-func (r *testReporter) Error(args ...interface{}) {
+func (r *testReporter) Error(args ...any) {
 	r.failed = true
 	r.errors = append(r.errors, fmt.Sprint(args...))
 }
