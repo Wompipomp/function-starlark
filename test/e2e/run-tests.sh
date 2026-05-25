@@ -115,6 +115,8 @@ kubectl apply -f "$SCRIPT_DIR/composition-depends-on.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-star-imports.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-composite-ready.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-transitive-skip.yaml"
+kubectl apply -f "$SCRIPT_DIR/composition-relative-loads.yaml"
+kubectl apply -f "$SCRIPT_DIR/composition-path-modules.yaml"
 if [ -f "$SCRIPT_DIR/composition-schemas-rendered.yaml" ]; then
     kubectl apply -f "$SCRIPT_DIR/composition-schemas-rendered.yaml"
 else
@@ -517,10 +519,107 @@ else
 fi
 
 # ============================================================
-# TEST 5: DEPENDS_ON (CREATION SEQUENCING)
+# TEST 5: FILESYSTEM RELATIVE-PATH LOADING (ConfigMap scripts)
 # ============================================================
 log ""
-log "===== TEST 5: DEPENDS_ON (CREATION SEQUENCING) ====="
+log "===== TEST 5: FILESYSTEM RELATIVE-PATH LOADING ====="
+
+log "Creating XR for relative-loads test"
+kubectl apply -f "$SCRIPT_DIR/xr-relative-loads.yaml"
+
+log "Waiting for relative-loads XR to become Ready..."
+if wait_for_condition "xtest/test-relative-loads" "Ready" 120; then
+    pass "relative-loads: XR reached Ready (filesystem relative loads worked)"
+else
+    fail "relative-loads: XR did not reach Ready (relative load may have failed)"
+    kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+fi
+
+rel_worked=$(get_status_field "xtest/test-relative-loads" "test.relativeLoadsWorked")
+if [ "$rel_worked" = "true" ]; then
+    pass "relative-loads: all relative load assertions passed"
+else
+    fail "relative-loads: relativeLoadsWorked='$rel_worked' (expected true)"
+fi
+
+greet_result=$(get_status_field "xtest/test-relative-loads" "test.greetResult")
+if [ "$greet_result" = "hello, e2e" ]; then
+    pass "relative-loads: load(\"./helper.star\", \"greet\") resolved sibling module"
+else
+    fail "relative-loads: greetResult='$greet_result' (expected 'hello, e2e')"
+fi
+
+compute_result=$(get_status_field "xtest/test-relative-loads" "test.computeResult")
+if [ "$compute_result" = "42" ]; then
+    pass "relative-loads: load(\"./utils.star\", \"*\") star import resolved"
+else
+    fail "relative-loads: computeResult='$compute_result' (expected 42)"
+fi
+
+nested_result=$(get_status_field "xtest/test-relative-loads" "test.nestedChainResult")
+if [ "$nested_result" = "99" ]; then
+    pass "relative-loads: nested chain (main->helper->utils) resolved correctly"
+else
+    fail "relative-loads: nestedChainResult='$nested_result' (expected 99)"
+fi
+
+# ============================================================
+# TEST 6: PATH-BASED INLINE MODULE KEYS
+# ============================================================
+log ""
+log "===== TEST 6: PATH-BASED INLINE MODULE KEYS ====="
+
+log "Creating XR for path-modules test"
+kubectl apply -f "$SCRIPT_DIR/xr-path-modules.yaml"
+
+log "Waiting for path-modules XR to become Ready..."
+if wait_for_condition "xtest/test-path-modules" "Ready" 120; then
+    pass "path-modules: XR reached Ready (path-based module keys resolved)"
+else
+    fail "path-modules: XR did not reach Ready (path-based module loading may have failed)"
+    kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+fi
+
+path_worked=$(get_status_field "xtest/test-path-modules" "test.pathModulesWorked")
+if [ "$path_worked" = "true" ]; then
+    pass "path-modules: all path-based module assertions passed"
+else
+    fail "path-modules: pathModulesWorked='$path_worked' (expected true)"
+fi
+
+path_name=$(get_status_field "xtest/test-path-modules" "test.resourceName")
+if [ "$path_name" = "acme-database-prod" ]; then
+    pass "path-modules: load(\"lib/naming.star\") resolved path-based key"
+else
+    fail "path-modules: resourceName='$path_name' (expected 'acme-database-prod')"
+fi
+
+path_tags=$(get_status_field "xtest/test-path-modules" "test.tagCount")
+if [ "$path_tags" = "3" ]; then
+    pass "path-modules: load(\"lib/tags.star\") resolved path-based key"
+else
+    fail "path-modules: tagCount='$path_tags' (expected 3)"
+fi
+
+path_validation=$(get_status_field "xtest/test-path-modules" "test.validationWorked")
+if [ "$path_validation" = "true" ]; then
+    pass "path-modules: load(\"lib/utils/validation.star\") resolved nested path key"
+else
+    fail "path-modules: validationWorked='$path_validation' (expected true)"
+fi
+
+path_shared=$(get_status_field "xtest/test-path-modules" "test.sharedVersion")
+if [ "$path_shared" = "1.0" ]; then
+    pass "path-modules: flat key coexists with path-based keys"
+else
+    fail "path-modules: sharedVersion='$path_shared' (expected '1.0')"
+fi
+
+# ============================================================
+# TEST 7: DEPENDS_ON (CREATION SEQUENCING)
+# ============================================================
+log ""
+log "===== TEST 7: DEPENDS_ON (CREATION SEQUENCING) ====="
 
 log "Creating XR for depends_on test"
 kubectl apply -f "$SCRIPT_DIR/xr-depends-on.yaml"
@@ -611,10 +710,10 @@ else
 fi
 
 # ============================================================
-# TEST 6: DEPENDS_ON (DELETION ORDERING)
+# TEST 8: DEPENDS_ON (DELETION ORDERING)
 # ============================================================
 log ""
-log "===== TEST 6: DEPENDS_ON (DELETION ORDERING) ====="
+log "===== TEST 8: DEPENDS_ON (DELETION ORDERING) ====="
 
 log "Starting deletion watcher..."
 DELETION_LOG=$(mktemp)
@@ -693,10 +792,10 @@ else
 fi
 
 # ============================================================
-# TEST 7: COMPOSITE READINESS GATING
+# TEST 9: COMPOSITE READINESS GATING
 # ============================================================
 log ""
-log "===== TEST 7: COMPOSITE READINESS GATING ====="
+log "===== TEST 9: COMPOSITE READINESS GATING ====="
 
 # --- Scenario A: auto-gate ---
 log "Scenario A: auto-gate (Resource(when=False) without optional=True)"
@@ -782,10 +881,10 @@ else
 fi
 
 # ============================================================
-# TEST 8: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE
+# TEST 10: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE
 # ============================================================
 log ""
-log "===== TEST 8: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE ====="
+log "===== TEST 10: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE ====="
 
 # --- Scenario A: transitive skip ---
 log "Scenario A: transitive skip (Resource(when=False) + downstream depends_on=[upstream])"
@@ -819,22 +918,30 @@ else
     fail "transitive-skip/cascade: condition message='$trans_cond_msg' (expected to mention both upstream and downstream)"
 fi
 
-# --- Scenario B: optional cascade does NOT propagate ---
-log "Scenario B: optional cascade (Resource(when=False, optional=True) does not transitively skip)"
+# --- Scenario B: optional cascade propagates transitive skip ---
+log "Scenario B: optional cascade (When(optional=True) skip propagates to downstream via depends_on)"
 kubectl apply -f "$SCRIPT_DIR/xr-transitive-skip-optional.yaml"
 
-if wait_for_condition "xtest/test-transitive-skip-optional" "Ready" 120; then
-    pass "transitive-skip/optional-cascade: XR reached Ready=True (optional dep dropped, downstream emitted)"
+if wait_for_reconciled "xtest/test-transitive-skip-optional" 60; then
+    pass "transitive-skip/optional-cascade: XR reconciled by function"
 else
-    fail "transitive-skip/optional-cascade: XR did not reach Ready (optional SkippedRef should not cascade)"
+    fail "transitive-skip/optional-cascade: XR never Synced within timeout"
     kubectl get xtest/test-transitive-skip-optional -o yaml 2>/dev/null || true
 fi
 
-opt_cascade_cond=$(get_condition_field "xtest/test-transitive-skip-optional" "ComposedResourcesReady" "status")
-if [ -z "$opt_cascade_cond" ]; then
-    pass "transitive-skip/optional-cascade: no ComposedResourcesReady condition (as expected)"
+opt_ready=$(get_condition_field "xtest/test-transitive-skip-optional" "Ready" "status")
+if [ "$opt_ready" != "True" ]; then
+    pass "transitive-skip/optional-cascade: XR Ready=$opt_ready (not True, downstream transitively skipped)"
 else
-    fail "transitive-skip/optional-cascade: unexpected ComposedResourcesReady=$opt_cascade_cond (optional cascade should not gate)"
+    fail "transitive-skip/optional-cascade: XR Ready=$opt_ready (expected not True; transitive skip should gate)"
+fi
+
+opt_cascade_cond=$(get_condition_field "xtest/test-transitive-skip-optional" "ComposedResourcesReady" "status")
+opt_cascade_reason=$(get_condition_field "xtest/test-transitive-skip-optional" "ComposedResourcesReady" "reason")
+if [ "$opt_cascade_cond" = "False" ] && [ "$opt_cascade_reason" = "PendingConditionalResources" ]; then
+    pass "transitive-skip/optional-cascade: ComposedResourcesReady=False/PendingConditionalResources"
+else
+    fail "transitive-skip/optional-cascade: condition status=$opt_cascade_cond reason=$opt_cascade_reason (expected False / PendingConditionalResources)"
 fi
 
 # ============================================================
@@ -848,6 +955,8 @@ kubectl delete xtest test-builtins --wait=false 2>/dev/null || true
 kubectl delete xtest test-oci --wait=false 2>/dev/null || true
 kubectl delete xtest test-schemas --wait=false 2>/dev/null || true
 kubectl delete xtest test-star-imports --wait=false 2>/dev/null || true
+kubectl delete xtest test-relative-loads --wait=false 2>/dev/null || true
+kubectl delete xtest test-path-modules --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-gate --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-optional --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-explicit --wait=false 2>/dev/null || true
