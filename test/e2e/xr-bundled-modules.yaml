@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-bundled-modules
+  labels:
+    e2e-test: bundled-modules
+spec:
+  compositionRef:
+    name: bundled-modules-test

@@ -1,0 +1,112 @@
+# Composition that tests path-based inline module keys.
+# Module keys use directory paths (e.g., "lib/helpers.star") and are loaded
+# via load("lib/helpers.star", "fn") — validates that inline module lookup
+# happens before validateModuleName() rejects the "/" character.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: path-modules-test
+  labels:
+    e2e-test: path-modules
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-path-modules
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          usageAPIVersion: "v1"
+          modules:
+            # Path-based key: simulates bundled file from resources/lib/naming.star
+            lib/naming.star: |
+              prefix = "acme"
+              def resource_name(component, env):
+                  return prefix + "-" + component + "-" + env
+
+            # Path-based key: simulates bundled file from resources/lib/tags.star
+            lib/tags.star: |
+              def make_tags(env, team):
+                  return {"environment": env, "team": team, "managed-by": "starlark"}
+
+            # Path-based key: deeper nesting
+            lib/utils/validation.star: |
+              def validate_name(name):
+                  if len(name) == 0:
+                      return "name must not be empty"
+                  if len(name) > 63:
+                      return "name must be <= 63 chars"
+                  return None
+
+            # Flat key alongside path-based keys (coexistence test)
+            shared.star: |
+              shared_version = "1.0"
+
+          source: |
+            # ============================================================
+            # E2E PATH-BASED MODULE KEY TEST
+            # Tests that spec.modules keys with "/" (directory paths) work
+            # via load("lib/naming.star", "fn") syntax.
+            # ============================================================
+
+            # Load from path-based module keys
+            load("lib/naming.star", "resource_name", "prefix")
+            load("lib/tags.star", "make_tags")
+            load("lib/utils/validation.star", "validate_name")
+
+            # Load from flat key (coexistence with path-based keys)
+            load("shared.star", "shared_version")
+
+            # Validate path-based loads work
+            name = resource_name("database", "prod")
+            if name != "acme-database-prod":
+                fatal("path module: resource_name returned %r, want 'acme-database-prod'" % name)
+
+            if prefix != "acme":
+                fatal("path module: prefix should be 'acme', got %r" % prefix)
+
+            tags = make_tags("prod", "platform")
+            if tags["environment"] != "prod":
+                fatal("path module: tags.environment should be 'prod', got %r" % tags["environment"])
+            if tags["team"] != "platform":
+                fatal("path module: tags.team should be 'platform', got %r" % tags["team"])
+
+            # Validate deeper nesting
+            err_empty = validate_name("")
+            if err_empty != "name must not be empty":
+                fatal("path module: validate_name('') should return error, got %r" % err_empty)
+            err_valid = validate_name("valid-name")
+            if err_valid != None:
+                fatal("path module: validate_name('valid-name') should return None, got %r" % err_valid)
+
+            # Validate flat key coexistence
+            if shared_version != "1.0":
+                fatal("path module: shared_version should be '1.0', got %r" % shared_version)
+
+            # All passed
+            Resource("path-module-result", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            set_xr_status("test.pathModulesWorked", True)
+            set_xr_status("test.resourceName", name)
+            set_xr_status("test.tagCount", len(tags))
+            set_xr_status("test.validationWorked", True)
+            set_xr_status("test.sharedVersion", shared_version)
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

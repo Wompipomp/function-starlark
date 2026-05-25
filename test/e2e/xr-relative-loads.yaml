@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-relative-loads
+  labels:
+    e2e-test: relative-loads
+spec:
+  compositionRef:
+    name: relative-loads-test

@@ -126,6 +126,42 @@ crossplane xpkg build -f package --embed-runtime-image=runtime -o function-starl
 echo "==> Pushing xpkg to local registry"
 crossplane xpkg push "localhost:${REGISTRY_PORT}/function-starlark:e2e" -f function-starlark.xpkg
 
+# --- ConfigMap + DeploymentRuntimeConfig for filesystem relative-load test ---
+echo "==> Creating ConfigMap and DeploymentRuntimeConfig for relative-load test"
+kubectl create configmap relative-load-scripts -n crossplane-system \
+    --from-file="$SCRIPT_DIR/fixtures/relative-loads/main.star" \
+    --from-file="$SCRIPT_DIR/fixtures/relative-loads/helper.star" \
+    --from-file="$SCRIPT_DIR/fixtures/relative-loads/utils.star" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl apply -f - <<EOF
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: fn-starlark-e2e
+spec:
+  deploymentTemplate:
+    spec:
+      selector:
+        matchLabels:
+          pkg.crossplane.io/function: function-starlark
+      template:
+        metadata:
+          labels:
+            pkg.crossplane.io/function: function-starlark
+        spec:
+          containers:
+            - name: package-runtime
+              volumeMounts:
+                - name: relative-load-scripts
+                  mountPath: /scripts/relative-load-scripts
+                  readOnly: true
+          volumes:
+            - name: relative-load-scripts
+              configMap:
+                name: relative-load-scripts
+EOF
+
 echo "==> Installing function-starlark"
 kubectl apply -f - <<EOF
 apiVersion: pkg.crossplane.io/v1beta1
@@ -134,6 +170,8 @@ metadata:
   name: function-starlark
 spec:
   package: "${INCLUSTER_REGISTRY}/function-starlark:e2e"
+  runtimeConfigRef:
+    name: fn-starlark-e2e
 EOF
 
 echo "==> Waiting for function-starlark to become healthy"

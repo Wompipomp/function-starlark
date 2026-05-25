@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-path-modules
+  labels:
+    e2e-test: path-modules
+spec:
+  compositionRef:
+    name: path-modules-test

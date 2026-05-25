@@ -1,0 +1,29 @@
+# Composition that exercises filesystem relative-path module loading (MOD-01, MOD-05).
+# Uses scriptConfigRef to load from a ConfigMap-mounted directory, enabling
+# load("./helper.star", ...) resolution via the caller's filesystem path.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: relative-loads-test
+  labels:
+    e2e-test: relative-loads
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-relative-loads
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          usageAPIVersion: "v1"
+          scriptConfigRef:
+            name: relative-load-scripts
+            key: main.star
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

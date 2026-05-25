@@ -207,6 +207,29 @@ func TestRelativeLoad(t *testing.T) {
 	}
 }
 
+func TestE2EFixtures(t *testing.T) {
+	var buf bytes.Buffer
+	if err := testrunner.Run(t, "../test/e2e/fixtures/testrunner", &buf); err != nil {
+		t.Fatalf("e2e testrunner fixtures failed:\n%s", buf.String())
+	}
+	output := buf.String()
+
+	for _, want := range []string{
+		"naming_test.star",
+		"tags_test.star",
+		"networking_test.star",
+		"--- PASS: test_resource_name",
+		"--- PASS: test_standard_tags",
+		"--- PASS: test_vpc_cidr_known_region",
+		"--- PASS: test_vpc_cidr_unknown_region",
+		"--- PASS: test_standard_tags_uses_naming_module",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q, got:\n%s", want, output)
+		}
+	}
+}
+
 func TestNoTestFiles(t *testing.T) {
 	dir := t.TempDir()
 

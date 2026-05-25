@@ -89,6 +89,30 @@ get_status_field() {
     kubectl get "$resource" -o jsonpath="{.status.$path}" 2>/dev/null || echo ""
 }
 
+# ============================================================
+# TEST 0: STARLARK TESTRUNNER (no cluster needed)
+# ============================================================
+log ""
+log "===== TEST 0: STARLARK TESTRUNNER ====="
+
+log "Running testrunner against e2e fixtures..."
+RUNNER_OUTPUT=$(cd "$SCRIPT_DIR/../.." && go test -count=1 -run TestE2EFixtures ./testrunner/ 2>&1) || true
+if echo "$RUNNER_OUTPUT" | grep -q "^ok"; then
+    pass "testrunner: e2e fixtures all pass"
+
+    file_count=$(find "$SCRIPT_DIR/fixtures/testrunner" -name "*_test.star" | wc -l | tr -d ' ')
+    pass "testrunner: discovered $file_count test files"
+
+    if echo "$RUNNER_OUTPUT" | grep -q "test_standard_tags_uses_naming_module"; then
+        pass "testrunner: cross-module loading works (tags.star loads naming.star)"
+    else
+        fail "testrunner: cross-module loading not verified in output"
+    fi
+else
+    fail "testrunner: e2e fixtures failed"
+    echo "$RUNNER_OUTPUT"
+fi
+
 # --- Setup ---
 if [ "$SKIP_SETUP" = false ]; then
     log "Running setup..."
@@ -117,6 +141,7 @@ kubectl apply -f "$SCRIPT_DIR/composition-composite-ready.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-transitive-skip.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-relative-loads.yaml"
 kubectl apply -f "$SCRIPT_DIR/composition-path-modules.yaml"
+kubectl apply -f "$SCRIPT_DIR/composition-bundled-modules.yaml"
 if [ -f "$SCRIPT_DIR/composition-schemas-rendered.yaml" ]; then
     kubectl apply -f "$SCRIPT_DIR/composition-schemas-rendered.yaml"
 else
@@ -616,6 +641,58 @@ else
 fi
 
 # ============================================================
+# TEST 11: BUNDLED MODULES (INTER-MODULE LOADING)
+# ============================================================
+log ""
+log "===== TEST 11: BUNDLED MODULES (INTER-MODULE LOADING) ====="
+
+log "Creating XR for bundled-modules test"
+kubectl apply -f "$SCRIPT_DIR/xr-bundled-modules.yaml"
+
+log "Waiting for bundled-modules XR to become Ready..."
+if wait_for_condition "xtest/test-bundled-modules" "Ready" 120; then
+    pass "bundled-modules: XR reached Ready (inter-module loading worked)"
+else
+    fail "bundled-modules: XR did not reach Ready (inter-module loading may have failed)"
+    kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+fi
+
+bundled_worked=$(get_status_field "xtest/test-bundled-modules" "test.bundledWorked")
+if [ "$bundled_worked" = "true" ]; then
+    pass "bundled-modules: all inter-module loading assertions passed"
+else
+    fail "bundled-modules: bundledWorked='$bundled_worked' (expected true)"
+fi
+
+bundled_name=$(get_status_field "xtest/test-bundled-modules" "test.resourceName")
+if [ "$bundled_name" = "acme-database-production" ]; then
+    pass "bundled-modules: lib/naming.star loaded lib/config.star (diamond dep)"
+else
+    fail "bundled-modules: resourceName='$bundled_name' (expected 'acme-database-production')"
+fi
+
+bundled_cidr=$(get_status_field "xtest/test-bundled-modules" "test.vpcCidr")
+if [ "$bundled_cidr" = "10.0.0.0/16" ]; then
+    pass "bundled-modules: lib/networking.star loaded lib/config.star"
+else
+    fail "bundled-modules: vpcCidr='$bundled_cidr' (expected '10.0.0.0/16')"
+fi
+
+bundled_tag_name=$(get_status_field "xtest/test-bundled-modules" "test.tagName")
+if [ "$bundled_tag_name" = "acme-api-production" ]; then
+    pass "bundled-modules: lib/tags.star loaded both lib/config.star and lib/naming.star (transitive chain)"
+else
+    fail "bundled-modules: tagName='$bundled_tag_name' (expected 'acme-api-production')"
+fi
+
+bundled_tag_count=$(get_status_field "xtest/test-bundled-modules" "test.tagCount")
+if [ "$bundled_tag_count" = "4" ]; then
+    pass "bundled-modules: standard_tags() returned all 4 tags"
+else
+    fail "bundled-modules: tagCount='$bundled_tag_count' (expected 4)"
+fi
+
+# ============================================================
 # TEST 7: DEPENDS_ON (CREATION SEQUENCING)
 # ============================================================
 log ""
@@ -957,6 +1034,7 @@ kubectl delete xtest test-schemas --wait=false 2>/dev/null || true
 kubectl delete xtest test-star-imports --wait=false 2>/dev/null || true
 kubectl delete xtest test-relative-loads --wait=false 2>/dev/null || true
 kubectl delete xtest test-path-modules --wait=false 2>/dev/null || true
+kubectl delete xtest test-bundled-modules --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-gate --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-optional --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-explicit --wait=false 2>/dev/null || true

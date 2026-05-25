@@ -1,0 +1,100 @@
+# Composition that tests inter-module loading between path-based module keys.
+# Modules load from each other via load("lib/other.star", "fn").
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: bundled-modules-test
+  labels:
+    e2e-test: bundled-modules
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-bundled-modules
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          usageAPIVersion: "v1"
+          modules:
+            # Base config module — no dependencies
+            lib/config.star: |
+              ENV = "production"
+              REGION = "eu-west-1"
+              PROJECT = "acme"
+
+            # Naming module — loads from lib/config.star
+            lib/naming.star: |
+              load("lib/config.star", "PROJECT", "ENV")
+              def resource_name(component):
+                  return PROJECT + "-" + component + "-" + ENV
+
+            # Networking module — loads from lib/config.star (diamond with naming)
+            lib/networking.star: |
+              load("lib/config.star", "REGION")
+              CIDRS = {
+                  "eu-west-1": "10.0.0.0/16",
+                  "us-east-1": "10.1.0.0/16",
+              }
+              def vpc_cidr():
+                  return CIDRS.get(REGION, "10.99.0.0/16")
+
+            # Tags module — loads from both config and naming (transitive chain)
+            lib/tags.star: |
+              load("lib/config.star", "ENV", "REGION")
+              load("lib/naming.star", "resource_name")
+              def standard_tags(component):
+                  return {
+                      "Name": resource_name(component),
+                      "Environment": ENV,
+                      "Region": REGION,
+                      "ManagedBy": "starlark",
+                  }
+
+          source: |
+            load("lib/naming.star", "resource_name")
+            load("lib/networking.star", "vpc_cidr")
+            load("lib/tags.star", "standard_tags")
+            load("lib/config.star", "ENV", "REGION")
+
+            name = resource_name("database")
+            if name != "acme-database-production":
+                fatal("bundled: resource_name returned %r, want 'acme-database-production'" % name)
+
+            cidr = vpc_cidr()
+            if cidr != "10.0.0.0/16":
+                fatal("bundled: vpc_cidr returned %r, want '10.0.0.0/16'" % cidr)
+
+            tags = standard_tags("api")
+            if tags["Name"] != "acme-api-production":
+                fatal("bundled: tags.Name=%r, want 'acme-api-production'" % tags["Name"])
+            if tags["Region"] != "eu-west-1":
+                fatal("bundled: tags.Region=%r, want 'eu-west-1'" % tags["Region"])
+            if tags["ManagedBy"] != "starlark":
+                fatal("bundled: tags.ManagedBy=%r, want 'starlark'" % tags["ManagedBy"])
+
+            Resource("bundled-result", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            })
+
+            set_xr_status("test.bundledWorked", True)
+            set_xr_status("test.resourceName", name)
+            set_xr_status("test.vpcCidr", cidr)
+            set_xr_status("test.tagName", tags["Name"])
+            set_xr_status("test.tagCount", len(tags))
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready
