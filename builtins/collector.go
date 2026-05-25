@@ -160,8 +160,7 @@ func (r *SkippedRef) Hash() (uint32, error) {
 }
 
 func (r *SkippedRef) Attr(name string) (starlark.Value, error) {
-	switch name {
-	case "name":
+	if name == "name" {
 		return starlark.String(r.name), nil
 	}
 	return nil, nil
@@ -550,10 +549,7 @@ func (c *Collector) resourceFn(
 
 	// Gate defaults to true (skip blocks composite readiness). Only
 	// When(optional=True) with condition=False makes a skip non-gating.
-	gate := true
-	if w != nil && !w.condition && w.optional {
-		gate = false
-	}
+	gate := w == nil || w.condition || !w.optional
 
 	// GATE-01: when provided and condition=false, keep_if_exists=false -> skip.
 	if w != nil && !w.condition && !w.keepIfExists {

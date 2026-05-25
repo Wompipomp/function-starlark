@@ -1591,7 +1591,7 @@ func TestRelativeLoadSibling(t *testing.T) {
 func TestRelativeLoadSubdir(t *testing.T) {
 	dir := t.TempDir()
 	subDir := filepath.Join(dir, "sub")
-	if err := os.MkdirAll(subDir, 0o755); err != nil {
+	if err := os.MkdirAll(subDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(subDir, "helpers.star"), []byte(`y = 99`), 0o600); err != nil {

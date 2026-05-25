@@ -12,11 +12,11 @@ import (
 
 func copyFixture(t *testing.T, dst, name string) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", name))
+	data, err := os.ReadFile(filepath.Join("testdata", name)) //nolint:gosec // test fixture paths are static
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dst, filepath.Base(name)), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dst, filepath.Base(name)), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -80,14 +80,14 @@ func TestDiscoveryRecursive(t *testing.T) {
 	dir := t.TempDir()
 	copyFixture(t, dir, "pass_test.star")
 	subdir := filepath.Join(dir, "subdir")
-	if err := os.MkdirAll(subdir, 0o755); err != nil {
+	if err := os.MkdirAll(subdir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join("testdata", "subdir", "nested_test.star"))
+	data, err := os.ReadFile(filepath.Join("testdata", "subdir", "nested_test.star")) //nolint:gosec // test fixture path
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(subdir, "nested_test.star"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(subdir, "nested_test.star"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +110,7 @@ func TestOutputFormat(t *testing.T) {
 	copyFixture(t, dir, "pass_test.star")
 
 	var buf bytes.Buffer
-	testrunner.Run(t, dir, &buf)
+	_ = testrunner.Run(t, dir, &buf)
 	output := buf.String()
 
 	if !strings.Contains(output, "# pass_test.star") {

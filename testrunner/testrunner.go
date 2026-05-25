@@ -59,7 +59,7 @@ func Run(_ *testing.T, dir string, w io.Writer) error {
 			return fmt.Errorf("resolving absolute path for %s: %w", testFile, err)
 		}
 
-		fmt.Fprintf(w, "# %s\n", filepath.Base(testFile))
+		_, _ = fmt.Fprintf(w, "# %s\n", filepath.Base(testFile))
 
 		// Fresh ModuleLoader per file (TEST-09).
 		loader := runtime.NewModuleLoader(nil, []string{filepath.Dir(absPath)}, predeclared, rt, "")
@@ -82,7 +82,7 @@ func Run(_ *testing.T, dir string, w io.Writer) error {
 
 		globals, execErr := starlark.ExecFileOptions(fileOptions(), thread, absPath, nil, predeclared)
 		if execErr != nil {
-			fmt.Fprintf(w, "FAIL  %s\n    %s\n", filepath.Base(testFile), execErr)
+			_, _ = fmt.Fprintf(w, "FAIL  %s\n    %s\n", filepath.Base(testFile), execErr)
 			totalFail++
 			continue
 		}
@@ -100,7 +100,7 @@ func Run(_ *testing.T, dir string, w io.Writer) error {
 				continue
 			}
 			if fn.NumParams() > 0 {
-				fmt.Fprintf(w, "  SKIP  %s (has parameters)\n", name)
+				_, _ = fmt.Fprintf(w, "  SKIP  %s (has parameters)\n", name)
 				continue
 			}
 			tests = append(tests, testFunc{name: name, fn: fn, line: fn.Position().Line})
@@ -112,29 +112,29 @@ func Run(_ *testing.T, dir string, w io.Writer) error {
 		for _, tf := range tests {
 			reporter.reset()
 			start := time.Now()
-			fmt.Fprintf(w, "=== RUN   %s\n", tf.name)
+			_, _ = fmt.Fprintf(w, "=== RUN   %s\n", tf.name)
 
 			_, callErr := starlark.Call(thread, tf.fn, nil, nil)
 			elapsed := time.Since(start)
 
-			if callErr != nil {
-				// Runtime error (not assert failure).
+			switch {
+			case callErr != nil:
 				var evalErr *starlark.EvalError
 				if errors.As(callErr, &evalErr) {
-					fmt.Fprintf(w, "    %s\n", evalErr.Backtrace())
+					_, _ = fmt.Fprintf(w, "    %s\n", evalErr.Backtrace())
 				} else {
-					fmt.Fprintf(w, "    %s\n", callErr)
+					_, _ = fmt.Fprintf(w, "    %s\n", callErr)
 				}
-				fmt.Fprintf(w, "%s\n", red(fmt.Sprintf("--- FAIL: %s (%.2fs)", tf.name, elapsed.Seconds()), color))
+				_, _ = fmt.Fprintf(w, "%s\n", red(fmt.Sprintf("--- FAIL: %s (%.2fs)", tf.name, elapsed.Seconds()), color))
 				totalFail++
-			} else if reporter.failed {
+			case reporter.failed:
 				for _, e := range reporter.errors {
-					fmt.Fprintf(w, "    %s\n", e)
+					_, _ = fmt.Fprintf(w, "    %s\n", e)
 				}
-				fmt.Fprintf(w, "%s\n", red(fmt.Sprintf("--- FAIL: %s (%.2fs)", tf.name, elapsed.Seconds()), color))
+				_, _ = fmt.Fprintf(w, "%s\n", red(fmt.Sprintf("--- FAIL: %s (%.2fs)", tf.name, elapsed.Seconds()), color))
 				totalFail++
-			} else {
-				fmt.Fprintf(w, "%s\n", green(fmt.Sprintf("--- PASS: %s (%.2fs)", tf.name, elapsed.Seconds()), color))
+			default:
+				_, _ = fmt.Fprintf(w, "%s\n", green(fmt.Sprintf("--- PASS: %s (%.2fs)", tf.name, elapsed.Seconds()), color))
 				totalPass++
 			}
 		}
@@ -143,10 +143,10 @@ func Run(_ *testing.T, dir string, w io.Writer) error {
 	// Summary.
 	total := totalPass + totalFail
 	if totalFail > 0 {
-		fmt.Fprintf(w, "%s\t%d tests: %d passed, %d failed\n", red("FAIL", color), total, totalPass, totalFail)
+		_, _ = fmt.Fprintf(w, "%s\t%d tests: %d passed, %d failed\n", red("FAIL", color), total, totalPass, totalFail)
 		return fmt.Errorf("%d of %d tests failed", totalFail, total)
 	}
-	fmt.Fprintf(w, "%s\t%d tests passed\n", green("ok", color), total)
+	_, _ = fmt.Fprintf(w, "%s\t%d tests passed\n", green("ok", color), total)
 	return nil
 }
 

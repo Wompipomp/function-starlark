@@ -143,8 +143,8 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 			parent = strings.TrimSuffix(thread.Name, starImportScanSuffix)
 		}
 
-		if strings.HasPrefix(parent, "oci://") {
-			// OCI package-local: existing behavior (unchanged).
+		switch {
+		case strings.HasPrefix(parent, "oci://"):
 			if !oci.IsPackageLocalTarget(module) {
 				return nil, fmt.Errorf(
 					"OCI package-local load %q must be a flat sibling (no subdirectories)",
@@ -160,7 +160,7 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 				return nil, err
 			}
 			module = expanded
-		} else if isFilesystemCaller(parent) {
+		case isFilesystemCaller(parent):
 			// Filesystem relative resolution.
 			if !isFilesystemRelativeTarget(module) {
 				return nil, fmt.Errorf("relative load %q must end with .star", module)
@@ -247,12 +247,11 @@ func (m *ModuleLoader) load(thread *starlark.Thread, module string) (starlark.St
 			e := &moduleEntry{exported, nil}
 			m.cache[resolved] = e
 			return e.globals, nil
-		} else {
-			// Inline caller -- no directory context.
+		default:
 			return nil, fmt.Errorf(
 				"relative load %q requires a filesystem-sourced module; "+
 					"inline modules have no directory context. "+
-					"Use a flat module name or move to a ConfigMap.",
+					"Use a flat module name or move to a ConfigMap",
 				module,
 			)
 		}
@@ -448,8 +447,8 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 
 		// Relative ./ handling: dispatch based on caller type.
 		if strings.HasPrefix(mod, "./") {
-			if strings.HasPrefix(filename, "oci://") {
-				// Existing OCI package-local expansion (unchanged).
+			switch {
+			case strings.HasPrefix(filename, "oci://"):
 				if !oci.IsPackageLocalTarget(mod) {
 					return "", fmt.Errorf("OCI package-local load %q must be a flat sibling", mod)
 				}
@@ -463,9 +462,7 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 				}
 				mod = expanded
 				loadMod = mod
-			} else if isFilesystemCaller(filename) {
-				// Filesystem relative: resolve to absolute path for export
-				// scanning but keep the original ./ path for the load statement.
+			case isFilesystemCaller(filename):
 				callerDir := filepath.Dir(filename)
 				relPath := mod[2:]
 				if !filepath.IsLocal(relPath) {
@@ -475,11 +472,10 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 					)
 				}
 				mod = filepath.Join(callerDir, relPath)
-				// loadMod stays as the original "./..." relative path.
-			} else {
+			default:
 				return "", fmt.Errorf(
 					"relative load %q requires a filesystem-sourced module; "+
-						"inline modules have no directory context.",
+						"inline modules have no directory context",
 					mod,
 				)
 			}
