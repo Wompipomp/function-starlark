@@ -16,7 +16,7 @@ func copyFixture(t *testing.T, dst, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dst, filepath.Base(name)), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dst, filepath.Base(name)), data, 0o600); err != nil { //nolint:gosec // test writes to t.TempDir
 		t.Fatal(err)
 	}
 }
@@ -87,7 +87,7 @@ func TestDiscoveryRecursive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(subdir, "nested_test.star"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(subdir, "nested_test.star"), data, 0o600); err != nil { //nolint:gosec // test writes to t.TempDir
 		t.Fatal(err)
 	}
 
