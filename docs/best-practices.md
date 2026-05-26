@@ -36,14 +36,15 @@ prematurely while a dependency is still pending.
 
 ```python
 # GATES the XR -- XR stays Ready=False until the cluster is ready.
+# When() signature: When(condition, reason, keep_if_exists, optional=False)
 Resource("db-replica", replica_body,
-    when=cluster_ready,
-    skip_reason="waiting for cluster to provision")
+    when=When(cluster_ready, "waiting for cluster to provision", keep_if_exists=False))
 ```
 
 For resources that are *expected* to be absent under some configurations
 (feature flags, tier-gated add-ons, environment opt-ins), use
-`optional=True` on `When()` so the absence does not block the XR:
+`optional=True` on `When()` so the absence does not block the XR.
+`optional` defaults to `False` (skip gates readiness):
 
 ```python
 Resource("monitoring", {
@@ -648,10 +649,10 @@ Skip a resource when a feature is disabled. Replaces wrapping `Resource()` in
 `if/else` blocks with `skip_resource()`:
 
 ```python
-# Skip resource when feature is disabled
+# Skip resource when feature is disabled (gates XR by default; use optional=True to opt out)
 feature_enabled = get(oxr, "spec.features.monitoring", False)
 Resource("monitoring-stack", monitoring_body,
-    when=feature_enabled, skip_reason="monitoring disabled in spec")
+    when=When(feature_enabled, "monitoring disabled in spec", keep_if_exists=False))
 ```
 
 **(b) Cliff guard with preserve_observed:**

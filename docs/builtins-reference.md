@@ -311,15 +311,17 @@ patterns. It accepts only a `When()` struct (bare bools are rejected with a
 helpful error). The `when` gate is evaluated first (before body type-checking),
 so when `When(False, ...)` the body kwarg is ignored.
 
-| `when` | `body` | `keep_if_exists` | Behavior |
-|--------|--------|------------------|----------|
-| omitted | dict | n/a | **Normal:** emit body |
-| omitted | None | n/a | **Warn + skip:** body is None |
-| When(True, ...) | dict | any | **Normal:** emit body (When is satisfied) |
-| When(True, ...) | None | any | **Warn + skip:** condition met but body is None |
-| When(False, ..., False) | dict/None | n/a | **Skip:** resource not emitted; Warning event with reason |
-| When(False, ..., True) | any | observed found | **Preserve:** emit observed body verbatim |
-| When(False, ..., True) | any | observed missing | **Skip:** not found in observed state |
+| `when` | `body` | `keep_if_exists` | `optional` | Behavior |
+|--------|--------|------------------|------------|----------|
+| omitted | dict | n/a | n/a | **Normal:** emit body |
+| omitted | None | n/a | n/a | **Warn + skip:** body is None |
+| When(True, ...) | dict | any | any | **Normal:** emit body (When is satisfied) |
+| When(True, ...) | None | any | any | **Warn + skip:** condition met but body is None |
+| When(False, ..., False, optional=False) | dict/None | n/a | default | **Skip + gate:** resource not emitted; Warning event with reason; XR `Ready=False` |
+| When(False, ..., False, optional=True) | dict/None | n/a | opted out | **Skip (non-gating):** resource not emitted; Warning event with reason; XR readiness unchanged |
+| When(False, ..., True) | any | observed found | any | **Preserve:** emit observed body verbatim |
+| When(False, ..., True, optional=False) | any | observed missing | default | **Skip + gate:** not found in observed state; XR `Ready=False` |
+| When(False, ..., True, optional=True) | any | observed missing | opted out | **Skip (non-gating):** not found in observed state; XR readiness unchanged |
 
 **Events emitted:**
 

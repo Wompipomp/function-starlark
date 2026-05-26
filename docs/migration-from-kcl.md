@@ -57,8 +57,9 @@ function-starlark provides these predeclared globals:
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
+| `When` | `When(condition, reason, keep_if_exists, optional=False)` | Create a gating struct for `Resource(when=...)`. `optional=False` (default) means a skip gates composite readiness; `optional=True` makes the skip non-gating. KCL has no equivalent. |
 | `Resource` | `Resource(name, body, ready=None, labels=None_or_dict, connection_details=None, depends_on=None, external_name=None, when=None)` | Register a desired composed resource; returns ResourceRef. `depends_on` accepts ResourceRef, string, or `(ref, "field.path")` tuple. `When(condition=False)` auto-gates the XR to Ready=False (opt-out with `When(optional=True)`). |
-| `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason. Pure observability -- does NOT gate the XR. For new code prefer `Resource(when=False, skip_reason=...)` which also handles composite-readiness gating. |
+| `skip_resource` | `skip_resource(name, reason)` | Remove a resource from desired state with a reason. Pure observability -- does NOT gate the XR. For new code prefer `Resource(when=When(...))` which also handles composite-readiness gating. |
 | `get` | `get(obj, path, default=None)` | Safe nested dict access with dot-path or list-of-keys |
 | `set_condition` | `set_condition(type, status, reason, message, target="Composite")` | Set an XR condition |
 | `emit_event` | `emit_event(severity, message, target="Composite")` | Emit a Normal or Warning event |

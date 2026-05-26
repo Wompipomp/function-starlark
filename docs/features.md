@@ -232,13 +232,13 @@ skipped resources and their skip reasons:
 ```python
 # XR stays Ready=False until the cluster is ready and this Resource can be rendered.
 Resource("db-replica", replica_body,
-    when=cluster_ready,
-    skip_reason="waiting for cluster to provision")
+    when=When(cluster_ready, "waiting for cluster to provision", keep_if_exists=False))
 ```
 
 Set `optional=True` on `When()` for resources that are *expected* to be absent
 under certain configurations (feature flags, tier-gated add-ons); such skips
-are still recorded as Warning events but do not gate the XR:
+are still recorded as Warning events but do not gate the XR. `optional`
+defaults to `False`, meaning skips gate composite readiness:
 
 ```python
 # Absent by design -- the XR should still reach Ready.
