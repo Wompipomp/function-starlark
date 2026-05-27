@@ -174,8 +174,23 @@ func (s *MutableStruct) AttrNames() []string {
 
 // --- starlark.HasSetField ---
 
-// SetField sets (or adds) a field by name. Returns an error if frozen.
+// SetField sets (or adds) a field by name. When a schema is attached,
+// the value is validated against the schema's field descriptor before
+// storage (validate-before-store). Returns an error if frozen or if
+// validation fails.
 func (s *MutableStruct) SetField(name string, val starlark.Value) error {
+	if s.schema != nil {
+		processedVal, err := s.schema.ValidateMutation(name, val)
+		if err != nil {
+			return err
+		}
+		// nil processedVal = None on optional-without-default = delete key.
+		if processedVal == nil {
+			s.d.Delete(starlark.String(name))
+			return nil
+		}
+		return s.d.SetKey(starlark.String(name), processedVal)
+	}
 	return s.d.SetKey(starlark.String(name), val)
 }
 
