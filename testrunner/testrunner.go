@@ -178,7 +178,8 @@ func purePredeclared() starlark.StringDict {
 		"schema":   schema.SchemaBuiltin(),
 		"field":    schema.FieldBuiltin(),
 		"struct":   starlark.NewBuiltin("struct", starlarkstruct.Make),
-		"get":      builtins.GetBuiltin(),
+		"get":            builtins.GetBuiltin(),
+		"mutable_struct": starlark.NewBuiltin("mutable_struct", builtins.MakeMutableStruct),
 	}
 }
 

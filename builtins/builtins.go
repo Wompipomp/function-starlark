@@ -120,6 +120,7 @@ func BuildGlobals(
 		"field":            schema.FieldBuiltin(),
 		"struct":           starlark.NewBuiltin("struct", starlarkstruct.Make),
 		"json":             starlarkjson.Module,
+		"mutable_struct":   starlark.NewBuiltin("mutable_struct", MakeMutableStruct),
 		"crypto":           CryptoModule,
 		"encoding":         EncodingModule,
 		"dict":             DictModule,

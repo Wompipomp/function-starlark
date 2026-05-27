@@ -74,6 +74,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"set_connection_details", "require_extra_resource", "require_extra_resources",
 		"get_label", "get_annotation", "set_xr_status", "get_observed",
 		"schema", "field", "struct", "json", "crypto", "encoding", "dict",
+		"mutable_struct",
 		"regex", "yaml",
 		"get_extra_resource", "get_extra_resources",
 		"is_observed", "observed_body", "get_condition",
