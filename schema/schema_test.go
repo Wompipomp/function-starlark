@@ -1403,6 +1403,319 @@ func TestPluralS(t *testing.T) {
 	}
 }
 
+// --- ValidateFields / ValidateMutation / FieldNames export tests (SCHM-08) ---
+
+func TestValidateFieldsDelegatesToPrivate(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	result, errs := s.ValidateFields([]starlark.Tuple{kv("name", starlark.String("hello"))}, "")
+	if len(errs) > 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	v, found, _ := result.Get(starlark.String("name"))
+	if !found {
+		t.Fatal("name not found")
+	}
+	if v.(starlark.String) != "hello" {
+		t.Errorf("name = %v, want hello", v)
+	}
+}
+
+func TestValidateFieldsReturnsErrors(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	_, errs := s.ValidateFields(nil, "")
+	if len(errs) == 0 {
+		t.Fatal("expected validation errors for missing required field")
+	}
+	if !strings.Contains(errs[0], "name: required field missing") {
+		t.Errorf("error = %q, want contains 'name: required field missing'", errs[0])
+	}
+}
+
+func TestFieldNamesReturnsOrder(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name":   testField("string", true, starlark.None, nil),
+			"region": testField("string", false, starlark.None, nil),
+		},
+		order: []string{"name", "region"},
+	}
+
+	names := s.FieldNames()
+	if len(names) != 2 || names[0] != "name" || names[1] != "region" {
+		t.Errorf("FieldNames() = %v, want [name region]", names)
+	}
+}
+
+func TestValidateMutationUnknownField(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	_, err := s.ValidateMutation("naem", starlark.String("x"))
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+	if !strings.Contains(err.Error(), `did you mean "name"`) {
+		t.Errorf("error = %v, want contains 'did you mean \"name\"'", err)
+	}
+}
+
+func TestValidateMutationTypeMismatch(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	_, err := s.ValidateMutation("name", starlark.MakeInt(123))
+	if err == nil {
+		t.Fatal("expected error for type mismatch")
+	}
+	if !strings.Contains(err.Error(), "expected string, got int") {
+		t.Errorf("error = %v, want contains 'expected string, got int'", err)
+	}
+}
+
+func TestValidateMutationEnumViolation(t *testing.T) {
+	enum := starlark.NewList([]starlark.Value{starlark.String("active"), starlark.String("inactive")})
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"status": testField("string", false, starlark.None, enum),
+		},
+		order: []string{"status"},
+	}
+
+	_, err := s.ValidateMutation("status", starlark.String("bad"))
+	if err == nil {
+		t.Fatal("expected error for enum violation")
+	}
+	if !strings.Contains(err.Error(), "not in enum") {
+		t.Errorf("error = %v, want contains 'not in enum'", err)
+	}
+}
+
+func TestValidateMutationNoneOnRequired(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	_, err := s.ValidateMutation("name", starlark.None)
+	if err == nil {
+		t.Fatal("expected error for None on required field")
+	}
+	if !strings.Contains(err.Error(), "required field cannot be set to None") {
+		t.Errorf("error = %v, want contains 'required field cannot be set to None'", err)
+	}
+}
+
+func TestValidateMutationNoneOnOptionalWithDefault(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", false, starlark.String("us"), nil),
+		},
+		order: []string{"region"},
+	}
+
+	val, err := s.ValidateMutation("region", starlark.None)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should return the default value.
+	if val != starlark.String("us") {
+		t.Errorf("val = %v, want \"us\" (default)", val)
+	}
+}
+
+func TestValidateMutationNoneOnOptionalWithoutDefault(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", false, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	val, err := s.ValidateMutation("region", starlark.None)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should return nil to signal "delete key".
+	if val != nil {
+		t.Errorf("val = %v, want nil (delete key)", val)
+	}
+}
+
+func TestValidateMutationValidValuePassthrough(t *testing.T) {
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	val, err := s.ValidateMutation("name", starlark.String("hello"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != starlark.String("hello") {
+		t.Errorf("val = %v, want \"hello\"", val)
+	}
+}
+
+func TestValidateMutationNestedDict(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	plainDict := makeDict(kv("region", starlark.String("westeurope")))
+	val, err := s.ValidateMutation("location", plainDict)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should return a SchemaDict wrapping the validated dict.
+	sd, ok := val.(*SchemaDict)
+	if !ok {
+		t.Fatalf("val is %T, want *SchemaDict", val)
+	}
+	if sd.SchemaName() != "Location" {
+		t.Errorf("SchemaName() = %q, want \"Location\"", sd.SchemaName())
+	}
+}
+
+func TestValidateMutationNestedDictInvalid(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	// Empty dict missing required region.
+	val, err := s.ValidateMutation("location", makeDict())
+	if err == nil {
+		t.Fatal("expected error for invalid nested dict")
+	}
+	if val != nil {
+		t.Errorf("val should be nil on error, got %v", val)
+	}
+}
+
+func TestValidateMutationNestedSchemaDictPassthrough(t *testing.T) {
+	inner := &SchemaCallable{
+		name: "Location",
+		fields: map[string]*FieldDescriptor{
+			"region": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"region"},
+	}
+
+	s := &SchemaCallable{
+		name: "Account",
+		fields: map[string]*FieldDescriptor{
+			"location": testFieldWithSchema(inner, true),
+		},
+		order: []string{"location"},
+	}
+
+	// Pre-validated SchemaDict should pass through unchanged.
+	existing := NewSchemaDict(inner, makeDict(kv("region", starlark.String("west"))))
+	val, err := s.ValidateMutation("location", existing)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if val != existing {
+		t.Error("expected SchemaDict to pass through unchanged")
+	}
+}
+
+func TestValidateMutationListWithSchemaItems(t *testing.T) {
+	item := &SchemaCallable{
+		name: "Container",
+		fields: map[string]*FieldDescriptor{
+			"name": testField("string", true, starlark.None, nil),
+		},
+		order: []string{"name"},
+	}
+
+	s := &SchemaCallable{
+		name: "PodSpec",
+		fields: map[string]*FieldDescriptor{
+			"containers": testFieldWithItems(item),
+		},
+		order: []string{"containers"},
+	}
+
+	c1 := makeDict(kv("name", starlark.String("web")))
+	val, err := s.ValidateMutation("containers", starlark.NewList([]starlark.Value{c1}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should return a list with wrapped SchemaDicts.
+	list, ok := val.(*starlark.List)
+	if !ok {
+		t.Fatalf("val is %T, want *starlark.List", val)
+	}
+	if list.Len() != 1 {
+		t.Fatalf("list.Len() = %d, want 1", list.Len())
+	}
+	elem, ok := list.Index(0).(*SchemaDict)
+	if !ok {
+		t.Fatalf("element is %T, want *SchemaDict", list.Index(0))
+	}
+	if elem.SchemaName() != "Container" {
+		t.Errorf("SchemaName() = %q, want \"Container\"", elem.SchemaName())
+	}
+}
+
 // Existing flat behavior unchanged (backward compat).
 func TestConstructorFlatSchemaUnchanged(t *testing.T) {
 	s := &SchemaCallable{
