@@ -673,7 +673,7 @@ func TestMutableStructSchemaUnknownFieldSuggestion(t *testing.T) {
 		&starlark.Thread{}, &starlark.Builtin{}, nil,
 		[]starlark.Tuple{
 			{starlark.String("schema"), sc},
-			{starlark.String("naem"), starlark.String("x")},
+			{starlark.String("nam"), starlark.String("x")},
 		},
 	)
 	if err == nil {
@@ -717,7 +717,7 @@ func TestMutableStructSchemaMultiError(t *testing.T) {
 		&starlark.Thread{}, &starlark.Builtin{}, nil,
 		[]starlark.Tuple{
 			{starlark.String("schema"), sc},
-			{starlark.String("naem"), starlark.String("x")},
+			{starlark.String("zzz"), starlark.String("x")},
 			{starlark.String("count"), starlark.String("bad")},
 		},
 	)
@@ -729,8 +729,8 @@ func TestMutableStructSchemaMultiError(t *testing.T) {
 	if !strings.Contains(errStr, "MySchema:") {
 		t.Errorf("error should name schema: %s", errStr)
 	}
-	if !strings.Contains(errStr, "naem: unknown field") {
-		t.Errorf("error should contain unknown field for naem: %s", errStr)
+	if !strings.Contains(errStr, "zzz: unknown field") {
+		t.Errorf("error should contain unknown field for zzz: %s", errStr)
 	}
 	if !strings.Contains(errStr, "count: expected int") {
 		t.Errorf("error should contain type error for count: %s", errStr)

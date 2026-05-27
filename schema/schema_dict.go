@@ -120,9 +120,16 @@ func (sd *SchemaDict) AttrNames() []string {
 // field is unknown or the value fails validation.
 func (sd *SchemaDict) SetField(name string, val starlark.Value) error {
 	if sd.schema != nil {
-		if err := sd.validateMutation(name, val); err != nil {
+		processedVal, err := sd.schema.ValidateMutation(name, val)
+		if err != nil {
 			return err
 		}
+		// nil value signals "delete key" (None on optional without default).
+		if processedVal == nil {
+			_, _, _ = sd.dict.Delete(starlark.String(name))
+			return nil
+		}
+		return sd.dict.SetKey(starlark.String(name), processedVal)
 	}
 	return sd.dict.SetKey(starlark.String(name), val)
 }
@@ -134,83 +141,19 @@ func (sd *SchemaDict) SetField(name string, val starlark.Value) error {
 func (sd *SchemaDict) SetKey(k, v starlark.Value) error {
 	if sd.schema != nil {
 		if s, ok := k.(starlark.String); ok {
-			if err := sd.validateMutation(string(s), v); err != nil {
+			processedVal, err := sd.schema.ValidateMutation(string(s), v)
+			if err != nil {
 				return err
 			}
+			// nil value signals "delete key" (None on optional without default).
+			if processedVal == nil {
+				_, _, _ = sd.dict.Delete(k)
+				return nil
+			}
+			return sd.dict.SetKey(k, processedVal)
 		}
 	}
 	return sd.dict.SetKey(k, v)
-}
-
-// validateMutation checks a single field assignment against the schema.
-// It validates: unknown fields, type mismatches, enum violations, and
-// nested schema compatibility. It does NOT check required (only relevant
-// at construction time).
-func (sd *SchemaDict) validateMutation(name string, val starlark.Value) error {
-	fd, ok := sd.schema.fields[name]
-	if !ok {
-		return fmt.Errorf("%s: %s", sd.schema.name, unknownFieldError(name, sd.schema.order))
-	}
-
-	// None is allowed — it removes/clears the field.
-	if val == starlark.None {
-		return nil
-	}
-
-	// Nested schema validation.
-	if fd.schema != nil {
-		switch v := val.(type) {
-		case *SchemaDict:
-			_ = v // Already validated at construction.
-		case *starlark.Dict:
-			_, subErrs := fd.schema.validateFields(v.Items(), name)
-			if len(subErrs) > 0 {
-				return fmt.Errorf("%s.%s", sd.schema.name, subErrs[0])
-			}
-		default:
-			return fmt.Errorf("%s.%s: expected %s or dict, got %s",
-				sd.schema.name, name, fd.schema.name, val.Type())
-		}
-		return nil
-	}
-
-	// List items validation.
-	if fd.items != nil && fd.typeName == "list" {
-		list, ok := val.(*starlark.List)
-		if !ok {
-			return fmt.Errorf("%s.%s: expected list, got %s", sd.schema.name, name, val.Type())
-		}
-		for i := 0; i < list.Len(); i++ {
-			elem := list.Index(i)
-			elemPath := fmt.Sprintf("%s[%d]", name, i)
-			switch v := elem.(type) {
-			case *SchemaDict:
-				_ = v // Already validated.
-			case *starlark.Dict:
-				_, subErrs := fd.items.validateFields(v.Items(), elemPath)
-				if len(subErrs) > 0 {
-					return fmt.Errorf("%s.%s", sd.schema.name, subErrs[0])
-				}
-			default:
-				return fmt.Errorf("%s.%s: expected %s or dict, got %s",
-					sd.schema.name, elemPath, fd.items.name, elem.Type())
-			}
-		}
-		return nil
-	}
-
-	// Primitive type check.
-	if fd.typeName != "" && !CheckType(val, fd.typeName) {
-		return fmt.Errorf("%s.%s: expected %s, got %s (%s)",
-			sd.schema.name, name, fd.typeName, val.Type(), val.String())
-	}
-
-	// Enum check.
-	if fd.enum != nil && !checkEnum(val, fd.enum) {
-		return fmt.Errorf("%s.%s", sd.schema.name, formatEnumError(name, val, fd.enum))
-	}
-
-	return nil
 }
 
 // --- starlark.Mapping ---

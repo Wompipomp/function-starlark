@@ -7,6 +7,8 @@ import (
 
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+
+	"github.com/wompipomp/function-starlark/schema"
 )
 
 // Compile-time interface compliance checks.
@@ -22,23 +24,59 @@ var (
 // reassignment via dot-access while unfrozen. Internally backed by a
 // *starlark.Dict for free freeze/mutation semantics.
 type MutableStruct struct {
-	d *starlark.Dict
+	d      *starlark.Dict
+	schema *schema.SchemaCallable // nil when no schema attached
 }
 
 // MakeMutableStruct is the Starlark built-in constructor for mutable_struct.
 // It accepts keyword-only arguments (no positional args) and returns a new
-// MutableStruct with those fields set.
+// MutableStruct with those fields set. When schema= is provided, all fields
+// are validated against the schema at construction time.
 func MakeMutableStruct(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	if len(args) > 0 {
 		return nil, fmt.Errorf("mutable_struct: unexpected positional arguments")
 	}
-	d := new(starlark.Dict)
+
+	// Extract schema= kwarg if present.
+	var sc *schema.SchemaCallable
+	var fieldKwargs []starlark.Tuple
 	for _, kv := range kwargs {
+		if string(kv[0].(starlark.String)) == "schema" {
+			var ok bool
+			sc, ok = kv[1].(*schema.SchemaCallable)
+			if !ok {
+				return nil, fmt.Errorf("mutable_struct: schema= must be a schema(), got %s", kv[1].Type())
+			}
+			continue
+		}
+		fieldKwargs = append(fieldKwargs, kv)
+	}
+
+	// Schema-backed construction: validate all fields.
+	if sc != nil {
+		result, errs := sc.ValidateFields(fieldKwargs, "")
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("%s: %d validation error%s:\n- %s",
+				sc.Name(), len(errs), pluralS(len(errs)), strings.Join(errs, "\n- "))
+		}
+		return &MutableStruct{d: result, schema: sc}, nil
+	}
+
+	// Non-schema path: store kwargs as-is.
+	d := new(starlark.Dict)
+	for _, kv := range fieldKwargs {
 		if err := d.SetKey(kv[0], kv[1]); err != nil {
 			return nil, err
 		}
 	}
 	return &MutableStruct{d: d}, nil
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // InternalDict returns the underlying *starlark.Dict for pipeline integration.
@@ -98,7 +136,9 @@ func (s *MutableStruct) Hash() (uint32, error) {
 // --- starlark.HasAttrs ---
 
 // Attr looks up a field by name. Returns NoSuchAttrError for missing
-// fields (struct semantics, not None like StarlarkDict).
+// fields (struct semantics, not None like StarlarkDict). When schema is
+// present, checks if the field is a valid schema field before returning
+// the error to ensure correct error messaging.
 func (s *MutableStruct) Attr(name string) (starlark.Value, error) {
 	v, found, err := s.d.Get(starlark.String(name))
 	if err != nil {
@@ -111,8 +151,16 @@ func (s *MutableStruct) Attr(name string) (starlark.Value, error) {
 	return v, nil
 }
 
-// AttrNames returns a sorted list of field names.
+// AttrNames returns a sorted list of field names. When schema is present,
+// returns all schema field names (not just dict keys) so the starlark
+// runtime spell checker has full field visibility.
 func (s *MutableStruct) AttrNames() []string {
+	if s.schema != nil {
+		names := make([]string, len(s.schema.FieldNames()))
+		copy(names, s.schema.FieldNames())
+		sort.Strings(names)
+		return names
+	}
 	items := s.d.Items()
 	names := make([]string, 0, len(items))
 	for _, item := range items {

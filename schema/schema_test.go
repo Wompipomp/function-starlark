@@ -1470,7 +1470,7 @@ func TestValidateMutationUnknownField(t *testing.T) {
 		order: []string{"name"},
 	}
 
-	_, err := s.ValidateMutation("naem", starlark.String("x"))
+	_, err := s.ValidateMutation("nam", starlark.String("x"))
 	if err == nil {
 		t.Fatal("expected error for unknown field")
 	}

@@ -197,6 +197,114 @@ func (s *SchemaCallable) validateFields(kwargs []starlark.Tuple, prefix string) 
 	return result, errs
 }
 
+// ValidateFields is the exported form of validateFields for cross-package use.
+// It performs recursive validation returning a raw dict and error strings.
+func (s *SchemaCallable) ValidateFields(kwargs []starlark.Tuple, prefix string) (*starlark.Dict, []string) {
+	return s.validateFields(kwargs, prefix)
+}
+
+// ValidateMutation validates a single field mutation and returns the processed
+// value to store. The return semantics are:
+//   - (processedVal, nil): store processedVal in the dict
+//   - (nil, nil): delete the key from the dict (None on optional without default)
+//   - (nil, error): validation failed
+func (s *SchemaCallable) ValidateMutation(name string, val starlark.Value) (starlark.Value, error) {
+	fd, ok := s.fields[name]
+	if !ok {
+		return nil, fmt.Errorf("%s: %s", s.name, unknownFieldError(name, s.order))
+	}
+
+	// None handling.
+	if val == starlark.None {
+		if fd.required {
+			return nil, fmt.Errorf("%s.%s: required field cannot be set to None", s.name, name)
+		}
+		if fd.defVal != starlark.None {
+			return fd.defVal, nil
+		}
+		return nil, nil // signal "delete key"
+	}
+
+	// Nested schema validation.
+	if fd.schema != nil {
+		switch v := val.(type) {
+		case *SchemaDict:
+			return v, nil // already validated
+		case *starlark.Dict:
+			subResult, subErrs := fd.schema.validateFields(v.Items(), name)
+			if len(subErrs) > 0 {
+				return nil, fmt.Errorf("%s.%s", s.name, subErrs[0])
+			}
+			return NewSchemaDict(fd.schema, subResult), nil
+		case interface{ InternalDict() *starlark.Dict }:
+			subResult, subErrs := fd.schema.validateFields(v.InternalDict().Items(), name)
+			if len(subErrs) > 0 {
+				return nil, fmt.Errorf("%s.%s", s.name, subErrs[0])
+			}
+			return NewSchemaDict(fd.schema, subResult), nil
+		default:
+			return nil, fmt.Errorf("%s.%s: expected %s or dict, got %s",
+				s.name, name, fd.schema.name, val.Type())
+		}
+	}
+
+	// List items validation.
+	if fd.items != nil && fd.typeName == "list" {
+		list, ok := val.(*starlark.List)
+		if !ok {
+			return nil, fmt.Errorf("%s.%s: expected list, got %s", s.name, name, val.Type())
+		}
+		validatedList := make([]starlark.Value, 0, list.Len())
+		for i := 0; i < list.Len(); i++ {
+			elem := list.Index(i)
+			elemPath := fmt.Sprintf("%s[%d]", name, i)
+			switch v := elem.(type) {
+			case *SchemaDict:
+				validatedList = append(validatedList, v)
+			case *starlark.Dict:
+				subResult, subErrs := fd.items.validateFields(v.Items(), elemPath)
+				if len(subErrs) > 0 {
+					return nil, fmt.Errorf("%s.%s", s.name, subErrs[0])
+				}
+				validatedList = append(validatedList, NewSchemaDict(fd.items, subResult))
+			default:
+				return nil, fmt.Errorf("%s.%s: expected %s or dict, got %s",
+					s.name, elemPath, fd.items.name, elem.Type())
+			}
+		}
+		return starlark.NewList(validatedList), nil
+	}
+
+	// Primitive type check.
+	if fd.typeName != "" && !CheckType(val, fd.typeName) {
+		return nil, fmt.Errorf("%s.%s: expected %s, got %s (%s)",
+			s.name, name, fd.typeName, val.Type(), val.String())
+	}
+
+	// Enum check.
+	if fd.enum != nil && !checkEnum(val, fd.enum) {
+		return nil, fmt.Errorf("%s.%s", s.name, formatEnumError(name, val, fd.enum))
+	}
+
+	return val, nil
+}
+
+// FieldNames returns the schema's field names in insertion order.
+func (s *SchemaCallable) FieldNames() []string {
+	return s.order
+}
+
+// NewSchemaCallable creates a SchemaCallable for cross-package construction
+// (primarily used in tests).
+func NewSchemaCallable(name, doc string, fields map[string]*FieldDescriptor, order []string) *SchemaCallable {
+	return &SchemaCallable{
+		name:   name,
+		doc:    doc,
+		fields: fields,
+		order:  order,
+	}
+}
+
 func pluralS(n int) string {
 	if n == 1 {
 		return ""

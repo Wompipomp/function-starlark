@@ -137,6 +137,20 @@ func FieldBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("field", fieldImpl)
 }
 
+// NewFieldDescriptor creates a FieldDescriptor for cross-package construction
+// (primarily used in tests).
+func NewFieldDescriptor(typeName string, schema *SchemaCallable, items *SchemaCallable, required bool, defVal starlark.Value, enum *starlark.List, doc string) *FieldDescriptor {
+	return &FieldDescriptor{
+		typeName: typeName,
+		schema:   schema,
+		items:    items,
+		required: required,
+		defVal:   defVal,
+		enum:     enum,
+		doc:      doc,
+	}
+}
+
 func fieldImpl(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kw []starlark.Tuple) (starlark.Value, error) {
 	var (
 		tp       typeParam
