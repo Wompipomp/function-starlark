@@ -1199,6 +1199,369 @@ func TestMutableStructSetFieldNoSchemaUnchanged(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 47 Plan 01 — Schema-aware merge (Binary), String(), None-in-merge
+// ---------------------------------------------------------------------------
+
+// SOPS-01: Two structs with same schema merged; result carries schema.
+func TestMutableStructSchemaMerge(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":     testMSField("string", true, starlark.None, nil),
+		"replicas": testMSField("int", false, starlark.MakeInt(1), nil),
+	}, []string{"name", "replicas"})
+
+	a, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("a")},
+			{starlark.String("replicas"), starlark.MakeInt(2)},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("b")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sa := a.(*MutableStruct)
+	sb := b.(*MutableStruct)
+
+	result, err := sa.Binary(syntax.PLUS, sb, starlark.Left)
+	if err != nil {
+		t.Fatalf("Binary +: %v", err)
+	}
+	merged := result.(*MutableStruct)
+
+	// Result must carry the schema.
+	if merged.schema != sc {
+		t.Error("merged result should carry the schema")
+	}
+	// Right wins on conflict: name should be "b".
+	v, _ := merged.Attr("name")
+	if v != starlark.String("b") {
+		t.Errorf("name = %v, want \"b\"", v)
+	}
+	// Left value preserved for non-conflicting: replicas should be 2.
+	v, _ = merged.Attr("replicas")
+	if v != starlark.MakeInt(2) {
+		t.Errorf("replicas = %v, want 2", v)
+	}
+}
+
+// SOPS-01: schema_struct + non_schema_struct and reversed.
+func TestMutableStructSchemaMergeSchemaWithNon(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":     testMSField("string", true, starlark.None, nil),
+		"replicas": testMSField("int", false, starlark.MakeInt(1), nil),
+	}, []string{"name", "replicas"})
+
+	schemaMS, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nonSchemaMS, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("replicas"), starlark.MakeInt(5)},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// schema + non-schema: result has schema, right fields validated.
+	result, err := schemaMS.(*MutableStruct).Binary(syntax.PLUS, nonSchemaMS, starlark.Left)
+	if err != nil {
+		t.Fatalf("schema + non-schema: %v", err)
+	}
+	merged := result.(*MutableStruct)
+	if merged.schema != sc {
+		t.Error("schema + non-schema: result should carry schema")
+	}
+	v, _ := merged.Attr("replicas")
+	if v != starlark.MakeInt(5) {
+		t.Errorf("replicas = %v, want 5", v)
+	}
+
+	// Reversed: non-schema + schema: result has schema.
+	result2, err := nonSchemaMS.(*MutableStruct).Binary(syntax.PLUS, schemaMS, starlark.Left)
+	if err != nil {
+		t.Fatalf("non-schema + schema: %v", err)
+	}
+	merged2 := result2.(*MutableStruct)
+	if merged2.schema != sc {
+		t.Error("non-schema + schema: result should carry schema")
+	}
+}
+
+// SOPS-01: schema_struct + struct_with_wrong_type returns type error.
+func TestMutableStructSchemaMergeRejectsInvalid(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", true, starlark.None, nil),
+	}, []string{"name"})
+
+	schemaMS, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	badMS, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("name"), starlark.MakeInt(123)},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = schemaMS.(*MutableStruct).Binary(syntax.PLUS, badMS, starlark.Left)
+	if err == nil {
+		t.Fatal("expected error for wrong type field in merge")
+	}
+	if !strings.Contains(err.Error(), "expected string, got int") {
+		t.Errorf("error = %v, want contains 'expected string, got int'", err)
+	}
+}
+
+// SOPS-02: Two structs with different schemas produce error.
+func TestMutableStructSchemaMergeDifferentSchemas(t *testing.T) {
+	scA := testSchemaCallable("SchemaA", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", false, starlark.None, nil),
+	}, []string{"name"})
+	scB := testSchemaCallable("SchemaB", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", false, starlark.None, nil),
+	}, []string{"name"})
+
+	a, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), scA},
+			{starlark.String("name"), starlark.String("a")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), scB},
+			{starlark.String("name"), starlark.String("b")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = a.(*MutableStruct).Binary(syntax.PLUS, b, starlark.Left)
+	if err == nil {
+		t.Fatal("expected error for different schemas")
+	}
+	if !strings.Contains(err.Error(), "cannot merge mutable_struct: schemas differ (SchemaA vs SchemaB)") {
+		t.Errorf("error = %v, want contains 'cannot merge mutable_struct: schemas differ (SchemaA vs SchemaB)'", err)
+	}
+}
+
+// Non-schema + non-schema: result has no schema.
+func TestMutableStructSchemaMergeNonSchemaPlusNonSchema(t *testing.T) {
+	a, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{{starlark.String("x"), starlark.MakeInt(1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{{starlark.String("y"), starlark.MakeInt(2)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.(*MutableStruct).Binary(syntax.PLUS, b, starlark.Left)
+	if err != nil {
+		t.Fatalf("Binary +: %v", err)
+	}
+	merged := result.(*MutableStruct)
+	if merged.schema != nil {
+		t.Error("non-schema + non-schema: result should have nil schema")
+	}
+	v, _ := merged.Attr("x")
+	if v != starlark.MakeInt(1) {
+		t.Errorf("x = %v, want 1", v)
+	}
+	v, _ = merged.Attr("y")
+	if v != starlark.MakeInt(2) {
+		t.Errorf("y = %v, want 2", v)
+	}
+}
+
+// SOPS-03: String() with schema shows schema name prefix with schema field order.
+func TestMutableStructSchemaString(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":     testMSField("string", true, starlark.None, nil),
+		"replicas": testMSField("int", false, starlark.MakeInt(3), nil),
+	}, []string{"name", "replicas"})
+
+	ms, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := ms.(*MutableStruct).String()
+	want := `MySchema(name = "x", replicas = 3)`
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// SOPS-03: String() schema field ordering differs from alphabetical.
+func TestMutableStructSchemaStringOrder(t *testing.T) {
+	// Schema order: replicas, name, region (NOT alphabetical).
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"replicas": testMSField("int", false, starlark.MakeInt(1), nil),
+		"name":     testMSField("string", true, starlark.None, nil),
+		"region":   testMSField("string", false, starlark.None, nil),
+	}, []string{"replicas", "name", "region"})
+
+	ms, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+			{starlark.String("region"), starlark.String("eu")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := ms.(*MutableStruct).String()
+	want := `MySchema(replicas = 1, name = "x", region = "eu")`
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// SOPS-03: String() omits cleared fields (deleted via None).
+func TestMutableStructSchemaStringOmitsClearedFields(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":   testMSField("string", true, starlark.None, nil),
+		"region": testMSField("string", false, starlark.None, nil),
+	}, []string{"name", "region"})
+
+	ms, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+			{starlark.String("region"), starlark.String("eu")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Clear region by setting to None (optional without default = delete).
+	if err := s.SetField("region", starlark.None); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.String()
+	want := `MySchema(name = "x")`
+	if got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// SOPS-04: None in right operand clears optional-without-default field.
+func TestMutableStructSchemaMergeNoneClearsField(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":   testMSField("string", true, starlark.None, nil),
+		"region": testMSField("string", false, starlark.None, nil),
+	}, []string{"name", "region"})
+
+	a, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+			{starlark.String("region"), starlark.String("eu")},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Right operand has None for region.
+	b, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("region"), starlark.None},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.(*MutableStruct).Binary(syntax.PLUS, b, starlark.Left)
+	if err != nil {
+		t.Fatalf("Binary +: %v", err)
+	}
+	merged := result.(*MutableStruct)
+
+	// region should be deleted (not present).
+	_, err = merged.Attr("region")
+	if err == nil {
+		t.Fatal("expected NoSuchAttrError for cleared field")
+	}
+	// name should still be present.
+	v, _ := merged.Attr("name")
+	if v != starlark.String("x") {
+		t.Errorf("name = %v, want \"x\"", v)
+	}
+}
+
+// SOPS-04: None in right operand restores default for optional-with-default.
+func TestMutableStructSchemaMergeNoneRestoresDefault(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":     testMSField("string", true, starlark.None, nil),
+		"replicas": testMSField("int", false, starlark.MakeInt(3), nil),
+	}, []string{"name", "replicas"})
+
+	a, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("x")},
+			{starlark.String("replicas"), starlark.MakeInt(10)},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Right operand has None for replicas.
+	b, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("replicas"), starlark.None},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.(*MutableStruct).Binary(syntax.PLUS, b, starlark.Left)
+	if err != nil {
+		t.Fatalf("Binary +: %v", err)
+	}
+	merged := result.(*MutableStruct)
+
+	// replicas should be restored to default (3).
+	v, _ := merged.Attr("replicas")
+	if v != starlark.MakeInt(3) {
+		t.Errorf("replicas = %v, want 3 (default)", v)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Phase 45 Plan 01 — Pipeline integration tests
 // ---------------------------------------------------------------------------
 
