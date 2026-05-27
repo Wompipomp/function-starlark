@@ -83,6 +83,8 @@ func dictItems(fnName string, v starlark.Value) ([]starlark.Tuple, error) {
 		return d.InternalDict().Items(), nil
 	case *schema.SchemaDict:
 		return d.InternalDict().Items(), nil
+	case *MutableStruct:
+		return d.InternalDict().Items(), nil
 	default:
 		return nil, fmt.Errorf("%s: got %s, want dict", fnName, v.Type())
 	}
@@ -91,7 +93,7 @@ func dictItems(fnName string, v starlark.Value) ([]starlark.Tuple, error) {
 // isDict returns true if v is any of the supported dict types.
 func isDict(v starlark.Value) bool {
 	switch v.(type) {
-	case *starlark.Dict, *convert.StarlarkDict, *schema.SchemaDict:
+	case *starlark.Dict, *convert.StarlarkDict, *schema.SchemaDict, *MutableStruct:
 		return true
 	default:
 		return false
@@ -107,6 +109,8 @@ func asMapping(v starlark.Value) (starlark.Mapping, bool) {
 		return d, true
 	case *schema.SchemaDict:
 		return d, true
+	case *MutableStruct:
+		return d.InternalDict(), true
 	default:
 		return nil, false
 	}

@@ -620,6 +620,8 @@ func (c *Collector) resourceFn(
 		body = v.InternalDict()
 	case *starlark.Dict:
 		body = v
+	case *MutableStruct:
+		body = v.InternalDict()
 	default:
 		return nil, fmt.Errorf("Resource(%q): body must be dict, got %s", name, bodyVal.Type())
 	}
@@ -895,6 +897,8 @@ func injectLabels(s *structpb.Struct, labelsVal starlark.Value, oxr *structpb.St
 		case *starlark.Dict:
 			items = d.Items()
 		case *convert.StarlarkDict:
+			items = d.InternalDict().Items()
+		case *MutableStruct:
 			items = d.InternalDict().Items()
 		default:
 			return fmt.Errorf("Resource(%q): labels must be dict or None, got %s",

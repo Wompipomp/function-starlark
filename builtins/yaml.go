@@ -82,6 +82,9 @@ func starlarkToGo(v starlark.Value) (any, error) {
 	case *schema.SchemaDict:
 		return dictToGoMap(v.InternalDict().Items())
 
+	case *MutableStruct:
+		return dictToGoMap(v.InternalDict().Items())
+
 	default:
 		return nil, fmt.Errorf("yaml.encode: unsupported type %s", v.Type())
 	}

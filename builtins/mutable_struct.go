@@ -41,6 +41,9 @@ func MakeMutableStruct(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tu
 	return &MutableStruct{d: d}, nil
 }
 
+// InternalDict returns the underlying *starlark.Dict for pipeline integration.
+func (s *MutableStruct) InternalDict() *starlark.Dict { return s.d }
+
 // --- starlark.Value ---
 
 // String returns the Starlark string representation with keys sorted
