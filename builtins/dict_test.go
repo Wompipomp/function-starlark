@@ -931,6 +931,136 @@ func TestDict_CompactNoOpAliasesInput(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 45 Plan 01 — MutableStruct integration tests for dict helpers
+// ---------------------------------------------------------------------------
+
+func TestDict_MergeWithMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.merge(mutable_struct(a=1), {"b": 2})
+has_a = result["a"] == 1
+has_b = result["b"] == 2
+count = len(result)
+is_dict = type(result) == "dict"
+`)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_b", true)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "is_dict", true)
+}
+
+func TestDict_DeepMergeWithMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.deep_merge({"a": {"x": 1}}, {"a": mutable_struct(y=2)})
+has_x = result["a"]["x"] == 1
+has_y = result["a"]["y"] == 2
+is_dict = type(result) == "dict"
+`)
+	assertBool(t, out, "has_x", true)
+	assertBool(t, out, "has_y", true)
+	assertBool(t, out, "is_dict", true)
+}
+
+func TestDict_CompactMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.compact(mutable_struct(a=1, b=None))
+count = len(result)
+has_a = result["a"] == 1
+has_b = "b" in result
+is_dict = type(result) == "dict"
+`)
+	assertInt(t, out, "count", 1)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_b", false)
+	assertBool(t, out, "is_dict", true)
+}
+
+func TestDict_CompactNestedMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.compact({"outer": mutable_struct(a=1, b=None)})
+count = len(result["outer"])
+has_a = result["outer"]["a"] == 1
+has_b = "b" in result["outer"]
+`)
+	assertInt(t, out, "count", 1)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_b", false)
+}
+
+func TestDict_PickMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.pick(mutable_struct(a=1, b=2, c=3), ["a", "c"])
+count = len(result)
+has_a = result["a"] == 1
+has_c = result["c"] == 3
+is_dict = type(result) == "dict"
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_c", true)
+	assertBool(t, out, "is_dict", true)
+}
+
+func TestDict_OmitMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.omit(mutable_struct(a=1, b=2, c=3), ["b"])
+count = len(result)
+has_a = result["a"] == 1
+has_c = result["c"] == 3
+has_b = "b" in result
+is_dict = type(result) == "dict"
+`)
+	assertInt(t, out, "count", 2)
+	assertBool(t, out, "has_a", true)
+	assertBool(t, out, "has_c", true)
+	assertBool(t, out, "has_b", false)
+	assertBool(t, out, "is_dict", true)
+}
+
+func TestDict_DigMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+result = dict.dig(mutable_struct(a=mutable_struct(b=42)), "a.b")
+`)
+	assertInt(t, out, "result", 42)
+}
+
+func TestDict_HasPathMutableStruct(t *testing.T) {
+	out := runDictScript(t, `
+yes = dict.has_path(mutable_struct(a=mutable_struct(b=1)), "a.b")
+no = dict.has_path(mutable_struct(a=mutable_struct(b=1)), "a.c")
+`)
+	assertBool(t, out, "yes", true)
+	assertBool(t, out, "no", false)
+}
+
+func TestDict_CompactMutableStructReturnsDict(t *testing.T) {
+	// Verify that dict.compact on MutableStruct returns *starlark.Dict, not *MutableStruct.
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{},
+		&starlark.Builtin{},
+		nil,
+		[]starlark.Tuple{
+			{starlark.String("a"), starlark.MakeInt(1)},
+			{starlark.String("b"), starlark.None},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	thread := &starlark.Thread{}
+	compactFn := dictInnerModule.Members["compact"]
+	result, err := starlark.Call(thread, compactFn, starlark.Tuple{ms}, nil)
+	if err != nil {
+		t.Fatalf("dict.compact error: %v", err)
+	}
+
+	// Must be *starlark.Dict, NOT *MutableStruct.
+	if _, ok := result.(*starlark.Dict); !ok {
+		t.Errorf("dict.compact returned %T, want *starlark.Dict", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Test assertion helpers
 // ---------------------------------------------------------------------------
 

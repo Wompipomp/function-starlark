@@ -443,6 +443,19 @@ result = yaml.encode(None)
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Phase 45 Plan 01 — MutableStruct yaml.encode test
+// ---------------------------------------------------------------------------
+
+func TestYAML_EncodeMutableStruct(t *testing.T) {
+	out := runYAMLScript(t, `
+ms_yaml = yaml.encode(mutable_struct(name="test", count=42))
+dict_yaml = yaml.encode({"name": "test", "count": 42})
+match = (ms_yaml == dict_yaml)
+`)
+	assertBool(t, out, "match", true)
+}
+
 // TestYAML_NegativeCases asserts that bad inputs fail with expected errors.
 func TestYAML_NegativeCases(t *testing.T) {
 	// Invalid YAML decode

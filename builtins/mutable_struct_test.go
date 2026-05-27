@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crossplane/function-sdk-go/logging"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+
+	"github.com/wompipomp/function-starlark/runtime"
 )
 
 func TestMutableStructCreateAndRead(t *testing.T) {
@@ -431,4 +434,73 @@ func TestMutableStructCompareUnsupportedOp(t *testing.T) {
 	if err == nil {
 		t.Fatal("CompareSameType with < should return error")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 45 Plan 01 — Pipeline integration tests
+// ---------------------------------------------------------------------------
+
+func TestMutableStructInternalDict(t *testing.T) {
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{},
+		&starlark.Builtin{},
+		nil,
+		[]starlark.Tuple{
+			{starlark.String("name"), starlark.String("test")},
+			{starlark.String("count"), starlark.MakeInt(42)},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	d := s.InternalDict()
+	if d == nil {
+		t.Fatal("InternalDict() returned nil")
+	}
+
+	// Should be the same backing dict.
+	items := d.Items()
+	if len(items) != 2 {
+		t.Fatalf("InternalDict().Items() = %d items, want 2", len(items))
+	}
+
+	// Verify the items match.
+	found := map[string]starlark.Value{}
+	for _, item := range items {
+		k, ok := item[0].(starlark.String)
+		if !ok {
+			t.Fatalf("key is %T, want starlark.String", item[0])
+		}
+		found[string(k)] = item[1]
+	}
+	if found["name"] != starlark.String("test") {
+		t.Errorf("name = %v, want \"test\"", found["name"])
+	}
+	if found["count"] != starlark.MakeInt(42) {
+		t.Errorf("count = %v, want 42", found["count"])
+	}
+}
+
+func TestMutableStructJSONEncode(t *testing.T) {
+	// Verify json.encode works on mutable_struct via the HasAttrs path
+	// (zero code changes needed -- this is a test-only verification).
+	req := makeReq(nil, nil, nil)
+	c := NewCollector(NewConditionCollector(), "test.star", nil, nil)
+	globals, err := testBuildGlobals(req, c)
+	if err != nil {
+		t.Fatalf("testBuildGlobals error: %v", err)
+	}
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	out, err := rt.Execute(`
+ms = mutable_struct(a=1, b="hello")
+ms_json = json.encode(ms)
+dict_json = json.encode({"a": 1, "b": "hello"})
+match = (ms_json == dict_json)
+`, globals, "test.star", nil)
+	if err != nil {
+		t.Fatalf("rt.Execute error: %v", err)
+	}
+	assertBool(t, out, "match", true)
 }

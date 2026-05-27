@@ -3946,3 +3946,86 @@ func TestWhenBuiltin_EmptyReason(t *testing.T) {
 		t.Errorf("error = %q, want to contain %q", err.Error(), "reason must not be empty")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 45 Plan 01 — MutableStruct as Resource body and labels
+// ---------------------------------------------------------------------------
+
+func TestCollectorMutableStructBody(t *testing.T) {
+	cc := NewConditionCollector()
+	c := NewCollector(cc, "test.star", nil, nil)
+	thread := new(starlark.Thread)
+
+	// Build a MutableStruct body with apiVersion, kind, metadata, spec.
+	body, err := MakeMutableStruct(thread, &starlark.Builtin{}, nil, []starlark.Tuple{
+		{starlark.String("apiVersion"), starlark.String("v1")},
+		{starlark.String("kind"), starlark.String("Bucket")},
+	})
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr, ok := res["bucket"]
+	if !ok {
+		t.Fatal("missing resource 'bucket'")
+	}
+	if cr.Body == nil {
+		t.Fatal("body is nil")
+	}
+	if cr.Body.GetFields()["apiVersion"].GetStringValue() != "v1" {
+		t.Errorf("apiVersion = %q, want 'v1'", cr.Body.GetFields()["apiVersion"].GetStringValue())
+	}
+	if cr.Body.GetFields()["kind"].GetStringValue() != "Bucket" {
+		t.Errorf("kind = %q, want 'Bucket'", cr.Body.GetFields()["kind"].GetStringValue())
+	}
+}
+
+func TestCollectorMutableStructLabels(t *testing.T) {
+	cc := NewConditionCollector()
+	oxr := makeOXR("xr-abc", "my-claim", "ns")
+	c := NewCollector(cc, "test.star", oxr, nil)
+	thread := new(starlark.Thread)
+
+	body := new(starlark.Dict)
+	_ = body.SetKey(starlark.String("apiVersion"), starlark.String("v1"))
+
+	// Build a MutableStruct for labels.
+	lblMS, err := MakeMutableStruct(thread, &starlark.Builtin{}, nil, []starlark.Tuple{
+		{starlark.String("team"), starlark.String("platform")},
+	})
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+
+	_, err = starlark.Call(thread, c.Builtin(), starlark.Tuple{
+		starlark.String("bucket"),
+		body,
+	}, []starlark.Tuple{
+		{starlark.String("labels"), lblMS},
+	})
+	if err != nil {
+		t.Fatalf("Resource() error: %v", err)
+	}
+
+	res := c.Resources()
+	cr := res["bucket"]
+	labels := cr.Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+
+	// User label should be present.
+	if labels.GetFields()["team"].GetStringValue() != "platform" {
+		t.Errorf("team = %q, want %q", labels.GetFields()["team"].GetStringValue(), "platform")
+	}
+	// Crossplane labels should also be present.
+	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
+		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	}
+}
