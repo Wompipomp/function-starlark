@@ -84,12 +84,36 @@ func (s *MutableStruct) InternalDict() *starlark.Dict { return s.d }
 
 // --- starlark.Value ---
 
-// String returns the Starlark string representation with keys sorted
-// alphabetically, e.g. mutable_struct(items = [], name = "test").
+// String returns the Starlark string representation. When a schema is
+// attached, uses the schema name as prefix and schema-defined field order
+// (omitting cleared fields). Without schema, uses alphabetical order
+// with mutable_struct(...) prefix.
 func (s *MutableStruct) String() string {
-	items := s.d.Items()
+	buf := new(strings.Builder)
 
-	// Collect and sort by key name.
+	if s.schema != nil {
+		buf.WriteString(s.schema.Name())
+		buf.WriteByte('(')
+		first := true
+		for _, name := range s.schema.FieldNames() {
+			v, found, _ := s.d.Get(starlark.String(name))
+			if !found {
+				continue // omit cleared fields
+			}
+			if !first {
+				buf.WriteString(", ")
+			}
+			first = false
+			buf.WriteString(name)
+			buf.WriteString(" = ")
+			buf.WriteString(v.String())
+		}
+		buf.WriteByte(')')
+		return buf.String()
+	}
+
+	// Non-schema path: alphabetical order.
+	items := s.d.Items()
 	type kv struct {
 		key string
 		val starlark.Value
@@ -104,7 +128,6 @@ func (s *MutableStruct) String() string {
 		return sorted[i].key < sorted[j].key
 	})
 
-	buf := new(strings.Builder)
 	buf.WriteString("mutable_struct(")
 	for i, e := range sorted {
 		if i > 0 {
@@ -197,7 +220,9 @@ func (s *MutableStruct) SetField(name string, val starlark.Value) error {
 // --- starlark.HasBinary ---
 
 // Binary supports the + operator to merge two MutableStructs. The right
-// operand wins on key conflicts. Returns nil, nil for unhandled operations.
+// operand wins on key conflicts. When either operand has a schema, the
+// result carries the schema and right-operand fields are validated via
+// ValidateMutation. Returns nil, nil for unhandled operations.
 func (s *MutableStruct) Binary(op syntax.Token, y starlark.Value, side starlark.Side) (starlark.Value, error) {
 	other, ok := y.(*MutableStruct)
 	if !ok || op != syntax.PLUS {
@@ -209,19 +234,52 @@ func (s *MutableStruct) Binary(op syntax.Token, y starlark.Value, side starlark.
 		left, right = other, s
 	}
 
+	// Determine result schema.
+	var resultSchema *schema.SchemaCallable
+	switch {
+	case left.schema == nil && right.schema == nil:
+		// Both nil — no schema.
+	case left.schema != nil && right.schema != nil && left.schema != right.schema:
+		return nil, fmt.Errorf("cannot merge mutable_struct: schemas differ (%s vs %s)",
+			left.schema.Name(), right.schema.Name())
+	case left.schema != nil:
+		resultSchema = left.schema
+	default:
+		resultSchema = right.schema
+	}
+
+	// Copy left fields directly (already validated).
 	merged := new(starlark.Dict)
 	for _, item := range left.d.Items() {
 		if err := merged.SetKey(item[0], item[1]); err != nil {
 			return nil, err
 		}
 	}
+
+	// Merge right fields, validating against schema if present.
 	for _, item := range right.d.Items() {
-		if err := merged.SetKey(item[0], item[1]); err != nil {
-			return nil, err
+		key, _ := item[0].(starlark.String)
+		if resultSchema != nil {
+			processedVal, err := resultSchema.ValidateMutation(string(key), item[1])
+			if err != nil {
+				return nil, err
+			}
+			// 3-way dispatch: (val, nil)=store, (nil, nil)=delete, (nil, err)=error.
+			if processedVal == nil {
+				merged.Delete(starlark.String(string(key)))
+				continue
+			}
+			if err := merged.SetKey(item[0], processedVal); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := merged.SetKey(item[0], item[1]); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	return &MutableStruct{d: merged}, nil
+	return &MutableStruct{d: merged, schema: resultSchema}, nil
 }
 
 // --- starlark.Comparable ---

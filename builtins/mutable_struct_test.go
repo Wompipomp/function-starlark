@@ -1207,13 +1207,15 @@ func TestMutableStructSchemaMerge(t *testing.T) {
 	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
 		"name":     testMSField("string", true, starlark.None, nil),
 		"replicas": testMSField("int", false, starlark.MakeInt(1), nil),
-	}, []string{"name", "replicas"})
+		"region":   testMSField("string", false, starlark.None, nil),
+	}, []string{"name", "replicas", "region"})
 
 	a, err := MakeMutableStruct(&starlark.Thread{}, &starlark.Builtin{}, nil,
 		[]starlark.Tuple{
 			{starlark.String("schema"), sc},
 			{starlark.String("name"), starlark.String("a")},
 			{starlark.String("replicas"), starlark.MakeInt(2)},
+			{starlark.String("region"), starlark.String("eu")},
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -1222,6 +1224,7 @@ func TestMutableStructSchemaMerge(t *testing.T) {
 		[]starlark.Tuple{
 			{starlark.String("schema"), sc},
 			{starlark.String("name"), starlark.String("b")},
+			{starlark.String("replicas"), starlark.MakeInt(5)},
 		})
 	if err != nil {
 		t.Fatal(err)
@@ -1245,10 +1248,15 @@ func TestMutableStructSchemaMerge(t *testing.T) {
 	if v != starlark.String("b") {
 		t.Errorf("name = %v, want \"b\"", v)
 	}
-	// Left value preserved for non-conflicting: replicas should be 2.
+	// Right wins on conflict: replicas should be 5.
 	v, _ = merged.Attr("replicas")
-	if v != starlark.MakeInt(2) {
-		t.Errorf("replicas = %v, want 2", v)
+	if v != starlark.MakeInt(5) {
+		t.Errorf("replicas = %v, want 5", v)
+	}
+	// Left value preserved when right doesn't have it: region should be "eu".
+	v, _ = merged.Attr("region")
+	if v != starlark.String("eu") {
+		t.Errorf("region = %v, want \"eu\"", v)
 	}
 }
 
