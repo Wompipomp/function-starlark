@@ -131,9 +131,10 @@ func (r *Runtime) CacheLen() int {
 // and loaded modules. Extracted to ensure consistent syntax options.
 func fileOptions() *syntax.FileOptions {
 	return &syntax.FileOptions{
-		TopLevelControl: true,
-		Set:             true,
-		While:           true,
+		TopLevelControl:  true,
+		Set:              true,
+		While:            true,
+		GlobalReassign:   true,
 	}
 }
 

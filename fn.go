@@ -374,6 +374,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			} else {
 				// Converged: clear TTL so Crossplane uses its own poll interval.
 				rsp.Meta.Ttl = nil
+				collector.SetDepsConverged()
 			}
 
 			// Append sequencing events to condCollector for response emission.

@@ -497,6 +497,7 @@ const (
 	compositeReadyReasonPending    = "PendingConditionalResources"
 	compositeReadyReasonWaitingDep = "WaitingForDependencies"
 	compositeReadyReasonComposite  = "CompositeNotReady"
+	compositeReadyReasonAllReady   = "AllReady"
 )
 
 // ApplyCompositeReady sets rsp.Desired.Composite.Ready. An explicit
@@ -505,9 +506,18 @@ const (
 // ComposedResourcesReady=False condition. With none of these, Ready is
 // left UNSPECIFIED.
 func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc *ConditionCollector) {
-	override, skips, defers := collector.compositeReadyState()
+	override, skips, defers, converged := collector.compositeReadyState()
 
 	if !override.Set && len(skips) == 0 && len(defers) == 0 {
+		if converged {
+			cc.AddCondition(CollectedCondition{
+				Type:    CompositeReadyConditionType,
+				Status:  "True",
+				Reason:  compositeReadyReasonAllReady,
+				Message: "All sequenced dependencies are ready",
+				Target:  "CompositeAndClaim",
+			})
+		}
 		return
 	}
 

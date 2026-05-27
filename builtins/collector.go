@@ -217,6 +217,7 @@ type Collector struct {
 	skipped        map[string]bool
 	gatingSkips    []GatingSkip
 	gatingDefers   []GatingDefer
+	depsConverged  bool
 	compositeReady CompositeReadyOverride
 	dependencies   []DependencyPair
 	cc             *ConditionCollector
@@ -406,6 +407,16 @@ func (c *Collector) AddGatingDefers(items []GatingDefer) {
 	c.mu.Unlock()
 }
 
+// SetDepsConverged marks that dependency sequencing ran and all resources
+// converged (no deferrals). Called by fn.go when deps exist but none were
+// deferred, so ApplyCompositeReady can clear any prior WaitingForDependencies
+// condition.
+func (c *Collector) SetDepsConverged() {
+	c.mu.Lock()
+	c.depsConverged = true
+	c.mu.Unlock()
+}
+
 // CompositeReadyOverride returns the explicit composite-ready override, if any.
 // The returned value's Set field is true iff set_composite_ready() was called.
 func (c *Collector) CompositeReadyOverride() CompositeReadyOverride {
@@ -416,10 +427,10 @@ func (c *Collector) CompositeReadyOverride() CompositeReadyOverride {
 
 // compositeReadyState reads the override, gating skips, and gating defers in a
 // single lock acquisition for the ApplyCompositeReady hot path.
-func (c *Collector) compositeReadyState() (CompositeReadyOverride, []GatingSkip, []GatingDefer) {
+func (c *Collector) compositeReadyState() (CompositeReadyOverride, []GatingSkip, []GatingDefer, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.compositeReady, copyGatingSkips(c.gatingSkips), copyGatingDefers(c.gatingDefers)
+	return c.compositeReady, copyGatingSkips(c.gatingSkips), copyGatingDefers(c.gatingDefers), c.depsConverged
 }
 
 func copyGatingSkips(src []GatingSkip) []GatingSkip {
