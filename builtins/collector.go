@@ -326,9 +326,10 @@ func (c *Collector) recordPreserve(name string, body *structpb.Struct, message s
 	})
 }
 
-// recordSkip handles skip registration, Warning event emission, and metric
-// increment. When gate is true and the skip is new, the resource is also
-// recorded as gating composite resource readiness (XR Ready=False).
+// recordSkip handles skip registration, event emission, and metric increment.
+// When gate is true and the skip is new, the resource is also recorded as
+// gating composite resource readiness (XR Ready=False). Gating skips emit a
+// Warning event; optional (non-gating) skips emit a Normal event.
 // It is a no-op if name was already skipped. The caller must NOT hold c.mu
 // when calling recordSkip (lock ordering: c.mu before cc.mu).
 func (c *Collector) recordSkip(name, reason string, gate bool) {
@@ -345,9 +346,15 @@ func (c *Collector) recordSkip(name, reason string, gate bool) {
 
 	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName).Inc()
 
+	severity := "Warning"
+	msg := fmt.Sprintf("Skipping resource %q: %s", name, reason)
+	if !gate {
+		severity = "Normal"
+		msg = fmt.Sprintf("Skipping optional resource %q: %s", name, reason)
+	}
 	c.cc.AddEvent(CollectedEvent{
-		Severity: "Warning",
-		Message:  fmt.Sprintf("Skipping resource %q: %s", name, reason),
+		Severity: severity,
+		Message:  msg,
 		Target:   "Composite",
 	})
 }
@@ -452,7 +459,7 @@ func copyGatingDefers(src []GatingDefer) []GatingDefer {
 }
 
 // skipResourceFn implements skip_resource(name, reason). Records the skip and
-// emits a Warning event (deduped per name); errors if the resource was already
+// emits a Normal event (deduped per name); errors if the resource was already
 // emitted via Resource(). Does not gate composite readiness.
 func (c *Collector) skipResourceFn(
 	_ *starlark.Thread,

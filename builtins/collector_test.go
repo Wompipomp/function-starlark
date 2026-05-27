@@ -1173,10 +1173,10 @@ func TestCollector_SkipResource_Warning(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("Events() len = %d, want 1", len(events))
 	}
-	if events[0].Severity != "Warning" {
-		t.Errorf("event severity = %q, want %q", events[0].Severity, "Warning")
+	if events[0].Severity != "Normal" {
+		t.Errorf("event severity = %q, want %q", events[0].Severity, "Normal")
 	}
-	wantMsg := `Skipping resource "audit-logs": encryption disabled`
+	wantMsg := `Skipping optional resource "audit-logs": encryption disabled`
 	if events[0].Message != wantMsg {
 		t.Errorf("event message = %q, want %q", events[0].Message, wantMsg)
 	}
@@ -2116,20 +2116,24 @@ func TestCollector_RecordSkip_EventParity(t *testing.T) {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
 
-	// Both events must have same structure (only name differs).
+	// Both events target the composite. Gating skip (x) is Warning;
+	// non-gating skip_resource (y) is Normal.
 	for i, e := range events {
-		if e.Severity != "Warning" {
-			t.Errorf("event[%d] severity = %q, want %q", i, e.Severity, "Warning")
-		}
 		if e.Target != "Composite" {
 			t.Errorf("event[%d] target = %q, want %q", i, e.Target, "Composite")
 		}
+	}
+	if events[0].Severity != "Warning" {
+		t.Errorf("event[0] severity = %q, want %q", events[0].Severity, "Warning")
+	}
+	if events[1].Severity != "Normal" {
+		t.Errorf("event[1] severity = %q, want %q", events[1].Severity, "Normal")
 	}
 	wantA := `Skipping resource "x": some reason`
 	if events[0].Message != wantA {
 		t.Errorf("event[0] message = %q, want %q", events[0].Message, wantA)
 	}
-	wantB := `Skipping resource "y": some reason`
+	wantB := `Skipping optional resource "y": some reason`
 	if events[1].Message != wantB {
 		t.Errorf("event[1] message = %q, want %q", events[1].Message, wantB)
 	}
