@@ -376,11 +376,9 @@ func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependen
 		t.Errorf("kind = %q, want %q", got, "Usage")
 	}
 
-	// metadata.name
-	meta := fields["metadata"].GetStructValue().GetFields()
-	wantName := usageName(dependent, dependency)
-	if got := meta["name"].GetStringValue(); got != wantName {
-		t.Errorf("metadata.name = %q, want %q", got, wantName)
+	// metadata should be absent (Crossplane auto-generates the name)
+	if meta, ok := fields["metadata"]; ok {
+		t.Errorf("expected no metadata on Usage body, got %v", meta)
 	}
 
 	// spec

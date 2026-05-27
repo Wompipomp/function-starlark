@@ -62,11 +62,6 @@ func buildUsageResource(dependent, dependency, apiVersion string, typeInfos map[
 		Fields: map[string]*structpb.Value{
 			"apiVersion": structpb.NewStringValue(apiVersion),
 			"kind":       structpb.NewStringValue("Usage"),
-			"metadata": structpb.NewStructValue(&structpb.Struct{
-				Fields: map[string]*structpb.Value{
-					"name": structpb.NewStringValue(usageName(dependent, dependency)),
-				},
-			}),
 			"spec": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{
 					"replayDeletion": structpb.NewBoolValue(true),
