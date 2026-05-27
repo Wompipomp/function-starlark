@@ -773,6 +773,432 @@ func TestMutableStructSchemaAttrNames(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 46 Plan 02 — Schema-aware SetField validation tests (SCHM-05, SCHM-06)
+// ---------------------------------------------------------------------------
+
+// helper: create a FieldDescriptor for list with items schema.
+func testMSFieldList(items *schema.SchemaCallable, required bool) *schema.FieldDescriptor {
+	return schema.NewFieldDescriptor("list", nil, items, required, starlark.None, nil, "")
+}
+
+// SCHM-05: SetField validates type constraint — rejects type mismatch.
+func TestMutableStructSchemaSetFieldTypeMismatch(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", true, starlark.None, nil),
+	}, []string{"name"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("hello")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	err = s.SetField("name", starlark.MakeInt(123))
+	if err == nil {
+		t.Fatal("expected error for type mismatch on SetField")
+	}
+	if !strings.Contains(err.Error(), "expected string, got int") {
+		t.Errorf("error = %v, want contains 'expected string, got int'", err)
+	}
+}
+
+// SCHM-05: SetField validates enum constraint — rejects enum violation.
+func TestMutableStructSchemaSetFieldEnumViolation(t *testing.T) {
+	enum := starlark.NewList([]starlark.Value{starlark.String("active"), starlark.String("inactive")})
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"status": testMSField("string", false, starlark.None, enum),
+	}, []string{"status"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("status"), starlark.String("active")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	err = s.SetField("status", starlark.String("bad"))
+	if err == nil {
+		t.Fatal("expected error for enum violation on SetField")
+	}
+	if !strings.Contains(err.Error(), "not in enum") {
+		t.Errorf("error = %v, want contains 'not in enum'", err)
+	}
+}
+
+// SCHM-05: SetField accepts valid value and stores it.
+func TestMutableStructSchemaSetFieldValidValue(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", true, starlark.None, nil),
+	}, []string{"name"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("old")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	err = s.SetField("name", starlark.String("new"))
+	if err != nil {
+		t.Fatalf("SetField valid value: %v", err)
+	}
+	v, err := s.Attr("name")
+	if err != nil {
+		t.Fatalf("Attr(name): %v", err)
+	}
+	if v != starlark.String("new") {
+		t.Errorf("name = %v, want \"new\"", v)
+	}
+}
+
+// SCHM-05: SetField validates nested dict — wraps as SchemaDict.
+func TestMutableStructSchemaSetFieldNestedDict(t *testing.T) {
+	inner := testSchemaCallable("Location", map[string]*schema.FieldDescriptor{
+		"region": testMSField("string", true, starlark.None, nil),
+	}, []string{"region"})
+
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"location": testMSFieldWithSchema(inner, true),
+	}, []string{"location"})
+
+	// Build initial struct with valid location.
+	initialDict := starlark.NewDict(1)
+	_ = initialDict.SetKey(starlark.String("region"), starlark.String("eastus"))
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("location"), initialDict},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Assign a new plain dict — should validate and wrap as SchemaDict.
+	newDict := starlark.NewDict(1)
+	_ = newDict.SetKey(starlark.String("region"), starlark.String("westeurope"))
+
+	err = s.SetField("location", newDict)
+	if err != nil {
+		t.Fatalf("SetField nested dict: %v", err)
+	}
+
+	v, err := s.Attr("location")
+	if err != nil {
+		t.Fatalf("Attr(location): %v", err)
+	}
+	sd, ok := v.(*schema.SchemaDict)
+	if !ok {
+		t.Fatalf("location is %T, want *schema.SchemaDict", v)
+	}
+	if sd.SchemaName() != "Location" {
+		t.Errorf("SchemaName() = %q, want \"Location\"", sd.SchemaName())
+	}
+}
+
+// SCHM-05: SetField validates MutableStruct assigned to nested schema field.
+func TestMutableStructSchemaSetFieldNestedMutableStruct(t *testing.T) {
+	inner := testSchemaCallable("Location", map[string]*schema.FieldDescriptor{
+		"region": testMSField("string", true, starlark.None, nil),
+	}, []string{"region"})
+
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"location": testMSFieldWithSchema(inner, true),
+	}, []string{"location"})
+
+	initialDict := starlark.NewDict(1)
+	_ = initialDict.SetKey(starlark.String("region"), starlark.String("eastus"))
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("location"), initialDict},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Create a MutableStruct (without schema) to assign to the nested field.
+	nested, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("region"), starlark.String("northeurope")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct nested: %v", err)
+	}
+
+	err = s.SetField("location", nested)
+	if err != nil {
+		t.Fatalf("SetField nested MutableStruct: %v", err)
+	}
+
+	v, err := s.Attr("location")
+	if err != nil {
+		t.Fatalf("Attr(location): %v", err)
+	}
+	sd, ok := v.(*schema.SchemaDict)
+	if !ok {
+		t.Fatalf("location is %T, want *schema.SchemaDict", v)
+	}
+	if sd.SchemaName() != "Location" {
+		t.Errorf("SchemaName() = %q, want \"Location\"", sd.SchemaName())
+	}
+}
+
+// SCHM-05: SetField validates list items with schema.
+func TestMutableStructSchemaSetFieldListItems(t *testing.T) {
+	itemSchema := testSchemaCallable("Item", map[string]*schema.FieldDescriptor{
+		"x": testMSField("int", true, starlark.None, nil),
+	}, []string{"x"})
+
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"items": testMSFieldList(itemSchema, true),
+	}, []string{"items"})
+
+	// Build initial struct with valid list.
+	d1 := starlark.NewDict(1)
+	_ = d1.SetKey(starlark.String("x"), starlark.MakeInt(1))
+	initialList := starlark.NewList([]starlark.Value{d1})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("items"), initialList},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Assign new list — elements should be validated.
+	d2 := starlark.NewDict(1)
+	_ = d2.SetKey(starlark.String("x"), starlark.MakeInt(42))
+	newList := starlark.NewList([]starlark.Value{d2})
+
+	err = s.SetField("items", newList)
+	if err != nil {
+		t.Fatalf("SetField list items: %v", err)
+	}
+
+	v, err := s.Attr("items")
+	if err != nil {
+		t.Fatalf("Attr(items): %v", err)
+	}
+	list, ok := v.(*starlark.List)
+	if !ok {
+		t.Fatalf("items is %T, want *starlark.List", v)
+	}
+	if list.Len() != 1 {
+		t.Fatalf("list.Len() = %d, want 1", list.Len())
+	}
+	// Element should be wrapped as SchemaDict.
+	elem := list.Index(0)
+	sd, ok := elem.(*schema.SchemaDict)
+	if !ok {
+		t.Fatalf("items[0] is %T, want *schema.SchemaDict", elem)
+	}
+	if sd.SchemaName() != "Item" {
+		t.Errorf("items[0].SchemaName() = %q, want \"Item\"", sd.SchemaName())
+	}
+}
+
+// SCHM-06: SetField rejects unknown field with "did you mean?" suggestion.
+func TestMutableStructSchemaSetFieldUnknownFieldSuggestion(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", true, starlark.None, nil),
+	}, []string{"name"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("hello")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	// "nam" is Levenshtein distance 1 from "name" — should trigger suggestion.
+	err = s.SetField("nam", starlark.String("x"))
+	if err == nil {
+		t.Fatal("expected error for unknown field on SetField")
+	}
+	if !strings.Contains(err.Error(), `did you mean "name"`) {
+		t.Errorf("error = %v, want contains 'did you mean \"name\"'", err)
+	}
+}
+
+// SCHM-06: SetField rejects unknown field with valid fields list (no close match).
+func TestMutableStructSchemaSetFieldUnknownFieldNoSuggestion(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name":   testMSField("string", false, starlark.None, nil),
+		"region": testMSField("string", false, starlark.None, nil),
+	}, []string{"name", "region"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	err = s.SetField("zzz", starlark.String("x"))
+	if err == nil {
+		t.Fatal("expected error for unknown field on SetField")
+	}
+	if !strings.Contains(err.Error(), "valid fields: name, region") {
+		t.Errorf("error = %v, want contains 'valid fields: name, region'", err)
+	}
+}
+
+// SCHM-05 None semantics: None on required field rejected.
+func TestMutableStructSchemaSetFieldNoneOnRequired(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"name": testMSField("string", true, starlark.None, nil),
+	}, []string{"name"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("name"), starlark.String("hello")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	err = s.SetField("name", starlark.None)
+	if err == nil {
+		t.Fatal("expected error for None on required field")
+	}
+	if !strings.Contains(err.Error(), "required field cannot be set to None") {
+		t.Errorf("error = %v, want contains 'required field cannot be set to None'", err)
+	}
+}
+
+// SCHM-05 None semantics: None on optional with default restores default.
+func TestMutableStructSchemaSetFieldNoneRestoresDefault(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"replicas": testMSField("int", false, starlark.MakeInt(3), nil),
+	}, []string{"replicas"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("replicas"), starlark.MakeInt(5)},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Setting None should restore default of 3.
+	err = s.SetField("replicas", starlark.None)
+	if err != nil {
+		t.Fatalf("SetField None: %v", err)
+	}
+	v, err := s.Attr("replicas")
+	if err != nil {
+		t.Fatalf("Attr(replicas): %v", err)
+	}
+	if v != starlark.MakeInt(3) {
+		t.Errorf("replicas = %v, want 3 (default)", v)
+	}
+}
+
+// SCHM-05 None semantics: None on optional without default deletes field.
+func TestMutableStructSchemaSetFieldNoneDeletesField(t *testing.T) {
+	sc := testSchemaCallable("MySchema", map[string]*schema.FieldDescriptor{
+		"region": testMSField("string", false, starlark.None, nil),
+	}, []string{"region"})
+
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("schema"), sc},
+			{starlark.String("region"), starlark.String("eastus")},
+		},
+	)
+	if err != nil {
+		t.Fatalf("MakeMutableStruct: %v", err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Setting None on optional-without-default should delete the field.
+	err = s.SetField("region", starlark.None)
+	if err != nil {
+		t.Fatalf("SetField None: %v", err)
+	}
+	// Field should be gone from dict.
+	_, err = s.Attr("region")
+	if err == nil {
+		t.Fatal("expected NoSuchAttrError after deleting field")
+	}
+}
+
+// SCHM-05: SetField without schema behaves exactly as before (no validation).
+func TestMutableStructSetFieldNoSchemaUnchanged(t *testing.T) {
+	ms, err := MakeMutableStruct(
+		&starlark.Thread{}, &starlark.Builtin{}, nil,
+		[]starlark.Tuple{
+			{starlark.String("name"), starlark.String("test")},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := ms.(*MutableStruct)
+
+	// Should allow any field, any type — no validation.
+	if err := s.SetField("anything", starlark.MakeInt(999)); err != nil {
+		t.Fatalf("SetField on non-schema struct: %v", err)
+	}
+	v, err := s.Attr("anything")
+	if err != nil {
+		t.Fatalf("Attr(anything): %v", err)
+	}
+	if v != starlark.MakeInt(999) {
+		t.Errorf("anything = %v, want 999", v)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Phase 45 Plan 01 — Pipeline integration tests
 // ---------------------------------------------------------------------------
 
