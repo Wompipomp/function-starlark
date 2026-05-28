@@ -169,15 +169,15 @@ func discoverTestFiles(dir string) ([]string, error) {
 // These are all pure builtins (no Crossplane request context required).
 func purePredeclared() starlark.StringDict {
 	return starlark.StringDict{
-		"json":     starlarkjson.Module,
-		"crypto":   builtins.CryptoModule,
-		"encoding": builtins.EncodingModule,
-		"dict":     builtins.DictModule,
-		"regex":    builtins.RegexModule,
-		"yaml":     builtins.YAMLModule,
-		"schema":   schema.SchemaBuiltin(),
-		"field":    schema.FieldBuiltin(),
-		"struct":   starlark.NewBuiltin("struct", starlarkstruct.Make),
+		"json":           starlarkjson.Module,
+		"crypto":         builtins.CryptoModule,
+		"encoding":       builtins.EncodingModule,
+		"dict":           builtins.DictModule,
+		"regex":          builtins.RegexModule,
+		"yaml":           builtins.YAMLModule,
+		"schema":         schema.SchemaBuiltin(),
+		"field":          schema.FieldBuiltin(),
+		"struct":         starlark.NewBuiltin("struct", starlarkstruct.Make),
 		"get":            builtins.GetBuiltin(),
 		"mutable_struct": starlark.NewBuiltin("mutable_struct", builtins.MakeMutableStruct),
 	}
