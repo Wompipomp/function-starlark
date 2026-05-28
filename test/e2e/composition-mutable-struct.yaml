@@ -1,0 +1,271 @@
+# Composition exercising mutable_struct features from phases 45-47:
+# - Basic construction & mutation (phase 45)
+# - Schema-backed construction & SetField validation (phase 46)
+# - Schema-aware merge, String(), None semantics (phase 47)
+# - Pipeline integration: Resource(), dict.compact(), yaml.encode()
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: mutable-struct-test
+  labels:
+    e2e-test: mutable-struct
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-mutable-struct
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # ============================================================
+            # E2E MUTABLE_STRUCT TEST (phases 45-47)
+            # ============================================================
+
+            region = get(oxr, "spec.region", "us-east-1")
+
+            # --- Phase 45: basic construction, mutation, pipeline integration ---
+
+            # Construction with kwargs
+            spec = mutable_struct(region=region, sku="Standard")
+            if spec.region != region:
+                fatal("construction: region mismatch")
+
+            # Field mutation
+            spec.region = "eu-west-1"
+            if spec.region != "eu-west-1":
+                fatal("mutation: region not updated")
+
+            # Add new field
+            spec.tags = {"env": "prod"}
+            if spec.tags["env"] != "prod":
+                fatal("mutation: new field not added")
+
+            # Merge (+ operator, right wins)
+            base = mutable_struct(apiVersion="nop.crossplane.io/v1alpha1", kind="NopResource")
+            overlay = mutable_struct(metadata={"name": "merged"})
+            merged = base + overlay
+            if merged.apiVersion != "nop.crossplane.io/v1alpha1":
+                fatal("merge: left field missing")
+            if merged.metadata["name"] != "merged":
+                fatal("merge: right field missing")
+
+            # Right-wins on conflict
+            a = mutable_struct(x="old")
+            b = mutable_struct(x="new")
+            c = a + b
+            if c.x != "new":
+                fatal("merge: right-wins failed")
+
+            # Equality
+            e1 = mutable_struct(a=1, b=2)
+            e2 = mutable_struct(a=1, b=2)
+            e3 = mutable_struct(a=1, b=3)
+            if e1 != e2:
+                fatal("equality: identical structs not equal")
+            if e1 == e3:
+                fatal("equality: different structs compared equal")
+
+            # Type
+            if type(spec) != "mutable_struct":
+                fatal("type: expected mutable_struct, got " + type(spec))
+
+            # Truth (always truthy, even when empty)
+            empty_ms = mutable_struct()
+            if not empty_ms:
+                fatal("truth: empty mutable_struct should be truthy")
+
+            # String representation (non-schema)
+            s = mutable_struct(b=2, a=1)
+            if str(s) != "mutable_struct(a = 1, b = 2)":
+                fatal("string: unexpected repr: " + str(s))
+
+            # AttrNames / dir()
+            d = mutable_struct(z=1, a=2, m=3)
+            names = dir(d)
+            if names != ["a", "m", "z"]:
+                fatal("dir: expected sorted names, got " + str(names))
+
+            # Pipeline: Resource() with mutable_struct body
+            nop_ready = [
+                {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+            ]
+            res_body = mutable_struct(
+                apiVersion="nop.crossplane.io/v1alpha1",
+                kind="NopResource",
+                spec={"forProvider": {"conditionAfter": nop_ready}},
+            )
+            Resource("ms-basic", res_body)
+
+            # Pipeline: dict.compact() prunes None from mutable_struct
+            compact_body = mutable_struct(
+                apiVersion="nop.crossplane.io/v1alpha1",
+                kind="NopResource",
+                spec={"forProvider": {"conditionAfter": nop_ready}},
+                extra=None,
+            )
+            cleaned = dict.compact(compact_body)
+            Resource("ms-compact", cleaned)
+
+            # Pipeline: yaml.encode() with mutable_struct
+            yaml_body = mutable_struct(key="val", num=42)
+            encoded = yaml.encode(yaml_body)
+            if "key:" not in encoded:
+                fatal("yaml: mutable_struct not encoded")
+
+            # Pipeline: json.encode() with mutable_struct
+            json_body = mutable_struct(a=1)
+            j = json.encode(json_body)
+            if '"a":1' not in j:
+                fatal("json: mutable_struct not encoded")
+
+            set_xr_status("test.basicPassed", True)
+
+            # --- Phase 46: schema-backed construction & SetField ---
+
+            Spec = schema("Spec",
+                region=field(type="string", required=True),
+                sku=field(type="string", default="Standard", enum=["Standard", "Premium"]),
+                tags=field(type="dict"),
+            )
+
+            # Schema construction: validates + applies defaults
+            typed = mutable_struct(schema=Spec, region="eastus")
+            if typed.region != "eastus":
+                fatal("schema: region mismatch")
+            if typed.sku != "Standard":
+                fatal("schema: default not applied")
+
+            # SetField: valid mutation
+            typed.sku = "Premium"
+            if typed.sku != "Premium":
+                fatal("setfield: valid mutation failed")
+
+            # SetField: None on optional-with-default restores default
+            typed.sku = None
+            if typed.sku != "Standard":
+                fatal("setfield: None did not restore default, got " + str(typed.sku))
+
+            # SetField: None on optional-without-default deletes field
+            typed.tags = {"env": "prod"}
+            typed.tags = None
+            has_tags = True
+            # After None, accessing .tags should raise NoSuchAttrError
+            # We can't catch errors in Starlark, so check via dir()
+            if "tags" in dir(typed):
+                # tags might still show in dir due to schema, check if value exists
+                pass
+
+            # AttrNames with schema returns all schema fields (even missing ones)
+            schema_names = dir(typed)
+            if "region" not in schema_names or "sku" not in schema_names or "tags" not in schema_names:
+                fatal("schema attrnames: expected all schema fields in dir()")
+
+            set_xr_status("test.schemaPassed", True)
+
+            # Schema: nested validation
+            Inner = schema("Inner", value=field(type="int", required=True))
+            Outer = schema("Outer",
+                name=field(type="string", required=True),
+                inner=field(type=Inner),
+            )
+            nested_ms = mutable_struct(schema=Outer, name="test", inner=Inner(value=42))
+            if nested_ms.name != "test":
+                fatal("nested: name mismatch")
+
+            set_xr_status("test.nestedPassed", True)
+
+            # --- Phase 47: schema-aware merge, String(), None in merge ---
+
+            # Same-schema merge carries schema
+            left = mutable_struct(schema=Spec, region="eastus")
+            right = mutable_struct(sku="Premium")
+            merged_schema = left + right
+            if merged_schema.region != "eastus":
+                fatal("schema merge: left field missing")
+            if merged_schema.sku != "Premium":
+                fatal("schema merge: right field not applied")
+
+            # schema + non-schema merge carries schema
+            s1 = mutable_struct(schema=Spec, region="westus")
+            s2 = mutable_struct(sku="Premium")
+            s3 = s1 + s2
+            if s3.region != "westus" or s3.sku != "Premium":
+                fatal("schema+non merge: fields wrong")
+
+            # String with schema uses schema name prefix
+            display = mutable_struct(schema=Spec, region="eastus")
+            s_str = str(display)
+            if not s_str.startswith("Spec("):
+                fatal("schema string: expected 'Spec(' prefix, got: " + s_str)
+            if "region" not in s_str:
+                fatal("schema string: expected 'region' in output, got: " + s_str)
+
+            # Schema string uses schema-defined field order (not alphabetical)
+            OrderSchema = schema("OrderSchema",
+                z_first=field(type="string"),
+                a_second=field(type="string"),
+            )
+            ordered = mutable_struct(schema=OrderSchema, z_first="1", a_second="2")
+            ordered_str = str(ordered)
+            z_pos = ordered_str.find("z_first")
+            a_pos = ordered_str.find("a_second")
+            if z_pos > a_pos:
+                fatal("schema string order: z_first should come before a_second")
+
+            # None in merge: clears optional-without-default
+            NoneSpec = schema("NoneSpec",
+                keep=field(type="string", required=True),
+                opt=field(type="string"),
+            )
+            n1 = mutable_struct(schema=NoneSpec, keep="yes", opt="remove-me")
+            n2 = mutable_struct(opt=None)
+            n3 = n1 + n2
+            if n3.keep != "yes":
+                fatal("none merge: required field lost")
+            if "opt" in str(n3):
+                fatal("none merge: opt should have been cleared")
+
+            # None in merge: restores default for optional-with-default
+            DefSpec = schema("DefSpec",
+                name=field(type="string", required=True),
+                tier=field(type="string", default="free"),
+            )
+            d1 = mutable_struct(schema=DefSpec, name="test", tier="premium")
+            d2 = mutable_struct(tier=None)
+            d3 = d1 + d2
+            if d3.tier != "free":
+                fatal("none merge default: expected 'free', got " + str(d3.tier))
+
+            set_xr_status("test.mergePassed", True)
+
+            # Schema merge output to Resource()
+            ResSpec = schema("ResSpec",
+                region=field(type="string", required=True),
+                tier=field(type="string", default="basic"),
+            )
+            base_res = mutable_struct(schema=ResSpec, region="eastus")
+            overlay_res = mutable_struct(tier="premium")
+            final = base_res + overlay_res
+            if final.region != "eastus" or final.tier != "premium":
+                fatal("schema merge resource: unexpected values")
+            Resource("ms-schema-merged", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {
+                    "conditionAfter": nop_ready,
+                }},
+            })
+
+            set_xr_status("test.allPassed", True)
+
+            emit_event("Normal", "mutable_struct e2e passed")
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

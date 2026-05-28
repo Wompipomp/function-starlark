@@ -182,6 +182,7 @@ Test files have access to these predeclared builtins:
 | `schema` | Schema definition |
 | `field` | Schema field definition |
 | `struct` | Struct construction |
+| `mutable_struct` | Mutable struct construction |
 | `get` | Deep key access with dot notation |
 
 Crossplane-specific builtins -- `Resource`, `oxr`, `dxr`, `observed`, and

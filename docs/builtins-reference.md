@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 35 predeclared names -- 6 globals, 23 functions, and
+function-starlark provides 36 predeclared names -- 6 globals, 24 functions, and
 6 namespace modules -- that are automatically available in every Starlark script
 without import. These are the core API for interacting with Crossplane's
 composite resource model.
@@ -39,6 +39,7 @@ composite resource model.
 | `schema()` | function | Define a typed constructor with field validation |
 | `field()` | function | Define a field descriptor for schema constructors |
 | `struct()` | function | Create an immutable struct with named fields (dot-access) |
+| `mutable_struct()` | function | Create a mutable struct with dot-access field mutation |
 | `get_extra_resource()` | function | One-call extra-resource field lookup with default |
 | `get_extra_resources()` | function | Get all extra resources for a name as list |
 | `is_observed()` | function | Check if a composed resource exists in observed state |
@@ -1162,6 +1163,109 @@ point.y  # 2
 # Namespace alias imports use struct internally
 load("helpers.star", h="*")
 h.my_function()  # h is a struct wrapping all exports from helpers.star
+```
+
+---
+
+### mutable_struct
+
+```python
+mutable_struct(schema=None, **kwargs)
+```
+
+Create a mutable struct with named fields accessible via dot notation. Unlike
+`struct()`, fields can be reassigned after creation (`s.field = new_value`).
+Internally backed by a dict, so it integrates transparently with `Resource()`,
+`dict.merge()`, `dict.compact()`, `yaml.encode()`, and `json.encode()`.
+
+When `schema=` is provided, all fields are validated at construction time and
+on every subsequent mutation (`s.field = val`). The merge operator (`+`) also
+validates when either operand carries a schema.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `schema` | schema or None | None | Optional schema for type validation. Must be a value returned by `schema()`. |
+| `**kwargs` | any | -- | Named fields. Each kwarg becomes a field on the struct. |
+
+**Returns:** A mutable struct value. Fields are accessed and mutated via dot
+notation. Supports `+` (merge), `==`/`!=` comparison, `str()`, and `dir()`.
+
+**Operators:**
+
+| Operator | Behavior |
+|----------|----------|
+| `a + b` | Merge two mutable_structs. Right side wins on key conflicts. Result carries the schema if either operand has one. Different schemas produce an error. |
+| `a == b` | True if both have the same fields with equal values. |
+
+**Schema behavior:**
+
+When a schema is attached:
+
+- **Construction** validates all fields, applies defaults for missing optional
+  fields, rejects unknown fields (with did-you-mean suggestions), and reports
+  all errors at once.
+- **SetField** (`s.field = val`) validates the value before storing. Assigning
+  `None` to a required field is rejected. Assigning `None` to an optional field
+  with a default restores the default. Assigning `None` to an optional field
+  without a default deletes the field.
+- **Merge** (`a + b`) validates right-operand fields against the schema. Merging
+  two structs with different schemas produces a clear error naming both schemas.
+- **String** representation uses the schema name as prefix with schema-defined
+  field ordering: `MySchema(field1 = val1, field2 = val2)`.
+
+**Example -- basic mutable struct:**
+
+```python
+spec = mutable_struct(region="us-east-1", sku="Standard")
+spec.region = "eu-west-1"  # mutate existing field
+spec.tags = {"env": "prod"}  # add new field
+
+Resource("storage", {
+    "apiVersion": "storage.azure.upbound.io/v1beta1",
+    "kind": "Account",
+    "spec": {"forProvider": spec},
+})
+```
+
+**Example -- merge:**
+
+```python
+base = mutable_struct(apiVersion="v1", kind="ConfigMap", metadata={"name": "test"})
+overlay = mutable_struct(data={"key": "val"})
+merged = base + overlay  # right side wins on conflicts
+
+Resource("cm", merged)
+```
+
+**Example -- schema-backed mutable struct:**
+
+```python
+Spec = schema("Spec",
+    region=field(type="string", required=True),
+    sku=field(type="string", default="Standard", enum=["Standard", "Premium"]),
+)
+
+spec = mutable_struct(schema=Spec, region="eastus")
+# spec.sku is "Standard" (default applied)
+
+spec.sku = "Premium"  # validated against schema
+# spec.sku = 123  # would fail: expected string, got int
+
+# Merge preserves schema
+overlay = mutable_struct(sku="Standard")
+result = spec + overlay  # result carries Spec schema
+
+# String shows schema name: Spec(region = "eastus", sku = "Standard")
+```
+
+**Example -- dict helpers:**
+
+```python
+b = mutable_struct(apiVersion="v1", kind="ConfigMap", extra=None)
+clean = dict.compact(b)  # prunes None values
+Resource("cm", clean)
 ```
 
 ---

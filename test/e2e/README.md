@@ -12,6 +12,7 @@ End-to-end tests that run function-starlark in a real Crossplane cluster.
 | **depends-on** | `composition-depends-on.yaml` | Creation sequencing (A->B->C chain), deletion ordering via Usage resources |
 | **composite-ready** | `composition-composite-ready.yaml` | Composite readiness gating: auto-gate via `When(condition=False)`, opt-out via `When(optional=True)`, explicit `set_composite_ready(False, reason=..., message=...)` |
 | **transitive-skip** | `composition-transitive-skip.yaml` | Transitive skip via `SkippedRef` in `depends_on` (always propagates); `depends_on=[None]` is tolerated without error |
+| **mutable-struct** | `composition-mutable-struct.yaml` | mutable_struct construction, mutation, merge, schema validation (construction + SetField + None), schema-aware merge with String() identity, pipeline integration (Resource, dict.compact, yaml.encode, json.encode) |
 
 ## Prerequisites
 

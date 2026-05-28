@@ -238,6 +238,41 @@ point.x  # 1
 point.y  # 2
 ```
 
+### mutable_struct(schema=None, **kwargs)
+
+Create a mutable struct with named fields accessible via dot notation. Unlike struct(), fields can be reassigned after creation (s.field = new_value). Integrates transparently with Resource(), dict.merge(), dict.compact(), yaml.encode(), and json.encode().
+
+When schema= is provided, all fields are validated at construction time and on every subsequent mutation. The merge operator (+) also validates when either operand carries a schema.
+
+- schema: Optional schema() for type validation. Validates fields at construction time and on every SetField/merge.
+- **kwargs: Named fields. Each kwarg becomes a field on the struct.
+- Supports + (merge, right side wins), == / != comparison, str(), dir().
+- Schema-backed String() uses schema name prefix: MySchema(field1 = val1, field2 = val2).
+- Assigning None to a required field is rejected. None on optional-with-default restores the default. None on optional-without-default deletes the field.
+- Merging two structs with different schemas produces a clear error naming both schemas.
+
+```python
+# Basic mutable struct
+spec = mutable_struct(region="us-east-1", sku="Standard")
+spec.region = "eu-west-1"  # mutate field
+spec.tags = {"env": "prod"}  # add new field
+Resource("storage", {"apiVersion": "...", "kind": "Account", "spec": {"forProvider": spec}})
+
+# Schema-backed mutable struct
+Spec = schema("Spec",
+    region=field(type="string", required=True),
+    sku=field(type="string", default="Standard", enum=["Standard", "Premium"]),
+)
+spec = mutable_struct(schema=Spec, region="eastus")
+spec.sku = "Premium"  # validated against schema
+
+# Merge
+base = mutable_struct(apiVersion="v1", kind="ConfigMap")
+overlay = mutable_struct(data={"key": "val"})
+merged = base + overlay
+Resource("cm", merged)
+```
+
 ### get_extra_resource(name, path=None, default=None)
 
 One-call extra-resource field lookup. Returns the value at path within the first matching extra resource, or default when the name is missing or path not found. When path is None, returns the full resource body.
@@ -499,7 +534,7 @@ Write unit tests for Starlark helper modules using `*_test.star` files.
 - assert.fail(msg) -- unconditionally report error (does NOT halt)
 
 ### Available builtins in tests
-All pure builtins available without import: json, crypto, encoding, dict, regex, yaml, schema, field, struct, get.
+All pure builtins available without import: json, crypto, encoding, dict, regex, yaml, schema, field, struct, mutable_struct, get.
 NOT available: Resource, oxr, dxr, observed (require Crossplane reconciliation context).
 
 ### Example

@@ -525,6 +525,49 @@ db = cosmosdb.Account(location="eastus", kind="GlobalDocumentDB")
 Each namespace struct keeps its provider's types separate. See the
 [module system guide](module-system.md#namespace-alias-imports) for full syntax.
 
+### Mutable structs
+
+`mutable_struct()` creates a struct whose fields can be reassigned after
+creation. This is useful when you need to build up a resource body incrementally,
+apply conditional overrides, or merge partial specs.
+
+```python
+spec = mutable_struct(region="us-east-1", sku="Standard")
+spec.region = "eu-west-1"  # mutate existing field
+spec.tags = {"env": "prod"}  # add new field
+
+Resource("storage", {
+    "apiVersion": "storage.azure.upbound.io/v1beta1",
+    "kind": "Account",
+    "spec": {"forProvider": spec},
+})
+```
+
+Mutable structs integrate transparently with `Resource()`, `dict.merge()`,
+`dict.compact()`, `yaml.encode()`, and `json.encode()` -- no conversion needed.
+
+**Schema-backed mutable structs** combine mutability with type safety. Attach a
+`schema=` to get validation at construction time and on every field assignment
+or merge:
+
+```python
+Spec = schema("Spec",
+    region=field(type="string", required=True),
+    sku=field(type="string", default="Standard", enum=["Standard", "Premium"]),
+)
+
+spec = mutable_struct(schema=Spec, region="eastus")
+spec.sku = "Premium"  # validated against schema
+# spec.sku = 123     # would fail: expected string, got int
+
+# Merge carries schema and validates right-operand fields
+overlay = mutable_struct(sku="Standard")
+result = spec + overlay  # result is schema-backed
+```
+
+For full signatures and operator behavior, see the
+[builtins reference](builtins-reference.md#mutable_struct).
+
 ## Observability (metrics)
 
 function-starlark exposes 9 Prometheus metrics on the standard `/metrics`

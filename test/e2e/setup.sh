@@ -11,6 +11,10 @@ REGISTRY_PORT="${REGISTRY_PORT:-5050}"
 CROSSPLANE_VERSION="${CROSSPLANE_VERSION:-1.19}"
 PROVIDER_NOP_VERSION="${PROVIDER_NOP_VERSION:-v0.3.0}"
 
+# Reset KUBECONFIG so kind writes to the default ~/.kube/config
+# instead of an unrelated cluster's kubeconfig.
+unset KUBECONFIG
+
 echo "==> Setting up e2e test environment"
 echo "    Cluster:    $CLUSTER_NAME"
 echo "    Registry:   localhost:$REGISTRY_PORT"

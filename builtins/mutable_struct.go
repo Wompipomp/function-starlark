@@ -258,7 +258,10 @@ func (s *MutableStruct) Binary(op syntax.Token, y starlark.Value, side starlark.
 
 	// Merge right fields, validating against schema if present.
 	for _, item := range right.d.Items() {
-		key, _ := item[0].(starlark.String)
+		key, ok := item[0].(starlark.String)
+		if !ok {
+			return nil, fmt.Errorf("cannot merge mutable_struct: non-string key %v", item[0])
+		}
 		if resultSchema != nil {
 			processedVal, err := resultSchema.ValidateMutation(string(key), item[1])
 			if err != nil {

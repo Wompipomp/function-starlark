@@ -2122,6 +2122,300 @@ func TestRunFunction(t *testing.T) {
 				}(),
 			},
 		},
+		"MutableStructResource": {
+			reason: "E2E-MS-01: mutable_struct passed to Resource(body=...) produces identical protobuf to plain dict.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", metadata={\"name\": \"test\"}, data={\"key\": \"val\"})\nResource(\"cm\", b)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", metadata={\"name\": \"test\"}, data={\"key\": \"val\"})\nResource(\"cm\", b)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"cm": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test"},"data":{"key":"val"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"MutableStructMutateBeforeResource": {
+			reason: "E2E-MS-02: mutable_struct fields can be mutated before passing to Resource().",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", metadata={\"name\": \"original\"})\nb.metadata = {\"name\": \"mutated\"}\nb.data = {\"new\": \"field\"}\nResource(\"cm\", b)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", metadata={\"name\": \"original\"})\nb.metadata = {\"name\": \"mutated\"}\nb.data = {\"new\": \"field\"}\nResource(\"cm\", b)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"cm": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"mutated"},"data":{"new":"field"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"MutableStructMerge": {
+			reason: "E2E-MS-03: mutable_struct + mutable_struct merge produces correct Resource() output.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "base = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", metadata={\"name\": \"test\"})\noverlay = mutable_struct(data={\"key\": \"val\"})\nmerged = base + overlay\nResource(\"cm\", merged)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "base = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", metadata={\"name\": \"test\"})\noverlay = mutable_struct(data={\"key\": \"val\"})\nmerged = base + overlay\nResource(\"cm\", merged)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"cm": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test"},"data":{"key":"val"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"MutableStructSchemaResource": {
+			reason: "E2E-MS-04: schema-backed mutable_struct passed to Resource() produces correct protobuf.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Spec = schema(\"Spec\", region=field(type=\"string\", required=True), sku=field(type=\"string\", default=\"Standard\"))\nspec = mutable_struct(schema=Spec, region=\"eastus\")\nResource(\"storage\", {\"apiVersion\": \"v1\", \"kind\": \"Account\", \"spec\": spec})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Spec = schema(\"Spec\", region=field(type=\"string\", required=True), sku=field(type=\"string\", default=\"Standard\"))\nspec = mutable_struct(schema=Spec, region=\"eastus\")\nResource(\"storage\", {\"apiVersion\": \"v1\", \"kind\": \"Account\", \"spec\": spec})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"storage": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Account","spec":{"region":"eastus","sku":"Standard"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"MutableStructSchemaMergeResource": {
+			reason: "E2E-MS-05: schema-backed mutable_struct merge preserves schema and validates, then produces correct Resource() output.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "Spec = schema(\"Spec\", region=field(type=\"string\", required=True), sku=field(type=\"string\", default=\"Standard\"))\nbase = mutable_struct(schema=Spec, region=\"eastus\")\noverlay = mutable_struct(sku=\"Premium\")\nmerged = base + overlay\nResource(\"storage\", {\"apiVersion\": \"v1\", \"kind\": \"Account\", \"spec\": merged})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "Spec = schema(\"Spec\", region=field(type=\"string\", required=True), sku=field(type=\"string\", default=\"Standard\"))\nbase = mutable_struct(schema=Spec, region=\"eastus\")\noverlay = mutable_struct(sku=\"Premium\")\nmerged = base + overlay\nResource(\"storage\", {\"apiVersion\": \"v1\", \"kind\": \"Account\", \"spec\": merged})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"storage": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"Account","spec":{"region":"eastus","sku":"Premium"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"MutableStructDictHelpers": {
+			reason: "E2E-MS-06: dict.merge/dict.pick/dict.compact work with mutable_struct values.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", data={\"k\": \"v\"}, extra=None)\nclean = dict.compact(b)\nResource(\"cm\", clean)"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\", data={\"k\": \"v\"}, extra=None)\nclean = dict.compact(b)\nResource(\"cm\", clean)"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"cm": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"ConfigMap","data":{"k":"v"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
+		"MutableStructYamlEncode": {
+			reason: "E2E-MS-07: yaml.encode works with mutable_struct values.",
+			args: args{
+				ctx: context.Background(),
+				req: &fnv1.RunFunctionRequest{
+					Input: resource.MustStructJSON(`{
+						"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+						"kind": "StarlarkInput",
+						"spec": {
+							"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\")\ny = yaml.encode(b)\nResource(\"cm\", {\"apiVersion\": \"v1\", \"kind\": \"ConfigMap\", \"data\": {\"rendered\": y}})"
+						}
+					}`),
+				},
+			},
+			want: want{
+				rsp: func() *fnv1.RunFunctionResponse {
+					rsp := response.To(&fnv1.RunFunctionRequest{
+						Input: resource.MustStructJSON(`{
+							"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+							"kind": "StarlarkInput",
+							"spec": {
+								"source": "b = mutable_struct(apiVersion=\"v1\", kind=\"ConfigMap\")\ny = yaml.encode(b)\nResource(\"cm\", {\"apiVersion\": \"v1\", \"kind\": \"ConfigMap\", \"data\": {\"rendered\": y}})"
+							}
+						}`),
+					}, response.DefaultTTL)
+					response.Normal(rsp, "function-starlark: executed successfully")
+					rsp.Context = &structpb.Struct{}
+					rsp.Desired = &fnv1.State{
+						Composite: &fnv1.Resource{
+							Resource: resource.MustStructJSON(`{}`),
+						},
+						Resources: map[string]*fnv1.Resource{
+							"cm": {
+								Resource: resource.MustStructJSON(`{"apiVersion":"v1","kind":"ConfigMap","data":{"rendered":"apiVersion: v1\nkind: ConfigMap"}}`),
+								Ready:    fnv1.Ready_READY_UNSPECIFIED,
+							},
+						},
+					}
+					return rsp
+				}(),
+			},
+		},
 		"SchemaLoadedModule": {
 			reason: "INT-02/INT-04: Schema defined in loaded module survives freeze and produces valid resource -- proves load() compatibility.",
 			args: args{
@@ -2354,6 +2648,69 @@ func TestErrorSubstrings(t *testing.T) {
 			}
 
 			// Should be Fatal severity.
+			if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_FATAL {
+				t.Errorf("expected SEVERITY_FATAL, got %v", rsp.GetResults()[0].GetSeverity())
+			}
+
+			msg := rsp.GetResults()[0].GetMessage()
+			for _, sub := range tc.contains {
+				if !strings.Contains(msg, sub) {
+					t.Errorf("expected message to contain %q, got: %s", sub, msg)
+				}
+			}
+		})
+	}
+}
+
+func TestMutableStructErrors(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	cases := map[string]struct {
+		source   string
+		contains []string
+	}{
+		"SchemaConstructionTypeMismatch": {
+			source:   `Spec = schema("Spec", region=field(type="string"))` + "\n" + `mutable_struct(schema=Spec, region=123)`,
+			contains: []string{"expected string, got int"},
+		},
+		"SchemaSetFieldRejectsWrongType": {
+			source:   `Spec = schema("Spec", region=field(type="string"))` + "\n" + `s = mutable_struct(schema=Spec, region="ok")` + "\n" + `s.region = 42`,
+			contains: []string{"expected string, got int"},
+		},
+		"SchemaSetFieldRejectsUnknown": {
+			source:   `Spec = schema("Spec", region=field(type="string"))` + "\n" + `s = mutable_struct(schema=Spec, region="ok")` + "\n" + `s.unknown = "x"`,
+			contains: []string{"unknown field"},
+		},
+		"SchemaMergeDifferentSchemas": {
+			source:   `A = schema("SchemaA", x=field(type="string"))` + "\n" + `B = schema("SchemaB", y=field(type="string"))` + "\n" + `a = mutable_struct(schema=A, x="1")` + "\n" + `b = mutable_struct(schema=B, y="2")` + "\n" + `c = a + b`,
+			contains: []string{"schemas differ", "SchemaA", "SchemaB"},
+		},
+		"SchemaMergeRejectsInvalidType": {
+			source:   `Spec = schema("Spec", count=field(type="int"))` + "\n" + `a = mutable_struct(schema=Spec, count=1)` + "\n" + `b = mutable_struct(count="not-int")` + "\n" + `c = a + b`,
+			contains: []string{"expected int, got string"},
+		},
+		"SchemaSetFieldNoneOnRequired": {
+			source:   `Spec = schema("Spec", region=field(type="string", required=True))` + "\n" + `s = mutable_struct(schema=Spec, region="ok")` + "\n" + `s.region = None`,
+			contains: []string{"required field"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := &fnv1.RunFunctionRequest{
+				Input: resource.MustStructJSON(fmt.Sprintf(`{
+					"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+					"kind": "StarlarkInput",
+					"spec": {"source": %q}
+				}`, tc.source)),
+			}
+
+			rsp, err := f.RunFunction(context.Background(), req)
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+
 			if rsp.GetResults()[0].GetSeverity() != fnv1.Severity_SEVERITY_FATAL {
 				t.Errorf("expected SEVERITY_FATAL, got %v", rsp.GetResults()[0].GetSeverity())
 			}
