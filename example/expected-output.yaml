@@ -266,7 +266,6 @@ metadata:
     crossplane.io/composition-resource-name: usage-e8072ae8
   labels:
     crossplane.io/composite: example-xr
-  name: usage-e8072ae8
   ownerReferences:
   - apiVersion: example.crossplane.io/v1
     blockOwnerDeletion: true
