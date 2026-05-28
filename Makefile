@@ -25,13 +25,9 @@ render: build
 	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml
 
 # Render and compare against expected output (non-zero exit on mismatch).
-# Filters version-dependent noise from `crossplane render`:
-#   - generateName: present in some CLI versions
-#   - "Unready resources: ..." Ready aggregation message: produced by some CLI
-#     versions on top of our explicit Composite.Ready=False; redundant with the
-#     ComposedResourcesReady condition we emit ourselves.
+# Pipes through normalize-render.sh to handle crossplane CLI v1/v2 differences.
 render-check: build
-	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | grep -v -E '^\s*generateName:|^\s*message: .Unready resources:' | diff - example/expected-output.yaml
+	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | bash example/normalize-render.sh | diff - example/expected-output.yaml
 
 # Build Crossplane package
 xpkg: build
