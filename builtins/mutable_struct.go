@@ -209,7 +209,9 @@ func (s *MutableStruct) SetField(name string, val starlark.Value) error {
 		}
 		// nil processedVal = None on optional-without-default = delete key.
 		if processedVal == nil {
-			_, _, _ = s.d.Delete(starlark.String(name))
+			if _, _, err := s.d.Delete(starlark.String(name)); err != nil {
+				return err
+			}
 			return nil
 		}
 		return s.d.SetKey(starlark.String(name), processedVal)
@@ -269,7 +271,9 @@ func (s *MutableStruct) Binary(op syntax.Token, y starlark.Value, side starlark.
 			}
 			// 3-way dispatch: (val, nil)=store, (nil, nil)=delete, (nil, err)=error.
 			if processedVal == nil {
-				_, _, _ = merged.Delete(starlark.String(string(key)))
+				if _, _, err := merged.Delete(starlark.String(string(key))); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if err := merged.SetKey(item[0], processedVal); err != nil {
