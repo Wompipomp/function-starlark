@@ -165,7 +165,8 @@ spec:
 ### Step 3: Render locally
 
 ```bash
-crossplane render xr.yaml composition.yaml functions.yaml
+# Requires the crossplane v2 CLI (`crossplane composition render`).
+crossplane composition render xr.yaml composition.yaml functions.yaml
 ```
 
 The output includes the composed Bucket and Topic resources, a Usage resource

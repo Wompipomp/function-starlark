@@ -1,5 +1,14 @@
 .PHONY: generate lint test bench build render render-check xpkg clean stdlib-push stdlib-push-local
 
+# crossplane CLI to use. Defaults to `crossplane` on PATH; override to point at a
+# v2 crank binary without replacing an existing v1 install, e.g.
+#   make render-check CROSSPLANE=$HOME/.local/bin/crank-v2
+CROSSPLANE ?= crossplane
+
+# Pinned crossplane render-engine version. `composition render` runs this engine
+# in Docker; pinning it keeps render output reproducible across hosts (CI/local).
+XP_ENGINE_VERSION ?= v2.3.1
+
 # Run code generation (deepcopy methods + CRD schemas)
 generate:
 	go generate ./...
@@ -20,15 +29,16 @@ bench:
 build: generate
 	docker build . --tag=runtime
 
-# Run crossplane render with example fixtures
+# Run crossplane render with example fixtures (v2 render engine)
 render: build
-	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml
+	$(CROSSPLANE) composition render example/xr.yaml example/composition.yaml example/functions.yaml --crossplane-version=$(XP_ENGINE_VERSION)
 
 # Render and compare against expected output (non-zero exit on mismatch).
-# Both sides pass through normalize-render.py to handle crossplane CLI v1/v2 differences.
+# Both sides pass through normalize-render.py to normalize timestamps/uids and
+# canonicalize document order (see that script for details).
 render-check: build
 	@actual=$$(mktemp) expected=$$(mktemp); \
-	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | python3 example/normalize-render.py > "$$actual"; \
+	$(CROSSPLANE) composition render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results --crossplane-version=$(XP_ENGINE_VERSION) 2>/dev/null | python3 example/normalize-render.py > "$$actual"; \
 	python3 example/normalize-render.py < example/expected-output.yaml > "$$expected"; \
 	diff "$$actual" "$$expected"; \
 	rc=$$?; rm -f "$$actual" "$$expected"; exit $$rc

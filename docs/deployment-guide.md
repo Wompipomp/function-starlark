@@ -332,5 +332,5 @@ make render
 make render-check
 ```
 
-This builds the Docker image and runs `crossplane render` against the example
-fixtures without requiring a Kubernetes cluster.
+This builds the Docker image and runs `crossplane composition render` (v2)
+against the example fixtures without requiring a Kubernetes cluster.

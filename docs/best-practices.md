@@ -266,9 +266,11 @@ spec:
 
 ## Testing with crossplane render
 
-The `crossplane render` CLI runs compositions locally against a function Docker
-image without needing a Kubernetes cluster. This is the primary testing
-workflow for function-starlark compositions.
+The `crossplane composition render` CLI (crossplane v2) runs compositions
+locally against a function Docker image without needing a Kubernetes cluster.
+This is the primary testing workflow for function-starlark compositions. It
+runs the crossplane render engine in Docker; pin its version with
+`--crossplane-version` for reproducible output.
 
 ### Setup
 
@@ -289,14 +291,15 @@ make build
 ### Run
 
 ```bash
-crossplane render example/xr.yaml example/composition.yaml example/functions.yaml
+crossplane composition render example/xr.yaml example/composition.yaml example/functions.yaml \
+  --crossplane-version=v2.3.1
 ```
 
 Use `--include-function-results` to see events and results in the output:
 
 ```bash
-crossplane render example/xr.yaml example/composition.yaml example/functions.yaml \
-  --include-function-results
+crossplane composition render example/xr.yaml example/composition.yaml example/functions.yaml \
+  --crossplane-version=v2.3.1 --include-function-results
 ```
 
 ### Automated regression testing
@@ -308,8 +311,9 @@ to your CI pipeline:
 make render-check
 ```
 
-This builds the Docker image, runs `crossplane render`, and diffs the output
-against `example/expected-output.yaml`. Any unexpected change causes a failure.
+This builds the Docker image, runs `crossplane composition render`, and diffs
+the output (normalized for timestamps/UIDs and document order) against
+`example/expected-output.yaml`. Any unexpected change causes a failure.
 
 ### Tips
 

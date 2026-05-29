@@ -429,14 +429,14 @@ For each KCL composition:
 
 ### 4. Validate with crossplane render
 
-Use `crossplane render` to compare outputs:
+Use `crossplane composition render` (crossplane v2) to compare outputs:
 
 ```bash
 # Render the KCL version
-crossplane render xr.yaml kcl-composition.yaml functions.yaml > kcl-output.yaml
+crossplane composition render xr.yaml kcl-composition.yaml functions.yaml > kcl-output.yaml
 
 # Render the Starlark version
-crossplane render xr.yaml starlark-composition.yaml functions.yaml > starlark-output.yaml
+crossplane composition render xr.yaml starlark-composition.yaml functions.yaml > starlark-output.yaml
 
 # Compare (ignore field ordering)
 diff <(yq -P 'sort_keys(..)' kcl-output.yaml) \

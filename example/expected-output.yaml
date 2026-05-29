@@ -3,21 +3,198 @@ apiVersion: example.crossplane.io/v1
 kind: XBucket
 metadata:
   name: example-xr
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: monitoring.example.io/v1
+      kind: Dashboard
+      name: example-xr-dashboard
+    - apiVersion: protection.crossplane.io/v1beta1
+      kind: Usage
+      name: example-xr-8ae6aeda8ff7
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-0
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-1
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-2
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-3
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-4
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-5
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-6
+    - apiVersion: s3.aws.upbound.io/v1beta1
+      kind: Bucket
+      name: example-xr-bucket-7
 status:
   atProvider:
     bucketCount: 8
     environment: prod
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
     message: 'Waiting on dependencies: "notification-topic" ("bucket-0" to be observed)'
     reason: WaitingForDependencies
     status: "False"
     type: ComposedResourcesReady
   - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
     reason: Creating
     status: "False"
     type: Ready
   region: us-east-1
+---
+apiVersion: monitoring.example.io/v1
+kind: Dashboard
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: monitoring-dashboard
+  labels:
+    app.kubernetes.io/managed-by: function-starlark
+    crossplane.io/composite: example-xr
+    environment: prod
+    function-starlark.crossplane.io/resource-name: monitoring-dashboard
+  name: example-xr-dashboard
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  forProvider:
+    enabled: true
+    refreshInterval: 30s
+    region: us-east-1
+---
+apiVersion: protection.crossplane.io/v1beta1
+kind: Usage
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: usage-e8072ae8
+  labels:
+    crossplane.io/composite: example-xr
+  name: example-xr-8ae6aeda8ff7
+  ownerReferences:
+  - apiVersion: example.crossplane.io/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: XBucket
+    name: example-xr
+    uid: ""
+spec:
+  by:
+    apiVersion: sns.aws.upbound.io/v1beta1
+    kind: Topic
+    resourceSelector:
+      matchControllerRef: true
+      matchLabels:
+        function-starlark.crossplane.io/resource-name: notification-topic
+  of:
+    apiVersion: s3.aws.upbound.io/v1beta1
+    kind: Bucket
+    resourceSelector:
+      matchControllerRef: true
+      matchLabels:
+        function-starlark.crossplane.io/resource-name: bucket-0
+  replayDeletion: true
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'Pipeline step "run-starlark": Created 8 buckets + 1 notification topic +
+  1 dashboard in us-east-1 (prod)'
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'Pipeline step "run-starlark": Creation sequencing: 1 resource(s) deferred:
+  notification-topic'
+reason: ComposeResources
+severity: Warning
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'Pipeline step "run-starlark": function-starlark: executed successfully'
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: 'Successfully selected composition: xbuckets.example.crossplane.io'
+reason: SelectComposition
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-0" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-1" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-2" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-3" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-4" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-5" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-6" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "bucket-7" is not yet ready
+reason: ComposeResources
+severity: Normal
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Composed resource "monitoring-dashboard" is not yet ready
+reason: ComposeResources
+severity: Normal
 ---
 apiVersion: s3.aws.upbound.io/v1beta1
 kind: Bucket
@@ -234,76 +411,3 @@ spec:
       Environment: prod
       Index: "7"
       ManagedBy: crossplane
----
-apiVersion: monitoring.example.io/v1
-kind: Dashboard
-metadata:
-  annotations:
-    crossplane.io/composition-resource-name: monitoring-dashboard
-  labels:
-    app.kubernetes.io/managed-by: function-starlark
-    crossplane.io/composite: example-xr
-    environment: prod
-    function-starlark.crossplane.io/resource-name: monitoring-dashboard
-  name: example-xr-dashboard
-  ownerReferences:
-  - apiVersion: example.crossplane.io/v1
-    blockOwnerDeletion: true
-    controller: true
-    kind: XBucket
-    name: example-xr
-    uid: ""
-spec:
-  forProvider:
-    enabled: true
-    refreshInterval: 30s
-    region: us-east-1
----
-apiVersion: protection.crossplane.io/v1beta1
-kind: Usage
-metadata:
-  annotations:
-    crossplane.io/composition-resource-name: usage-e8072ae8
-  labels:
-    crossplane.io/composite: example-xr
-  ownerReferences:
-  - apiVersion: example.crossplane.io/v1
-    blockOwnerDeletion: true
-    controller: true
-    kind: XBucket
-    name: example-xr
-    uid: ""
-spec:
-  by:
-    apiVersion: sns.aws.upbound.io/v1beta1
-    kind: Topic
-    resourceSelector:
-      matchControllerRef: true
-      matchLabels:
-        function-starlark.crossplane.io/resource-name: notification-topic
-  of:
-    apiVersion: s3.aws.upbound.io/v1beta1
-    kind: Bucket
-    resourceSelector:
-      matchControllerRef: true
-      matchLabels:
-        function-starlark.crossplane.io/resource-name: bucket-0
-  replayDeletion: true
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
-message: 'Creation sequencing: 1 resource(s) deferred: notification-topic'
-severity: SEVERITY_WARNING
-step: run-starlark
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
-message: 'function-starlark: executed successfully'
-severity: SEVERITY_NORMAL
-step: run-starlark
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
-message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)
-severity: SEVERITY_NORMAL
-step: run-starlark
