@@ -9,14 +9,14 @@ status:
     environment: prod
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
-    reason: Creating
-    status: "False"
-    type: Ready
-  - lastTransitionTime: "2024-01-01T00:00:00Z"
     message: 'Waiting on dependencies: "notification-topic" ("bucket-0" to be observed)'
     reason: WaitingForDependencies
     status: "False"
     type: ComposedResourcesReady
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: Creating
+    status: "False"
+    type: Ready
   region: us-east-1
 ---
 apiVersion: s3.aws.upbound.io/v1beta1
@@ -292,12 +292,6 @@ spec:
 ---
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
-message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)
-severity: SEVERITY_NORMAL
-step: run-starlark
----
-apiVersion: render.crossplane.io/v1beta1
-kind: Result
 message: 'Creation sequencing: 1 resource(s) deferred: notification-topic'
 severity: SEVERITY_WARNING
 step: run-starlark
@@ -305,5 +299,11 @@ step: run-starlark
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
 message: 'function-starlark: executed successfully'
+severity: SEVERITY_NORMAL
+step: run-starlark
+---
+apiVersion: render.crossplane.io/v1beta1
+kind: Result
+message: Created 8 buckets + 1 notification topic + 1 dashboard in us-east-1 (prod)
 severity: SEVERITY_NORMAL
 step: run-starlark

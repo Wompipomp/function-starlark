@@ -25,9 +25,13 @@ render: build
 	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml
 
 # Render and compare against expected output (non-zero exit on mismatch).
-# Pipes through normalize-render.sh to handle crossplane CLI v1/v2 differences.
+# Both sides pass through normalize-render.py to handle crossplane CLI v1/v2 differences.
 render-check: build
-	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | bash example/normalize-render.sh | diff - example/expected-output.yaml
+	@actual=$$(mktemp) expected=$$(mktemp); \
+	crossplane render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results 2>/dev/null | python3 example/normalize-render.py > "$$actual"; \
+	python3 example/normalize-render.py < example/expected-output.yaml > "$$expected"; \
+	diff "$$actual" "$$expected"; \
+	rc=$$?; rm -f "$$actual" "$$expected"; exit $$rc
 
 # Build Crossplane package
 xpkg: build
