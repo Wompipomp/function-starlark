@@ -1,6 +1,6 @@
 # function-starlark
 
-> Crossplane composition function using Starlark (Python-like) scripts. ~20MB memory, hermetic sandbox, built-in dependency ordering, auto-injected labels, OCI module system.
+> Crossplane composition function using Starlark (Python-like) scripts. ~20MB memory, hermetic sandbox, built-in dependency ordering, OCI module system.
 
 ## What this is
 
@@ -62,7 +62,7 @@ Register a desired composed resource. This is the primary function.
 - name: Composition resource name (unique string). This replaces KCL's "krm.kcl.dev/composition-resource-name" annotation.
 - body: Dict with apiVersion, kind, metadata, spec.
 - ready: None (auto-detect), True, or False.
-- labels: Omit for auto-injection of crossplane.io/* labels. Dict to merge custom labels. None to opt out.
+- labels: Dict to merge custom labels into body metadata.labels (kwarg wins). None/omitted: no-op. crossplane.io/* traceability labels are set by Crossplane itself after the pipeline, not by the function.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
 - depends_on: List of dependency items. Accepted types: ResourceRef, SkippedRef, string, tuple (ref, field_path), or None (silently dropped). Non-optional SkippedRef triggers transitive skip of the dependent. Optional SkippedRef is dropped from the list. Plain refs/strings check existence. Tuples check that the field path has a non-empty value. Generates Crossplane Usage resources.
 - external_name: Sugar for crossplane.io/external-name annotation.
@@ -496,7 +496,7 @@ Resource("bucket", bucket_config)
 - Use get_observed() for one-call observed resource field access instead of manual "if name in observed" existence checks.
 - Use resource_name(suffix) from stdlib for metadata.name to handle 63-char K8s limit.
 - Use external_name= kwarg instead of manual crossplane.io/external-name annotation.
-- Use labels= kwarg for custom labels. Let auto-injection handle crossplane.io/* labels.
+- Use labels= kwarg for custom labels. Do not set crossplane.io/* labels -- Crossplane injects them itself after the pipeline.
 - Use fatal() for validation errors (not fail()).
 - Use emit_event() for observability.
 - Use depends_on= for creation ordering between resources.

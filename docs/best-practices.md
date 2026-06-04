@@ -125,11 +125,12 @@ set_xr_status("region", region)
 
 ## Label strategy
 
-### Default: Auto-injection
+### Default: Let Crossplane handle its own labels
 
-Let auto-injection handle `crossplane.io/*` labels. Do not manually set them
--- function-starlark injects `crossplane.io/composite`, `crossplane.io/claim-name`,
-and `crossplane.io/claim-namespace` automatically on every `Resource()` call.
+Do not manually set `crossplane.io/*` labels -- Crossplane injects
+`crossplane.io/composite`, `crossplane.io/claim-name`, and
+`crossplane.io/claim-namespace` on every composed resource after the function
+pipeline runs, overwriting whatever the composition sets.
 
 ### Reading labels and annotations
 
@@ -173,23 +174,8 @@ for i in range(count):
         "metadata": {"labels": {"index": str(i)}},
         "spec": {"forProvider": {"region": region}},
     }, labels=common_labels)
-    # Result: index label from body + common labels from kwarg + crossplane auto-labels
+    # Result: index label from body + common labels from kwarg
 ```
-
-### Opt-out
-
-Use `labels=None` only when you need exact control over labels -- for example,
-when migrating existing resources that must not gain new labels:
-
-```python
-Resource("legacy-bucket", {...}, labels=None)
-```
-
-### Collision warning
-
-If your `labels=` kwarg uses a key that collides with `crossplane.io/*`, a
-Warning event is emitted. This is usually a mistake -- let auto-injection
-handle Crossplane labels.
 
 ## Dependency patterns
 

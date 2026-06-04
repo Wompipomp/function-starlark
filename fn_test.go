@@ -4302,6 +4302,17 @@ func assertWarningResult(t *testing.T, rsp *fnv1.RunFunctionResponse, substrings
 		substrings, rsp.GetResults())
 }
 
+// assertNoWarningResult verifies the response contains no SEVERITY_WARNING
+// results.
+func assertNoWarningResult(t *testing.T, rsp *fnv1.RunFunctionResponse) {
+	t.Helper()
+	for _, r := range rsp.GetResults() {
+		if r.GetSeverity() == fnv1.Severity_SEVERITY_WARNING {
+			t.Errorf("expected no WARNING results, got: %s", r.GetMessage())
+		}
+	}
+}
+
 // resourceNames extracts the keys from a resource map for diagnostic output.
 func resourceNames(resources map[string]*fnv1.Resource) []string {
 	names := make([]string, 0, len(resources))
@@ -5330,9 +5341,10 @@ func extractLabels(t *testing.T, rsp *fnv1.RunFunctionResponse, resourceName str
 	return out
 }
 
-// TestRunFunctionLabelsAutoInject verifies that Resource() with no labels= kwarg
-// auto-injects all three crossplane traceability labels from the OXR.
-func TestRunFunctionLabelsAutoInject(t *testing.T) {
+// TestRunFunctionLabelsNotInjected verifies that Resource() does NOT inject
+// crossplane traceability labels: Crossplane itself sets them on composed
+// resources after the function pipeline runs.
+func TestRunFunctionLabelsNotInjected(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
 
@@ -5359,19 +5371,15 @@ func TestRunFunctionLabelsAutoInject(t *testing.T) {
 	assertNormalResult(t, rsp)
 
 	labels := extractLabels(t, rsp, "bucket")
-	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
-		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
-	}
-	if got := labels["crossplane.io/claim-name"]; got != "my-claim" {
-		t.Errorf("crossplane.io/claim-name = %q, want %q", got, "my-claim")
-	}
-	if got := labels["crossplane.io/claim-namespace"]; got != "default" {
-		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
+	for _, k := range []string{"crossplane.io/composite", "crossplane.io/claim-name", "crossplane.io/claim-namespace"} {
+		if _, ok := labels[k]; ok {
+			t.Errorf("%s should not be injected", k)
+		}
 	}
 }
 
-// TestRunFunctionLabelsKwargMerge verifies that labels={"team":"platform"} merges
-// user labels with auto-injected crossplane labels, with kwarg taking priority.
+// TestRunFunctionLabelsKwargMerge verifies that labels={"team":"platform"}
+// merges user labels into the body without injecting crossplane labels.
 func TestRunFunctionLabelsKwargMerge(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
@@ -5399,19 +5407,15 @@ func TestRunFunctionLabelsKwargMerge(t *testing.T) {
 	assertNormalResult(t, rsp)
 
 	labels := extractLabels(t, rsp, "bucket")
-	// Crossplane labels should be present.
-	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
-		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
-	}
-	if got := labels["crossplane.io/claim-name"]; got != "my-claim" {
-		t.Errorf("crossplane.io/claim-name = %q, want %q", got, "my-claim")
-	}
-	if got := labels["crossplane.io/claim-namespace"]; got != "default" {
-		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
-	}
-	// User kwarg label should also be present.
+	// User kwarg label should be present.
 	if got := labels["team"]; got != "platform" {
 		t.Errorf("team = %q, want %q", got, "platform")
+	}
+	// Crossplane labels are not injected by the function.
+	for _, k := range []string{"crossplane.io/composite", "crossplane.io/claim-name", "crossplane.io/claim-namespace"} {
+		if _, ok := labels[k]; ok {
+			t.Errorf("%s should not be injected", k)
+		}
 	}
 }
 
@@ -5492,7 +5496,7 @@ func TestRunFunctionLabelsNonStringKey(t *testing.T) {
 // TestRunFunctionLabelsKwargConflictWarning verifies that when a labels= kwarg
 // key conflicts with an auto-injected crossplane label, a Warning event is emitted
 // and the kwarg value wins.
-func TestRunFunctionLabelsKwargConflictWarning(t *testing.T) {
+func TestRunFunctionLabelsKwargCrossplaneKeyPassthrough(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
 
@@ -5518,20 +5522,19 @@ func TestRunFunctionLabelsKwargConflictWarning(t *testing.T) {
 
 	assertNormalResult(t, rsp)
 
-	// Warning should be emitted about kwarg overriding auto-injected.
-	assertWarningResult(t, rsp, "labels= kwarg", "crossplane.io/composite", "overrides auto-injected")
+	// No warning: the function does not police crossplane.io/* label keys.
+	assertNoWarningResult(t, rsp)
 
-	// Kwarg value should win.
+	// Kwarg value passes through unchanged (Crossplane overwrites it on-cluster).
 	labels := extractLabels(t, rsp, "bucket")
 	if got := labels["crossplane.io/composite"]; got != "custom" {
-		t.Errorf("crossplane.io/composite = %q, want %q (kwarg should win)", got, "custom")
+		t.Errorf("crossplane.io/composite = %q, want %q (kwarg passes through)", got, "custom")
 	}
 }
 
-// TestRunFunctionLabelsBodyConflictWarning verifies that when a body dict has
-// metadata.labels with a crossplane label key, a Warning is emitted and the
-// auto-injected value wins over the body value.
-func TestRunFunctionLabelsBodyConflictWarning(t *testing.T) {
+// TestRunFunctionLabelsBodyCrossplaneKeyPreserved verifies that a crossplane
+// label key in body metadata.labels is preserved untouched without a Warning.
+func TestRunFunctionLabelsBodyCrossplaneKeyPreserved(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
 
@@ -5557,62 +5560,18 @@ func TestRunFunctionLabelsBodyConflictWarning(t *testing.T) {
 
 	assertNormalResult(t, rsp)
 
-	// Warning about body label being overridden.
-	assertWarningResult(t, rsp, "body label", "crossplane.io/composite", "overridden by auto-injected")
+	// No warning: the function does not police crossplane.io/* label keys.
+	assertNoWarningResult(t, rsp)
 
-	// Auto-injected value should win over body.
+	// Body value is preserved untouched.
 	labels := extractLabels(t, rsp, "bucket")
-	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
-		t.Errorf("crossplane.io/composite = %q, want %q (auto-injected should win over body)", got, "xr-abc")
-	}
-}
-
-// TestRunFunctionLabelsClaimOnlyWhenPresent verifies that claim labels are only
-// injected when the OXR actually has claim labels. Direct XRs without claims
-// should only get the crossplane.io/composite label.
-func TestRunFunctionLabelsClaimOnlyWhenPresent(t *testing.T) {
-	rt := runtime.NewRuntime(logging.NewNopLogger())
-	f := &Function{log: logging.NewNopLogger(), runtime: rt}
-
-	script := `Resource("bucket", {"apiVersion": "s3.aws.upbound.io/v1beta1", "kind": "Bucket"})`
-
-	// OXR with name but NO claim labels (direct XR, no claim).
-	oxr := buildOXRWithClaim("xr-abc", "", "")
-
-	req := &fnv1.RunFunctionRequest{
-		Input: resource.MustStructJSON(fmt.Sprintf(`{
-			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
-			"kind": "StarlarkInput",
-			"spec": {"source": %q}
-		}`, script)),
-		Observed: &fnv1.State{
-			Composite: &fnv1.Resource{Resource: oxr},
-		},
-	}
-
-	rsp, err := f.RunFunction(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
-	}
-
-	assertNormalResult(t, rsp)
-
-	labels := extractLabels(t, rsp, "bucket")
-	// Composite label should be present.
-	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
-		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
-	}
-	// Claim labels should NOT be present.
-	if _, ok := labels["crossplane.io/claim-name"]; ok {
-		t.Error("crossplane.io/claim-name should not be present when OXR has no claim")
-	}
-	if _, ok := labels["crossplane.io/claim-namespace"]; ok {
-		t.Error("crossplane.io/claim-namespace should not be present when OXR has no claim")
+	if got := labels["crossplane.io/composite"]; got != "old-value" {
+		t.Errorf("crossplane.io/composite = %q, want %q (body preserved)", got, "old-value")
 	}
 }
 
 // TestRunFunctionLabelsEmptyDict verifies that labels={} behaves the same as
-// omitting the labels kwarg -- crossplane labels are still auto-injected.
+// omitting the labels kwarg -- a no-op.
 func TestRunFunctionLabelsEmptyDict(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
@@ -5640,15 +5599,11 @@ func TestRunFunctionLabelsEmptyDict(t *testing.T) {
 	assertNormalResult(t, rsp)
 
 	labels := extractLabels(t, rsp, "bucket")
-	// All crossplane labels should be auto-injected even with empty dict.
-	if got := labels["crossplane.io/composite"]; got != "xr-abc" {
-		t.Errorf("crossplane.io/composite = %q, want %q", got, "xr-abc")
-	}
-	if got := labels["crossplane.io/claim-name"]; got != "my-claim" {
-		t.Errorf("crossplane.io/claim-name = %q, want %q", got, "my-claim")
-	}
-	if got := labels["crossplane.io/claim-namespace"]; got != "default" {
-		t.Errorf("crossplane.io/claim-namespace = %q, want %q", got, "default")
+	// Empty dict is a no-op: no crossplane labels are injected.
+	for _, k := range []string{"crossplane.io/composite", "crossplane.io/claim-name", "crossplane.io/claim-namespace"} {
+		if _, ok := labels[k]; ok {
+			t.Errorf("%s should not be injected", k)
+		}
 	}
 }
 
