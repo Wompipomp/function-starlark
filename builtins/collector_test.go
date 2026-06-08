@@ -1530,51 +1530,6 @@ func makeOXR(name, claimName, claimNamespace string) *structpb.Struct {
 	}
 }
 
-func TestCrossplaneLabelsFromOXR(t *testing.T) {
-	oxr := makeOXR("xr-abc", "my-claim", "ns")
-	labels := crossplaneLabelsFromOXR(oxr)
-
-	if len(labels) != 3 {
-		t.Fatalf("labels count = %d, want 3", len(labels))
-	}
-	if labels["crossplane.io/composite"] != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels["crossplane.io/composite"], "xr-abc")
-	}
-	if labels["crossplane.io/claim-name"] != "my-claim" {
-		t.Errorf("claim-name = %q, want %q", labels["crossplane.io/claim-name"], "my-claim")
-	}
-	if labels["crossplane.io/claim-namespace"] != "ns" {
-		t.Errorf("claim-namespace = %q, want %q", labels["crossplane.io/claim-namespace"], "ns")
-	}
-}
-
-func TestCrossplaneLabelsFromOXR_NoClaim(t *testing.T) {
-	oxr := makeOXR("xr-abc", "", "")
-	labels := crossplaneLabelsFromOXR(oxr)
-
-	if len(labels) != 1 {
-		t.Fatalf("labels count = %d, want 1", len(labels))
-	}
-	if labels["crossplane.io/composite"] != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels["crossplane.io/composite"], "xr-abc")
-	}
-}
-
-func TestCrossplaneLabelsFromOXR_Nil(t *testing.T) {
-	labels := crossplaneLabelsFromOXR(nil)
-	if len(labels) != 0 {
-		t.Errorf("labels count = %d, want 0 for nil OXR", len(labels))
-	}
-}
-
-func TestCrossplaneLabelsFromOXR_NilMetadata(t *testing.T) {
-	oxr := &structpb.Struct{Fields: map[string]*structpb.Value{}}
-	labels := crossplaneLabelsFromOXR(oxr)
-	if len(labels) != 0 {
-		t.Errorf("labels count = %d, want 0 for OXR with no metadata", len(labels))
-	}
-}
-
 func TestCollector_Labels_Omitted(t *testing.T) {
 	cc := NewConditionCollector()
 	oxr := makeOXR("xr-abc", "my-claim", "ns")
@@ -1603,14 +1558,12 @@ func TestCollector_Labels_Omitted(t *testing.T) {
 		t.Fatal("labels is nil")
 	}
 
-	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
-	}
-	if labels.GetFields()["crossplane.io/claim-name"].GetStringValue() != "my-claim" {
-		t.Errorf("claim-name = %q, want %q", labels.GetFields()["crossplane.io/claim-name"].GetStringValue(), "my-claim")
-	}
-	if labels.GetFields()["crossplane.io/claim-namespace"].GetStringValue() != "ns" {
-		t.Errorf("claim-namespace = %q, want %q", labels.GetFields()["crossplane.io/claim-namespace"].GetStringValue(), "ns")
+	// No crossplane traceability labels are injected; Crossplane itself
+	// sets them after the pipeline runs.
+	for _, k := range []string{"crossplane.io/composite", "crossplane.io/claim-name", "crossplane.io/claim-namespace"} {
+		if labels.GetFields()[k] != nil {
+			t.Errorf("%s should not be injected", k)
+		}
 	}
 }
 
@@ -1644,9 +1597,9 @@ func TestCollector_Labels_BasicDict(t *testing.T) {
 	if labels.GetFields()["team"].GetStringValue() != "platform" {
 		t.Errorf("team = %q, want %q", labels.GetFields()["team"].GetStringValue(), "platform")
 	}
-	// Crossplane labels should also be present.
-	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	// Crossplane labels are not injected by the function.
+	if labels.GetFields()["crossplane.io/composite"] != nil {
+		t.Error("crossplane.io/composite should not be injected")
 	}
 }
 
@@ -1679,8 +1632,8 @@ func TestCollector_Labels_StarlarkDict(t *testing.T) {
 	if labels.GetFields()["env"].GetStringValue() != "prod" {
 		t.Errorf("env = %q, want %q", labels.GetFields()["env"].GetStringValue(), "prod")
 	}
-	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	if labels.GetFields()["crossplane.io/composite"] != nil {
+		t.Error("crossplane.io/composite should not be injected")
 	}
 }
 
@@ -1715,16 +1668,16 @@ func TestCollector_Labels_MergePriority(t *testing.T) {
 	res := c.Resources()
 	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
 
-	// Kwarg should win over both body and auto-injected.
+	// Kwarg should win over body.
 	got := labels.GetFields()["crossplane.io/composite"].GetStringValue()
 	if got != "custom" {
 		t.Errorf("composite = %q, want %q (kwarg should win)", got, "custom")
 	}
 
-	// Should have both body-vs-auto and kwarg-vs-auto warnings.
+	// No warnings: the function does not police crossplane.io/* labels.
 	events := cc.Events()
-	if len(events) != 2 {
-		t.Fatalf("Events() len = %d, want 2", len(events))
+	if len(events) != 0 {
+		t.Fatalf("Events() len = %d, want 0", len(events))
 	}
 }
 
@@ -1789,9 +1742,9 @@ func TestCollector_Labels_EmptyDict(t *testing.T) {
 	res := c.Resources()
 	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
 
-	// Auto-injection should still run with empty dict.
-	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	// Empty dict is a no-op: no crossplane labels are injected.
+	if labels.GetFields()["crossplane.io/composite"] != nil {
+		t.Error("crossplane.io/composite should not be injected")
 	}
 }
 
@@ -1843,7 +1796,7 @@ func TestCollector_Labels_NonStringValue(t *testing.T) {
 	}
 }
 
-func TestCollector_Labels_BodyConflictWarning(t *testing.T) {
+func TestCollector_Labels_BodyCrossplaneKeyPreserved(t *testing.T) {
 	cc := NewConditionCollector()
 	oxr := makeOXR("xr-abc", "", "")
 	c := NewCollector(cc, "test.star", oxr, nil)
@@ -1865,20 +1818,18 @@ func TestCollector_Labels_BodyConflictWarning(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	events := cc.Events()
-	if len(events) != 1 {
-		t.Fatalf("Events() len = %d, want 1", len(events))
+	// Body value is preserved untouched and no warning is emitted.
+	if events := cc.Events(); len(events) != 0 {
+		t.Fatalf("Events() len = %d, want 0", len(events))
 	}
-	if events[0].Severity != "Warning" {
-		t.Errorf("severity = %q, want %q", events[0].Severity, "Warning")
-	}
-	wantMsg := `Resource "bucket": body label "crossplane.io/composite"="old" overridden by auto-injected "xr-abc"`
-	if events[0].Message != wantMsg {
-		t.Errorf("message = %q, want %q", events[0].Message, wantMsg)
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+	if got := labels.GetFields()["crossplane.io/composite"].GetStringValue(); got != "old" {
+		t.Errorf("composite = %q, want %q (body preserved)", got, "old")
 	}
 }
 
-func TestCollector_Labels_KwargConflictWarning(t *testing.T) {
+func TestCollector_Labels_KwargCrossplaneKeyPassthrough(t *testing.T) {
 	cc := NewConditionCollector()
 	oxr := makeOXR("xr-abc", "", "")
 	c := NewCollector(cc, "test.star", oxr, nil)
@@ -1899,13 +1850,14 @@ func TestCollector_Labels_KwargConflictWarning(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	events := cc.Events()
-	if len(events) != 1 {
-		t.Fatalf("Events() len = %d, want 1", len(events))
+	// Kwarg value passes through unchanged and no warning is emitted.
+	if events := cc.Events(); len(events) != 0 {
+		t.Fatalf("Events() len = %d, want 0", len(events))
 	}
-	wantMsg := `Resource "bucket": labels= kwarg "crossplane.io/composite"="custom" overrides auto-injected "xr-abc"`
-	if events[0].Message != wantMsg {
-		t.Errorf("message = %q, want %q", events[0].Message, wantMsg)
+	res := c.Resources()
+	labels := res["bucket"].Body.GetFields()["metadata"].GetStructValue().GetFields()["labels"].GetStructValue()
+	if got := labels.GetFields()["crossplane.io/composite"].GetStringValue(); got != "custom" {
+		t.Errorf("composite = %q, want %q (kwarg passes through)", got, "custom")
 	}
 }
 
@@ -2867,8 +2819,8 @@ func TestCollector_WhenFalse_KeepIfExists_NoLabelInjection(t *testing.T) {
 						t.Errorf("preserved body should NOT have %s label", ResourceNameLabel)
 					}
 					// Check NO crossplane.io/composite label.
-					if _, ok := lblStruct.GetFields()[labelComposite]; ok {
-						t.Errorf("preserved body should NOT have %s label", labelComposite)
+					if _, ok := lblStruct.GetFields()["crossplane.io/composite"]; ok {
+						t.Errorf("preserved body should NOT have %s label", "crossplane.io/composite")
 					}
 				}
 			}
@@ -4028,8 +3980,8 @@ func TestCollectorMutableStructLabels(t *testing.T) {
 	if labels.GetFields()["team"].GetStringValue() != "platform" {
 		t.Errorf("team = %q, want %q", labels.GetFields()["team"].GetStringValue(), "platform")
 	}
-	// Crossplane labels should also be present.
-	if labels.GetFields()["crossplane.io/composite"].GetStringValue() != "xr-abc" {
-		t.Errorf("composite = %q, want %q", labels.GetFields()["crossplane.io/composite"].GetStringValue(), "xr-abc")
+	// Crossplane labels are not injected by the function.
+	if labels.GetFields()["crossplane.io/composite"] != nil {
+		t.Error("crossplane.io/composite should not be injected")
 	}
 }

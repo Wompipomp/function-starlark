@@ -17,13 +17,6 @@ import (
 
 const externalNameAnnotation = "crossplane.io/external-name"
 
-// Crossplane traceability label keys auto-injected by Resource().
-const (
-	labelComposite      = "crossplane.io/composite"
-	labelClaimName      = "crossplane.io/claim-name"
-	labelClaimNamespace = "crossplane.io/claim-namespace"
-)
-
 // ResourceRef is a custom Starlark type returned by Resource().
 // It carries the resource name and can be passed to depends_on.
 type ResourceRef struct {
@@ -222,15 +215,16 @@ type Collector struct {
 	dependencies   []DependencyPair
 	cc             *ConditionCollector
 	scriptName     string
-	oxr            *structpb.Struct      // frozen observed XR, for label extraction
+	oxr            *structpb.Struct      // frozen observed XR; currently unused, kept for API stability
 	observed       *convert.StarlarkDict // frozen observed composed resources; may be nil
 }
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
-// emit Warning events when the external_name or labels kwarg conflicts with
-// existing values. The scriptName is recorded for use in metric labels. The
-// oxr is the observed composite resource struct used for auto-injecting
-// crossplane traceability labels. The observed dict holds the frozen Starlark
+// emit Warning events when the external_name kwarg conflicts with an existing
+// annotation. The scriptName is recorded for use in metric labels. The oxr
+// parameter is currently unused (label auto-injection was removed; Crossplane
+// sets its traceability labels itself after the pipeline) and is kept to avoid
+// churning every call site. The observed dict holds the frozen Starlark
 // representation of observed composed resources; it may be nil.
 func NewCollector(cc *ConditionCollector, scriptName string, oxr *structpb.Struct, observed *convert.StarlarkDict) *Collector {
 	return &Collector{
@@ -659,8 +653,8 @@ func (c *Collector) resourceFn(
 		injectExternalName(s, string(en), name, c.cc)
 	}
 
-	// Process labels kwarg: auto-inject crossplane traceability labels.
-	if err := injectLabels(s, labelsVal, c.oxr, name, c.cc); err != nil {
+	// Process labels kwarg: merge user labels over body metadata.labels.
+	if err := injectLabels(s, labelsVal, name); err != nil {
 		return nil, err
 	}
 
@@ -816,125 +810,54 @@ func injectExternalName(s *structpb.Struct, externalName, resourceName string, c
 	annotations.Fields[externalNameAnnotation] = structpb.NewStringValue(externalName)
 }
 
-// crossplaneLabelsFromOXR extracts crossplane traceability labels from the
-// observed composite resource. Returns only non-empty values, handling nil
-// at every level.
-func crossplaneLabelsFromOXR(oxr *structpb.Struct) map[string]string {
-	labels := make(map[string]string)
-	if oxr == nil {
-		return labels
-	}
-	md := oxr.GetFields()["metadata"]
-	if md == nil {
-		return labels
-	}
-	mdStruct := md.GetStructValue()
-	if mdStruct == nil {
-		return labels
-	}
-	// composite name from metadata.name (always present)
-	if nameVal := mdStruct.GetFields()["name"]; nameVal != nil {
-		if name := nameVal.GetStringValue(); name != "" {
-			labels[labelComposite] = name
-		}
-	}
-	// claim labels from metadata.labels (only when claim exists)
-	lblVal := mdStruct.GetFields()["labels"]
-	if lblVal == nil {
-		return labels
-	}
-	lblStruct := lblVal.GetStructValue()
-	if lblStruct == nil {
-		return labels
-	}
-	if cn := lblStruct.GetFields()[labelClaimName]; cn != nil {
-		if v := cn.GetStringValue(); v != "" {
-			labels[labelClaimName] = v
-		}
-	}
-	if cns := lblStruct.GetFields()[labelClaimNamespace]; cns != nil {
-		if v := cns.GetStringValue(); v != "" {
-			labels[labelClaimNamespace] = v
-		}
-	}
-	return labels
-}
-
-// injectLabels performs three-way label merging on the resource body struct.
-// Priority: body metadata.labels (lowest) < auto-injected crossplane labels < labels= kwarg (highest).
-// If labelsVal is starlark.None, all injection is skipped (opt-out).
-// If labelsVal is nil (omitted) or an empty dict, only auto-injection runs.
-// Warning events are emitted for body-vs-auto and kwarg-vs-auto conflicts.
-func injectLabels(s *structpb.Struct, labelsVal starlark.Value, oxr *structpb.Struct, resourceName string, cc *ConditionCollector) error {
-	// Explicit opt-out: labels=None
-	if labelsVal == starlark.None {
+// injectLabels merges the labels= kwarg into the resource body struct
+// (kwarg values win over body metadata.labels). starlark.None is accepted
+// as a no-op for backward compatibility.
+//
+// Crossplane traceability labels (crossplane.io/composite, claim-name,
+// claim-namespace) are NOT injected here: Crossplane itself sets them on
+// every composed resource after the function pipeline runs (both the
+// composite reconciler and `crossplane render` via
+// RenderComposedResourceMetadata), overwriting whatever a function returns.
+func injectLabels(s *structpb.Struct, labelsVal starlark.Value, resourceName string) error {
+	// nil (omitted) and None (legacy opt-out of the removed auto-injection)
+	// both leave body labels untouched.
+	if labelsVal == nil || labelsVal == starlark.None {
 		return nil
 	}
 
-	// Extract crossplane labels from OXR
-	xpLabels := crossplaneLabelsFromOXR(oxr)
+	var items []starlark.Tuple
+	switch d := labelsVal.(type) {
+	case *starlark.Dict:
+		items = d.Items()
+	case *convert.StarlarkDict:
+		items = d.InternalDict().Items()
+	case *MutableStruct:
+		items = d.InternalDict().Items()
+	default:
+		return fmt.Errorf("Resource(%q): labels must be dict or None, got %s",
+			resourceName, labelsVal.Type())
+	}
 
-	// If no crossplane labels and no user labels, nothing to do.
-	if len(xpLabels) == 0 && labelsVal == nil {
+	if len(items) == 0 {
 		return nil
 	}
 
 	metadata := getOrCreateNestedStruct(s, "metadata")
 	bodyLabels := getOrCreateNestedStruct(metadata, "labels")
 
-	// Step 1: Set crossplane labels, warn if body already has them.
-	for k, v := range xpLabels {
-		if existing, ok := bodyLabels.Fields[k]; ok {
-			oldVal := existing.GetStringValue()
-			msg := fmt.Sprintf("Resource %q: body label %q=%q overridden by auto-injected %q",
-				resourceName, k, oldVal, v)
-			cc.mu.Lock()
-			cc.events = append(cc.events, CollectedEvent{
-				Severity: "Warning", Message: msg, Target: "Composite",
-			})
-			cc.mu.Unlock()
+	for _, item := range items {
+		k, ok := item[0].(starlark.String)
+		if !ok {
+			return fmt.Errorf("Resource(%q): labels key must be string, got %s",
+				resourceName, item[0].Type())
 		}
-		bodyLabels.Fields[k] = structpb.NewStringValue(v)
-	}
-
-	// Step 2: If user provided labels dict, overlay on top (user wins).
-	if labelsVal != nil {
-		var items []starlark.Tuple
-		switch d := labelsVal.(type) {
-		case *starlark.Dict:
-			items = d.Items()
-		case *convert.StarlarkDict:
-			items = d.InternalDict().Items()
-		case *MutableStruct:
-			items = d.InternalDict().Items()
-		default:
-			return fmt.Errorf("Resource(%q): labels must be dict or None, got %s",
-				resourceName, labelsVal.Type())
+		v, ok := item[1].(starlark.String)
+		if !ok {
+			return fmt.Errorf("Resource(%q): labels value must be string, got %s",
+				resourceName, item[1].Type())
 		}
-
-		for _, item := range items {
-			k, ok := item[0].(starlark.String)
-			if !ok {
-				return fmt.Errorf("Resource(%q): labels key must be string, got %s",
-					resourceName, item[0].Type())
-			}
-			v, ok := item[1].(starlark.String)
-			if !ok {
-				return fmt.Errorf("Resource(%q): labels value must be string, got %s",
-					resourceName, item[1].Type())
-			}
-			// Warn if kwarg overrides an auto-injected crossplane label.
-			if autoVal, isXP := xpLabels[string(k)]; isXP {
-				msg := fmt.Sprintf("Resource %q: labels= kwarg %q=%q overrides auto-injected %q",
-					resourceName, string(k), string(v), autoVal)
-				cc.mu.Lock()
-				cc.events = append(cc.events, CollectedEvent{
-					Severity: "Warning", Message: msg, Target: "Composite",
-				})
-				cc.mu.Unlock()
-			}
-			bodyLabels.Fields[string(k)] = structpb.NewStringValue(string(v))
-		}
+		bodyLabels.Fields[string(k)] = structpb.NewStringValue(string(v))
 	}
 
 	return nil

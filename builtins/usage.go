@@ -34,10 +34,23 @@ type resourceTypeInfo struct {
 	Kind       string
 }
 
+// usageKind returns the Usage kind for the given API version and composite
+// scope. The v2 (protection.crossplane.io) Usage kind is namespaced, so
+// cluster-scoped composites (e.g. legacy apiextensions/v1 XRs) must compose
+// the cluster-scoped ClusterUsage variant instead — a namespaced Usage
+// without a namespace can never be applied by the composite reconciler.
+// The v1 (apiextensions.crossplane.io) Usage is always cluster-scoped.
+func usageKind(apiVersion string, compositeNamespaced bool) string {
+	if apiVersion == UsageAPIVersionV2 && !compositeNamespaced {
+		return "ClusterUsage"
+	}
+	return "Usage"
+}
+
 // buildUsageResource constructs a single Usage resource as a protobuf Struct.
 // Uses resourceSelector with matchControllerRef to match composed resources by
 // label, since actual K8s resource names aren't known at pipeline time.
-func buildUsageResource(dependent, dependency, apiVersion string, typeInfos map[string]resourceTypeInfo) *structpb.Struct {
+func buildUsageResource(dependent, dependency, apiVersion, kind string, typeInfos map[string]resourceTypeInfo) *structpb.Struct {
 	selector := func(name string) *structpb.Value {
 		fields := map[string]*structpb.Value{
 			"resourceSelector": structpb.NewStructValue(&structpb.Struct{
@@ -61,7 +74,7 @@ func buildUsageResource(dependent, dependency, apiVersion string, typeInfos map[
 	return &structpb.Struct{
 		Fields: map[string]*structpb.Value{
 			"apiVersion": structpb.NewStringValue(apiVersion),
-			"kind":       structpb.NewStringValue("Usage"),
+			"kind":       structpb.NewStringValue(kind),
 			"spec": structpb.NewStructValue(&structpb.Struct{
 				Fields: map[string]*structpb.Value{
 					"replayDeletion": structpb.NewBoolValue(true),
@@ -75,9 +88,11 @@ func buildUsageResource(dependent, dependency, apiVersion string, typeInfos map[
 
 // BuildUsageResources generates Usage resources for all dependency pairs.
 // resources is the map of collected resources (name -> CollectedResource) used
-// to extract apiVersion/kind for Usage selectors.
+// to extract apiVersion/kind for Usage selectors. compositeNamespaced reports
+// whether the observed composite is namespaced; it selects between the
+// namespaced Usage and cluster-scoped ClusterUsage kinds on the v2 API.
 // Returns a map keyed by Usage resource name.
-func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map[string]CollectedResource) map[string]*structpb.Struct {
+func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map[string]CollectedResource, compositeNamespaced bool) map[string]*structpb.Struct {
 	// Build type info map from collected resources.
 	typeInfos := make(map[string]resourceTypeInfo, len(resources))
 	for name, cr := range resources {
@@ -90,10 +105,11 @@ func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map
 		}
 	}
 
+	kind := usageKind(apiVersion, compositeNamespaced)
 	result := make(map[string]*structpb.Struct, len(deps))
 	for _, d := range deps {
 		name := usageName(d.Dependent, d.Dependency)
-		result[name] = buildUsageResource(d.Dependent, d.Dependency, apiVersion, typeInfos)
+		result[name] = buildUsageResource(d.Dependent, d.Dependency, apiVersion, kind, typeInfos)
 	}
 	return result
 }

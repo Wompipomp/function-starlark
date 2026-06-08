@@ -251,7 +251,7 @@ Kubernetes resources in a composition.
 | `name` | string | required | Composition resource name. Must be unique across all `Resource()` calls in the script. |
 | `body` | dict | required | Kubernetes resource manifest with `apiVersion`, `kind`, `metadata`, `spec`. |
 | `ready` | None \| True \| False | None | Readiness signal. See below. |
-| `labels` | dict \| None \| omitted | auto-inject | Label behavior. See below. |
+| `labels` | dict \| None \| omitted | omitted | Extra labels merged into `body.metadata.labels`. See below. |
 | `connection_details` | dict \| None | None | Per-resource connection details (string key-value pairs). |
 | `depends_on` | list \| None | None | List of dependency items for creation sequencing. Accepted item types: `ResourceRef`, `SkippedRef`, `string`, `(ref, "field.path")` tuple, or `None` (silently ignored). Any `SkippedRef` triggers transitive skip of the dependent (see below). |
 | `external_name` | string \| None | None | Sugar for `crossplane.io/external-name` annotation. |
@@ -270,19 +270,18 @@ below).
 - `True`: Explicitly mark the resource as ready regardless of its actual status.
 - `False`: Explicitly mark the resource as not ready.
 
-**labels -- three-state behavior:**
+**labels -- behavior:**
 
-- **Omitted** (default): Crossplane traceability labels are auto-injected:
-  `crossplane.io/composite`, `crossplane.io/claim-name`,
-  `crossplane.io/claim-namespace`. Claim labels are only added when a claim
-  exists.
-- **Dict provided**: User labels are merged at highest priority. Merge order:
-  `body.metadata.labels` (lowest) < auto-injected crossplane labels <
-  `labels=` kwarg (highest). User values win on conflict. A warning event is
-  emitted when a `labels=` kwarg key conflicts with an auto-injected crossplane
-  label key.
-- **None**: Opt out of all auto-injection. Only `body.metadata.labels` are
-  preserved.
+- **Omitted** (default): `body.metadata.labels` are used as-is.
+- **Dict provided**: Merged into `body.metadata.labels`; kwarg values win on
+  conflict.
+- **None**: No-op, same as omitted (kept for backward compatibility with the
+  removed auto-injection opt-out).
+
+Crossplane traceability labels (`crossplane.io/composite`,
+`crossplane.io/claim-name`, `crossplane.io/claim-namespace`) are NOT injected
+by the function -- Crossplane sets them on every composed resource after the
+pipeline runs, overwriting whatever a function returns.
 
 **depends_on -- creation sequencing:**
 
@@ -2607,7 +2606,7 @@ docs[2]["name"]  # "c"
 ## See also
 
 - [Features guide](features.md) -- Detailed behavior for depends_on creation
-  sequencing, labels auto-injection, connection details, skip_resource,
+  sequencing, labels merging, connection details, skip_resource,
   observability metrics, metadata & observed access builtins, namespace modules,
   and schema validation
 - [Standard library reference](stdlib-reference.md) -- Additional utility

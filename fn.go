@@ -316,7 +316,13 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				usageAPIOverride = os.Getenv("STARLARK_USAGE_API_VERSION")
 			}
 			apiVersion := builtins.ResolveUsageAPIVersion(usageAPIOverride)
-			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources())
+			// The v2 Usage kind is namespaced; cluster-scoped composites
+			// (legacy XRs) must compose ClusterUsage instead. Detect the
+			// composite's scope from its observed namespace.
+			compositeNamespaced := req.GetObserved().GetComposite().GetResource().
+				GetFields()["metadata"].GetStructValue().
+				GetFields()["namespace"].GetStringValue() != ""
+			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources(), compositeNamespaced)
 
 			// Ensure Desired and Resources maps exist.
 			if rsp.Desired == nil {

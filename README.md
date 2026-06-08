@@ -59,7 +59,7 @@ with zero external toolchain.
 | Memory footprint | ~20MB idle | 200MB+ baseline | ~20-40MB idle |
 | Connection details | Per-resource + XR-level | Per-resource via annotations | Per-resource + XR-level |
 | Dependency ordering | depends_on + creation sequencing | Not built-in | Not built-in |
-| Auto labels | crossplane.io/* auto-injected | Manual via annotations | Manual via template |
+| Labels | labels= kwarg merge (crossplane.io/* set by Crossplane itself) | Manual via annotations | Manual via template |
 | Conditions/Events | set_condition(), emit_event() | Via KCL annotations | Via custom conditions (1.17+) |
 | Extra resources | require_extra_resource/require_extra_resources | ExtraResources spec | ExtraResources spec |
 | Readiness control | ready= kwarg (None/True/False) | Annotation-based | Annotation-based |
@@ -171,8 +171,9 @@ crossplane composition render xr.yaml composition.yaml functions.yaml
 
 The output includes the composed Bucket and Topic resources, a Usage resource
 expressing the dependency from topic to bucket, a Dashboard (because
-`environment` is `prod`), status conditions, and `crossplane.io/*` labels
-auto-injected on every resource.
+`environment` is `prod`), and status conditions. Crossplane itself adds its
+`crossplane.io/*` traceability labels to every composed resource after the
+pipeline runs.
 
 For a comprehensive 10-resource example exercising all builtins, see
 [example/](example/).

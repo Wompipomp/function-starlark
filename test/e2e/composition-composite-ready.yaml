@@ -1,13 +1,21 @@
-# Composition for composite-readiness gating tests. Three modes driven by
+# Composition for composite-readiness gating tests. Five modes driven by
 # spec.mode on the XR:
-#   "gate"     -- When(condition=False) without optional. The skipped
-#                  resource gates the XR to Ready=False and an informational
-#                  ComposedResourcesReady=False condition is emitted.
-#   "optional" -- When(condition=False, optional=True). The skipped resource
-#                  does NOT gate the XR; it still reaches Ready=True.
-#   "explicit" -- set_composite_ready(False, reason=..., message=...). The
-#                  XR stays Ready=False with the user-supplied reason, even
-#                  though no resources were skipped.
+#   "gate"        -- When(condition=False) without optional. The skipped
+#                     resource gates the XR to Ready=False and an informational
+#                     ComposedResourcesReady=False condition is emitted.
+#   "optional"    -- When(condition=False, optional=True). The skipped resource
+#                     does NOT gate the XR; it still reaches Ready=True.
+#   "explicit"    -- set_composite_ready(False, reason=..., message=...). The
+#                     XR stays Ready=False with the user-supplied reason, even
+#                     though no resources were skipped.
+#   "ready-false" -- Resource(ready=False). The composed resource IS created
+#                     and its MR reaches Ready=True, but the explicit readiness
+#                     override keeps the XR from becoming Ready (and
+#                     function-auto-ready must not overrule it).
+#   "ready-true"  -- Resource(ready=True). The composed MR never reports
+#                     Ready=True itself (conditionAfter sets Ready=False), but
+#                     the explicit override marks it ready so the XR reaches
+#                     Ready=True anyway.
 #
 # Every mode also emits a dummy NopResource that reaches Ready=True so the
 # "optional" case can actually reach the Ready condition.
@@ -64,8 +72,36 @@ spec:
                     message="E2E: explicit set_composite_ready with reason/message")
                 set_xr_status("test.scenario", "explicit-false")
 
+            elif mode == "ready-false":
+                # Explicit per-resource override: the MR itself becomes
+                # Ready=True, but ready=False must keep the XR not-Ready
+                # (function-auto-ready only fills in unspecified readiness).
+                Resource("never-ready", {
+                    "apiVersion": "nop.crossplane.io/v1alpha1",
+                    "kind": "NopResource",
+                    "spec": {"forProvider": {"conditionAfter": [
+                        {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                        {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                    ]}},
+                }, ready=False)
+                set_xr_status("test.scenario", "ready-false")
+
+            elif mode == "ready-true":
+                # Explicit per-resource override: the MR never reports
+                # Ready=True itself, but ready=True marks it ready in the
+                # pipeline so the XR still reaches Ready=True.
+                Resource("forced-ready", {
+                    "apiVersion": "nop.crossplane.io/v1alpha1",
+                    "kind": "NopResource",
+                    "spec": {"forProvider": {"conditionAfter": [
+                        {"conditionType": "Ready", "conditionStatus": "False", "time": "0s"},
+                        {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                    ]}},
+                }, ready=True)
+                set_xr_status("test.scenario", "ready-true")
+
             else:
-                fatal("unknown mode %q, expected gate|optional|explicit" % mode)
+                fatal("unknown mode %q, expected gate|optional|explicit|ready-false|ready-true" % mode)
     - step: auto-ready
       functionRef:
         name: function-auto-ready

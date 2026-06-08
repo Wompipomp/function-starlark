@@ -1,0 +1,14 @@
+# ready=False override: the composed MR reaches Ready=True on its own, but the
+# explicit Resource(ready=False) override keeps the XR from becoming Ready.
+# Expected outcome: composed resource 'never-ready' exists with MR Ready=True,
+# XR Ready stays not-True.
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-composite-ready-rfalse
+  labels:
+    e2e-test: composite-ready
+spec:
+  compositionRef:
+    name: composite-ready-test
+  mode: ready-false

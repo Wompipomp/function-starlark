@@ -1,0 +1,70 @@
+# Composition that tests cross-step pipeline context propagation and the
+# `environment` global with real data.
+#
+# Step 1 (seed-context) writes the well-known EnvironmentConfig context key
+# ("apiextensions.crossplane.io/environment") plus a custom key into the
+# pipeline context. Crossplane carries the context to step 2.
+#
+# Step 2 (read-env) reads the `environment` global (built by function-starlark
+# from the well-known context key) and the custom context key, proving that:
+#   - context writes from one pipeline step reach the next step
+#   - the environment global is populated from the well-known context key
+#     (including nested access via get())
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: context-env-test
+  labels:
+    e2e-test: context-env
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: seed-context
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # Seed the well-known EnvironmentConfig key. The next pipeline step
+            # must see this as its `environment` global.
+            context["apiextensions.crossplane.io/environment"] = {
+                "region": "eu-central-1",
+                "tier": "gold",
+                "nested": {"zone": "a"},
+            }
+            # Custom key: proves arbitrary context keys propagate across steps.
+            context["e2e.cross-step"] = "from-step-one"
+    - step: read-env
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # --- environment global populated from step 1's context write ---
+            set_xr_status("test.envRegion", get(environment, "region", "missing"))
+            set_xr_status("test.envTier", get(environment, "tier", "missing"))
+            set_xr_status("test.envZone", get(environment, "nested.zone", "missing"))
+
+            # --- custom context key propagated across pipeline steps ---
+            cross = context["e2e.cross-step"] if "e2e.cross-step" in context else "missing"
+            set_xr_status("test.crossStepContext", cross)
+
+            # Emit one resource so the XR has something to become Ready on.
+            Resource("env-dummy", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            })
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

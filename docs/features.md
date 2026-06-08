@@ -90,41 +90,31 @@ controls which Usage API version is used. Default is `"v2"`
 (`protection.crossplane.io/v1beta1`, Crossplane 2.x). Set to `"v1"` for
 Crossplane 1.x (`apiextensions.crossplane.io/v1beta1`).
 
+On the v2 API the kind is scope-aware: namespaced composites get the
+namespaced `Usage` kind, while cluster-scoped composites (e.g. legacy
+`apiextensions.crossplane.io/v1` XRs) get the cluster-scoped `ClusterUsage`
+kind — a namespaced Usage without a namespace cannot be composed by a
+cluster-scoped XR. The v1 `Usage` is always cluster-scoped.
+
 A single summary Warning event is emitted when Usage resources are generated,
 reminding that `compositeDeletePolicy: Foreground` is needed on the XRD for
 proper deletion ordering.
 
 ## Labels
 
-### Auto-injection
+### Crossplane traceability labels
 
-By default, every `Resource()` call auto-injects Crossplane traceability labels:
+The function does **not** inject Crossplane traceability labels
+(`crossplane.io/composite`, `crossplane.io/claim-name`,
+`crossplane.io/claim-namespace`). Crossplane itself sets them on every
+composed resource after the function pipeline runs -- both the composite
+reconciler and `crossplane render` -- overwriting whatever a function returns.
+There is no need to set them in compositions.
 
-- `crossplane.io/composite` -- the XR name
-- `crossplane.io/claim-name` -- the claim name (if a Claim exists)
-- `crossplane.io/claim-namespace` -- the claim namespace (if a Claim exists)
+### Merge
 
-Claim labels are only injected when claim metadata exists in the XR, so direct
-XR usage without a Claim works without errors.
-
-```python
-# Auto-injection happens automatically -- no code needed
-Resource("bucket", {
-    "apiVersion": "s3.aws.upbound.io/v1beta1",
-    "kind": "Bucket",
-    "spec": {"forProvider": {"region": "us-east-1"}},
-})
-# Result labels include: crossplane.io/composite, crossplane.io/claim-name, etc.
-```
-
-### Three-way merge
-
-When the `labels=` kwarg is provided, labels are merged with this priority
-(lowest to highest):
-
-1. `body` `metadata.labels` (from the resource dict)
-2. Auto-injected Crossplane labels
-3. `labels=` kwarg (user labels always win)
+When the `labels=` kwarg is provided, it is merged into `body`
+`metadata.labels`, with kwarg values winning on conflict:
 
 ```python
 Resource("bucket", {
@@ -133,30 +123,11 @@ Resource("bucket", {
     "metadata": {"labels": {"from-body": "true"}},
     "spec": {"forProvider": {"region": "us-east-1"}},
 }, labels={"team": "platform", "env": "prod"})
-# Result: body labels + crossplane auto-labels + {"team": "platform", "env": "prod"}
+# Result: {"from-body": "true", "team": "platform", "env": "prod"}
 ```
 
-### Opt-out
-
-Pass `labels=None` to skip all auto-injection. Only labels present in the body
-dict are preserved:
-
-```python
-Resource("bucket", {
-    "apiVersion": "s3.aws.upbound.io/v1beta1",
-    "kind": "Bucket",
-    "metadata": {"labels": {"keep-only-this": "true"}},
-    "spec": {"forProvider": {"region": "us-east-1"}},
-}, labels=None)
-# Result: only {"keep-only-this": "true"} -- no crossplane labels injected
-```
-
-### Conflict warnings
-
-A Warning event is emitted when a `labels=` kwarg key conflicts with an
-auto-injected Crossplane label key (e.g., if you set
-`crossplane.io/composite` in the `labels=` kwarg). This is usually a mistake
--- let auto-injection handle Crossplane labels.
+`labels=None` is accepted as a no-op for backward compatibility (it used to
+opt out of the since-removed auto-injection).
 
 ## Connection details
 
