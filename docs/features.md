@@ -90,6 +90,12 @@ controls which Usage API version is used. Default is `"v2"`
 (`protection.crossplane.io/v1beta1`, Crossplane 2.x). Set to `"v1"` for
 Crossplane 1.x (`apiextensions.crossplane.io/v1beta1`).
 
+On the v2 API the kind is scope-aware: namespaced composites get the
+namespaced `Usage` kind, while cluster-scoped composites (e.g. legacy
+`apiextensions.crossplane.io/v1` XRs) get the cluster-scoped `ClusterUsage`
+kind — a namespaced Usage without a namespace cannot be composed by a
+cluster-scoped XR. The v1 `Usage` is always cluster-scoped.
+
 A single summary Warning event is emitted when Usage resources are generated,
 reminding that `compositeDeletePolicy: Foreground` is needed on the XRD for
 proper deletion ordering.

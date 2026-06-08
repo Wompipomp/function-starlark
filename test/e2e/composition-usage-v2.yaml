@@ -1,0 +1,51 @@
+# Composition that tests usageAPIVersion: "v2" — Usage resources generated for
+# depends_on pairs against protection.crossplane.io/v1beta1 (Crossplane 2.x).
+#
+# The runner only applies this composition when the cluster serves the
+# protection.crossplane.io API group. The default e2e cluster is Crossplane
+# 2.x, so this test runs by default; it is skipped only when overriding to a
+# 1.x cluster (where only "v1" / apiextensions.crossplane.io usages exist).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: usage-v2-test
+  labels:
+    e2e-test: usage-v2
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-usage-v2
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          usageAPIVersion: "v2"  # protection.crossplane.io/v1beta1
+          sequencingTTL: "5s"
+          source: |
+            base = Resource("usage-base", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            })
+
+            Resource("usage-dependent", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            }, depends_on=[base])
+
+            set_xr_status("test.usageV2", True)
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

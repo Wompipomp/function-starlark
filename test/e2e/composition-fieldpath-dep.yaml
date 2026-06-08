@@ -1,0 +1,65 @@
+# Composition that tests tuple depends_on with a field-path readiness check:
+#   depends_on=[(ref, "field.path")]
+#
+# The consumer is deferred until the producer's observed state has a truthy
+# value at metadata.annotations.e2e-signal. Two-phase test:
+#
+#   Phase 1: XR spec.signal is unset -> producer is created WITHOUT the
+#            annotation -> consumer is deferred (creation sequencing), the XR
+#            stays not-Ready with ComposedResourcesReady=False and reason
+#            WaitingForDependencies.
+#   Phase 2: the runner patches XR spec.signal -> the producer body gains the
+#            annotation -> once observed, the field-path check passes and the
+#            consumer is emitted -> XR reaches Ready.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: fieldpath-dep-test
+  labels:
+    e2e-test: fieldpath-dep
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-fieldpath-dep
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          usageAPIVersion: "v1"  # auto-rewritten to "v2" on Crossplane 2.x clusters by run-tests.sh
+          sequencingTTL: "5s"
+          source: |
+            signal = get(oxr, "spec.signal", "")
+
+            producer_body = {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            }
+            if signal:
+                producer_body["metadata"] = {"annotations": {"e2e-signal": signal}}
+
+            producer = Resource("producer", producer_body)
+
+            # Tuple dependency: consumer waits for a truthy value at the given
+            # field path on the OBSERVED producer (not just Ready/Synced).
+            Resource("consumer", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            }, depends_on=[(producer, "metadata.annotations.e2e-signal")])
+
+            set_xr_status("test.signal", signal if signal else "none")
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

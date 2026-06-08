@@ -2929,8 +2929,11 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "protection.crossplane.io/v1beta1" {
 		t.Errorf("Usage apiVersion = %q, want protection.crossplane.io/v1beta1", got)
 	}
-	if got := body.GetFields()["kind"].GetStringValue(); got != "Usage" {
-		t.Errorf("Usage kind = %q, want Usage", got)
+	// Cluster-scoped composite + v2 API -> the cluster-scoped ClusterUsage
+	// kind (the v2 Usage kind is namespaced and cannot be composed by a
+	// cluster-scoped XR).
+	if got := body.GetFields()["kind"].GetStringValue(); got != "ClusterUsage" {
+		t.Errorf("Usage kind = %q, want ClusterUsage", got)
 	}
 
 	spec := body.GetFields()["spec"].GetStructValue()

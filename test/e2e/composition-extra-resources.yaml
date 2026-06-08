@@ -1,0 +1,72 @@
+# Composition that tests the extra-resources roundtrip:
+#   require_extra_resource()  -> Crossplane fetches by name
+#   require_extra_resources() -> Crossplane fetches by labels
+#   get_extra_resource()/get_extra_resources()/extra_resources -> readers
+#
+# Crossplane runs the function iteratively (GA since 1.x): on the first
+# iteration extra_resources is empty and the function returns its
+# requirements; Crossplane fetches the matching cluster-scoped resources and
+# calls the function again with extra_resources populated. The requirements
+# below are static, so the dance converges on the second iteration.
+#
+# The runner pre-creates two standalone NopResources labeled e2e-extra=true
+# (matched by label) and relies on the suite's own XRD (matched by name).
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: extra-resources-test
+  labels:
+    e2e-test: extra-resources
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-extra-resources
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # --- Requirements (must be called every run for convergence) ---
+            require_extra_resource("xrd",
+                "apiextensions.crossplane.io/v1", "CompositeResourceDefinition",
+                match_name="xtests.e2e.fn-starlark.io")
+            require_extra_resources("nops",
+                "nop.crossplane.io/v1alpha1", "NopResource",
+                match_labels={"e2e-extra": "true"})
+
+            # --- Readers (empty on iteration 1, populated on iteration 2) ---
+            # get_extra_resource: first match + dot-path traversal.
+            xrd_group = get_extra_resource("xrd", "spec.group", "")
+            # get_extra_resource without path returns the full body.
+            xrd_body = get_extra_resource("xrd")
+            xrd_kind = get(xrd_body, "kind", "") if xrd_body else ""
+            # get_extra_resources: dot-path mapped over all matches.
+            nop_names = get_extra_resources("nops", "metadata.name")
+            # Raw global access.
+            raw_has_xrd = "xrd" in extra_resources and extra_resources["xrd"] != None
+
+            set_xr_status("test.extraXrdGroup", xrd_group)
+            set_xr_status("test.extraXrdKind", xrd_kind)
+            set_xr_status("test.extraNopCount", len(nop_names))
+            set_xr_status("test.extraNopNamesSorted", ",".join(sorted(nop_names)))
+            set_xr_status("test.extraRawHasXrd", raw_has_xrd)
+            set_xr_status("test.extraResourcesReady",
+                xrd_group != "" and len(nop_names) == 2)
+
+            # Emit one resource so the XR has something to become Ready on.
+            Resource("extra-dummy", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            })
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

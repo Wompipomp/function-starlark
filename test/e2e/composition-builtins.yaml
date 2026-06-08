@@ -19,7 +19,7 @@ spec:
         apiVersion: starlark.fn.crossplane.io/v1alpha1
         kind: StarlarkInput
         spec:
-          usageAPIVersion: "v1"  # e2e uses Crossplane 1.x
+          usageAPIVersion: "v1"  # auto-rewritten to "v2" on Crossplane 2.x clusters by run-tests.sh
           modules:
             helper.star: |
               # Inline module to test load() with inline modules
@@ -139,6 +139,61 @@ spec:
                     },
                 },
             }, connection_details={"endpoint": "test-endpoint-value"})
+
+            # --- Test: external_name kwarg ---
+            # Sets the crossplane.io/external-name annotation on the composed
+            # resource.
+            Resource("resource-ext-name", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, external_name="e2e-external-id")
+
+            # --- Test: external_name conflict (kwarg wins + Warning event) ---
+            # The body already carries a crossplane.io/external-name annotation;
+            # the kwarg must win and a Warning event must be emitted.
+            Resource("resource-ext-conflict", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "metadata": {
+                    "annotations": {"crossplane.io/external-name": "body-loses"},
+                },
+                "spec": {
+                    "forProvider": {
+                        "conditionAfter": [
+                            {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                            {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                        ],
+                    },
+                },
+            }, external_name="kwarg-wins")
+
+            # --- Test: set_response_ttl() ---
+            # Sets a short response TTL. The observable effect (function
+            # re-invocation cadence) is implicit; here we verify the call is
+            # accepted end-to-end and does not break the reconcile.
+            set_response_ttl("5s")
+            set_xr_status("test.responseTtlSet", True)
+
+            # --- Test: is_observed() / observed_body() / get_condition() ---
+            # On the first reconcile resource-a is not observed yet; on later
+            # reconciles (the preserve phase below forces at least one more)
+            # these flip to their observed values. The runner polls for the
+            # final values.
+            set_xr_status("test.isObservedA", is_observed("resource-a"))
+            ob = observed_body("resource-a", {})
+            set_xr_status("test.observedBodyKind", get(ob, "kind", "none"))
+            ready_cond = get_condition("resource-a", "Ready")
+            set_xr_status("test.condAReadyStatus", ready_cond["status"] if ready_cond else "absent")
+            # get_condition returns None for a missing condition type.
+            set_xr_status("test.condMissingIsNone", get_condition("resource-a", "NoSuchType") == None)
 
             # --- Test: skip_resource() ---
             # Intentionally omit a resource and emit a Warning event.

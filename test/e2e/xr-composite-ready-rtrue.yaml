@@ -1,0 +1,14 @@
+# ready=True override: the composed MR never reports Ready=True itself
+# (conditionAfter sets Ready=False), but Resource(ready=True) marks it ready in
+# the pipeline. Expected outcome: XR reaches Ready=True while the MR's own
+# Ready condition is False.
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-composite-ready-rtrue
+  labels:
+    e2e-test: composite-ready
+spec:
+  compositionRef:
+    name: composite-ready-test
+  mode: ready-true

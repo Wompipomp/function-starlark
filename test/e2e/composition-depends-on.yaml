@@ -26,7 +26,7 @@ spec:
         apiVersion: starlark.fn.crossplane.io/v1alpha1
         kind: StarlarkInput
         spec:
-          usageAPIVersion: "v1"  # e2e uses Crossplane 1.x
+          usageAPIVersion: "v1"  # auto-rewritten to "v2" on Crossplane 2.x clusters by run-tests.sh
           sequencingTTL: "5s"
           source: |
             # ============================================================

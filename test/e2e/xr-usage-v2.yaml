@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-usage-v2
+  labels:
+    e2e-test: usage-v2
+spec:
+  compositionRef:
+    name: usage-v2-test

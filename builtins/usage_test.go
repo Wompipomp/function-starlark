@@ -45,14 +45,38 @@ func TestBuildUsageResource(t *testing.T) {
 		"db":  {APIVersion: "nop.crossplane.io/v1alpha1", Kind: "NopResource"},
 	}
 	t.Run("v1alpha1 API version", func(t *testing.T) {
-		res := buildUsageResource("app", "db", UsageAPIVersionV1, typeInfos)
-		assertUsageResource(t, res, "app", "db", UsageAPIVersionV1)
+		res := buildUsageResource("app", "db", UsageAPIVersionV1, "Usage", typeInfos)
+		assertUsageResource(t, res, "app", "db", UsageAPIVersionV1, "Usage")
 	})
 
 	t.Run("v1beta1 API version", func(t *testing.T) {
-		res := buildUsageResource("app", "db", UsageAPIVersionV2, typeInfos)
-		assertUsageResource(t, res, "app", "db", UsageAPIVersionV2)
+		res := buildUsageResource("app", "db", UsageAPIVersionV2, "ClusterUsage", typeInfos)
+		assertUsageResource(t, res, "app", "db", UsageAPIVersionV2, "ClusterUsage")
 	})
+}
+
+func TestUsageKind(t *testing.T) {
+	tests := []struct {
+		name                string
+		apiVersion          string
+		compositeNamespaced bool
+		want                string
+	}{
+		// The v2 Usage kind is namespaced; cluster-scoped composites
+		// (legacy XRs) must compose the cluster-scoped ClusterUsage.
+		{"v2 cluster-scoped composite", UsageAPIVersionV2, false, "ClusterUsage"},
+		{"v2 namespaced composite", UsageAPIVersionV2, true, "Usage"},
+		// The v1 Usage is always cluster-scoped.
+		{"v1 cluster-scoped composite", UsageAPIVersionV1, false, "Usage"},
+		{"v1 namespaced composite", UsageAPIVersionV1, true, "Usage"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := usageKind(tt.apiVersion, tt.compositeNamespaced); got != tt.want {
+				t.Errorf("usageKind(%q, %v) = %q, want %q", tt.apiVersion, tt.compositeNamespaced, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestBuildUsageResources(t *testing.T) {
@@ -61,7 +85,7 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "cache", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, false)
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
@@ -81,14 +105,14 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "A", Dependency: "B", IsRef: true},
 			{Dependent: "B", Dependency: "C", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, false)
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
 	})
 
 	t.Run("empty dependency list", func(t *testing.T) {
-		result := BuildUsageResources(nil, UsageAPIVersionV1, nil)
+		result := BuildUsageResources(nil, UsageAPIVersionV1, nil, false)
 		if len(result) != 0 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 0", len(result))
 		}
@@ -99,7 +123,7 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "db", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, false)
 		// Same dependent+dependency hashes to the same name, so map deduplicates.
 		if len(result) != 1 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 1 (deduplicated)", len(result))
@@ -361,7 +385,7 @@ func TestWarnUnmatchedStringRefs(t *testing.T) {
 }
 
 // assertUsageResource verifies a Usage protobuf Struct has the correct structure.
-func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependency, apiVersion string) {
+func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependency, apiVersion, kind string) {
 	t.Helper()
 
 	fields := res.GetFields()
@@ -372,8 +396,8 @@ func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependen
 	}
 
 	// kind
-	if got := fields["kind"].GetStringValue(); got != "Usage" {
-		t.Errorf("kind = %q, want %q", got, "Usage")
+	if got := fields["kind"].GetStringValue(); got != kind {
+		t.Errorf("kind = %q, want %q", got, kind)
 	}
 
 	// metadata should be absent (Crossplane auto-generates the name)

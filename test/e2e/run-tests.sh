@@ -25,12 +25,19 @@ fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); TESTS+=("FAIL: $1"); }
 
 wait_for_condition() {
     local resource="$1" condition="$2" timeout="${3:-120}"
-    local end=$((SECONDS + timeout))
+    local start=$SECONDS end=$((SECONDS + timeout))
     while [ $SECONDS -lt $end ]; do
         local val
         val=$(kubectl get "$resource" -o jsonpath="{.status.conditions[?(@.type==\"$condition\")].status}" 2>/dev/null || echo "")
         if [ "$val" = "True" ]; then
             return 0
+        fi
+        # Heartbeat: without realtime compositions (e.g. Crossplane 1.x) XRs
+        # can take ~60-90s to notice composed readiness — show we're alive,
+        # not hung. On 2.x (realtime, default) this rarely fires.
+        local elapsed=$((SECONDS - start))
+        if [ "$elapsed" -gt 0 ] && [ $((elapsed % 30)) -lt 3 ]; then
+            echo "    ... still waiting for $condition=True on $resource (${elapsed}s/${timeout}s)"
         fi
         sleep 3
     done
@@ -118,6 +125,32 @@ if [ "$SKIP_SETUP" = false ]; then
     "$SCRIPT_DIR/setup.sh"
 fi
 
+# --- Cluster capability detection (Crossplane 1.x vs 2.x) ---
+# On a Crossplane 2.x cluster the suite exercises the v2 Usage API
+# (protection.crossplane.io): compositions pinned to usageAPIVersion "v1" are
+# rendered to "v2" on the fly, and usage queries target the v2 group.
+USAGE_KIND="usages"
+RENDER_USAGE_V2=false
+# NOTE: single command, no pipeline — `kubectl api-resources | grep -q` breaks
+# under `set -o pipefail` (grep -q exits on first match, kubectl dies with
+# SIGPIPE, and the check inverts exactly when the API group exists).
+if kubectl get crd usages.protection.crossplane.io &>/dev/null; then
+    log "Crossplane 2.x detected (protection.crossplane.io served): using v2 Usage API"
+    # All e2e XRs are cluster-scoped (legacy), so the function emits the
+    # cluster-scoped ClusterUsage kind on the v2 API.
+    USAGE_KIND="clusterusages.protection.crossplane.io"
+    RENDER_USAGE_V2=true
+fi
+
+# Applies a composition file, rendering usageAPIVersion for the cluster.
+apply_composition() {
+    if [ "$RENDER_USAGE_V2" = true ]; then
+        sed 's/usageAPIVersion: "v1"/usageAPIVersion: "v2"/' "$1" | kubectl apply -f -
+    else
+        kubectl apply -f "$1"
+    fi
+}
+
 # --- Apply XRD ---
 log "Applying XRD"
 kubectl apply -f "$SCRIPT_DIR/xrd.yaml"
@@ -126,27 +159,30 @@ kubectl wait --for=condition=Established xrd xtests.e2e.fn-starlark.io --timeout
 
 # --- Apply all compositions ---
 log "Applying compositions"
-kubectl apply -f "$SCRIPT_DIR/composition-builtins.yaml"
+apply_composition "$SCRIPT_DIR/composition-builtins.yaml"
 # Use rendered OCI composition with in-cluster registry address
 if [ -f "$SCRIPT_DIR/composition-oci-rendered.yaml" ]; then
-    kubectl apply -f "$SCRIPT_DIR/composition-oci-rendered.yaml"
+    apply_composition "$SCRIPT_DIR/composition-oci-rendered.yaml"
 else
     echo "WARNING: composition-oci-rendered.yaml not found, using original (may fail in-cluster)"
-    kubectl apply -f "$SCRIPT_DIR/composition-oci.yaml"
+    apply_composition "$SCRIPT_DIR/composition-oci.yaml"
 fi
-kubectl apply -f "$SCRIPT_DIR/composition-depends-on.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-star-imports.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-composite-ready.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-transitive-skip.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-relative-loads.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-path-modules.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-bundled-modules.yaml"
-kubectl apply -f "$SCRIPT_DIR/composition-mutable-struct.yaml"
+apply_composition "$SCRIPT_DIR/composition-depends-on.yaml"
+apply_composition "$SCRIPT_DIR/composition-star-imports.yaml"
+apply_composition "$SCRIPT_DIR/composition-composite-ready.yaml"
+apply_composition "$SCRIPT_DIR/composition-transitive-skip.yaml"
+apply_composition "$SCRIPT_DIR/composition-relative-loads.yaml"
+apply_composition "$SCRIPT_DIR/composition-path-modules.yaml"
+apply_composition "$SCRIPT_DIR/composition-bundled-modules.yaml"
+apply_composition "$SCRIPT_DIR/composition-mutable-struct.yaml"
+apply_composition "$SCRIPT_DIR/composition-context-env.yaml"
+apply_composition "$SCRIPT_DIR/composition-extra-resources.yaml"
+apply_composition "$SCRIPT_DIR/composition-fieldpath-dep.yaml"
 if [ -f "$SCRIPT_DIR/composition-schemas-rendered.yaml" ]; then
-    kubectl apply -f "$SCRIPT_DIR/composition-schemas-rendered.yaml"
+    apply_composition "$SCRIPT_DIR/composition-schemas-rendered.yaml"
 else
     echo "WARNING: composition-schemas-rendered.yaml not found, using original (may fail in-cluster)"
-    kubectl apply -f "$SCRIPT_DIR/composition-schemas.yaml"
+    apply_composition "$SCRIPT_DIR/composition-schemas.yaml"
 fi
 sleep 2
 
@@ -265,12 +301,12 @@ else
 fi
 
 # Check Usage resource exists (resource-b depends_on resource-a)
-usage_count=$(kubectl get usages -l crossplane.io/composite=test-builtins -o name 2>/dev/null | wc -l | tr -d ' ')
+usage_count=$(kubectl get "$USAGE_KIND" -l crossplane.io/composite=test-builtins -o name 2>/dev/null | wc -l | tr -d ' ')
 if [ "$usage_count" -ge 1 ] 2>/dev/null; then
     pass "builtins: Usage resource(s) created for depends_on"
 else
     # Usage resources might not have composite label, check by name pattern
-    all_usages=$(kubectl get usages -o name 2>/dev/null | wc -l | tr -d ' ')
+    all_usages=$(kubectl get "$USAGE_KIND" -o name 2>/dev/null | wc -l | tr -d ' ')
     if [ "$all_usages" -ge 1 ] 2>/dev/null; then
         pass "builtins: Usage resource(s) exist in cluster"
     else
@@ -381,6 +417,80 @@ if kubectl get nopresource \
     pass "preserve: phase 2 - resource preserved after config removal (observed body re-emitted)"
 else
     fail "preserve: phase 2 - preservable-resource was deleted (preserve_observed did not work)"
+fi
+
+# --- external_name kwarg tests ---
+ext_ann=$(kubectl get nopresource \
+    -l "crossplane.io/composite=test-builtins,function-starlark.crossplane.io/resource-name=resource-ext-name" \
+    -o jsonpath='{.items[0].metadata.annotations.crossplane\.io/external-name}' 2>/dev/null || echo "")
+if [ "$ext_ann" = "e2e-external-id" ]; then
+    pass "external-name: kwarg set crossplane.io/external-name annotation"
+else
+    fail "external-name: annotation='$ext_ann' (expected e2e-external-id)"
+fi
+
+conflict_ann=$(kubectl get nopresource \
+    -l "crossplane.io/composite=test-builtins,function-starlark.crossplane.io/resource-name=resource-ext-conflict" \
+    -o jsonpath='{.items[0].metadata.annotations.crossplane\.io/external-name}' 2>/dev/null || echo "")
+if [ "$conflict_ann" = "kwarg-wins" ]; then
+    pass "external-name: kwarg wins over body annotation on conflict"
+else
+    fail "external-name: conflict annotation='$conflict_ann' (expected kwarg-wins)"
+fi
+
+events=$(kubectl get events --field-selector involvedObject.name=test-builtins -o jsonpath='{.items[*].message}' 2>/dev/null || echo "")
+if echo "$events" | grep -q "overrides annotation"; then
+    pass "external-name: Warning event emitted for annotation conflict"
+else
+    fail "external-name: no 'overrides annotation' Warning event found"
+fi
+
+# --- set_response_ttl smoke test ---
+ttl_set=$(get_status_field "xtest/test-builtins" "test.responseTtlSet")
+if [ "$ttl_set" = "true" ]; then
+    pass "response-ttl: set_response_ttl() accepted end-to-end"
+else
+    fail "response-ttl: responseTtlSet='$ttl_set' (expected true)"
+fi
+
+# --- is_observed / observed_body / get_condition tests ---
+# These flip once a later reconcile observes resource-a (the preserve phase
+# above already forced one). Poll on the slowest field (the Ready condition
+# must also have appeared on the observed MR).
+log "Waiting for observed-state helpers to see resource-a..."
+for i in $(seq 1 30); do
+    cond_a=$(get_status_field "xtest/test-builtins" "test.condAReadyStatus" 2>/dev/null || echo "")
+    if [ "$cond_a" = "True" ]; then
+        break
+    fi
+    sleep 2
+done
+
+is_observed_a=$(get_status_field "xtest/test-builtins" "test.isObservedA")
+if [ "$is_observed_a" = "true" ]; then
+    pass "observed-helpers: is_observed() flipped to true after re-reconcile"
+else
+    fail "observed-helpers: isObservedA='$is_observed_a' (expected true)"
+fi
+
+ob_kind=$(get_status_field "xtest/test-builtins" "test.observedBodyKind")
+if [ "$ob_kind" = "NopResource" ]; then
+    pass "observed-helpers: observed_body() returned full resource body"
+else
+    fail "observed-helpers: observedBodyKind='$ob_kind' (expected NopResource)"
+fi
+
+if [ "$cond_a" = "True" ]; then
+    pass "observed-helpers: get_condition() read Ready condition from observed resource"
+else
+    fail "observed-helpers: condAReadyStatus='$cond_a' (expected True)"
+fi
+
+cond_missing=$(get_status_field "xtest/test-builtins" "test.condMissingIsNone")
+if [ "$cond_missing" = "true" ]; then
+    pass "observed-helpers: get_condition() returns None for missing condition type"
+else
+    fail "observed-helpers: condMissingIsNone='$cond_missing' (expected true)"
 fi
 
 # ============================================================
@@ -842,7 +952,7 @@ else
 fi
 
 # Verify Usage resources exist (2 pairs: schema->database, app->schema)
-usage_count=$(kubectl get usages -o name 2>/dev/null | wc -l | tr -d ' ')
+usage_count=$(kubectl get "$USAGE_KIND" -o name 2>/dev/null | wc -l | tr -d ' ')
 if [ "$usage_count" -ge 2 ] 2>/dev/null; then
     pass "depends_on: Usage resources created ($usage_count found)"
 else
@@ -1020,6 +1130,83 @@ else
     fail "composite-ready/explicit: condition message='$explicit_cond_msg' (expected user-supplied message)"
 fi
 
+# --- Scenario D: Resource(ready=False) override ---
+log "Scenario D: Resource(ready=False) keeps XR not-Ready despite MR Ready=True"
+kubectl apply -f "$SCRIPT_DIR/xr-composite-ready-rfalse.yaml"
+
+if wait_for_reconciled "xtest/test-composite-ready-rfalse" 60; then
+    pass "composite-ready/ready-false: XR reconciled by function"
+else
+    fail "composite-ready/ready-false: XR never Synced within timeout"
+    kubectl get xtest/test-composite-ready-rfalse -o yaml 2>/dev/null || true
+fi
+
+# The composed resource must exist (ready=False is not a skip)...
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-composite-ready-rfalse,function-starlark.crossplane.io/resource-name=never-ready" \
+    -o name 2>/dev/null | grep -q .; then
+    pass "composite-ready/ready-false: composed resource 'never-ready' exists"
+else
+    fail "composite-ready/ready-false: composed resource 'never-ready' not found"
+fi
+
+# ...and the MR itself reaches Ready=True (proving the override, not the MR
+# state, is what blocks the XR). Poll: provider-nop sets the condition on its
+# first reconcile, which can lag creation by a few seconds.
+rfalse_mr_ready=""
+for i in $(seq 1 20); do
+    rfalse_mr_ready=$(kubectl get nopresource \
+        -l "crossplane.io/composite=test-composite-ready-rfalse,function-starlark.crossplane.io/resource-name=never-ready" \
+        -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+    if [ "$rfalse_mr_ready" = "True" ]; then
+        break
+    fi
+    sleep 3
+done
+if [ "$rfalse_mr_ready" = "True" ]; then
+    pass "composite-ready/ready-false: MR's own Ready condition is True"
+else
+    fail "composite-ready/ready-false: MR Ready='$rfalse_mr_ready' (expected True)"
+fi
+
+rfalse_ready=$(get_condition_field "xtest/test-composite-ready-rfalse" "Ready" "status")
+if [ "$rfalse_ready" = "True" ]; then
+    fail "composite-ready/ready-false: XR Ready=$rfalse_ready (expected not True; ready=False override failed)"
+else
+    pass "composite-ready/ready-false: XR Ready=$rfalse_ready (not True, as expected)"
+fi
+
+# --- Scenario E: Resource(ready=True) override ---
+log "Scenario E: Resource(ready=True) makes XR Ready despite MR Ready=False"
+kubectl apply -f "$SCRIPT_DIR/xr-composite-ready-rtrue.yaml"
+
+if wait_for_condition "xtest/test-composite-ready-rtrue" "Ready" 120; then
+    pass "composite-ready/ready-true: XR reached Ready=True (explicit override honored)"
+else
+    fail "composite-ready/ready-true: XR did not reach Ready (ready=True override failed)"
+    kubectl get xtest/test-composite-ready-rtrue -o yaml 2>/dev/null || true
+fi
+
+# The MR's own Ready condition must be False (proving the override, not the MR
+# state, is what made the XR Ready). The XR goes Ready immediately via the
+# override, so poll: provider-nop may not have written the MR's own
+# (intentionally False) Ready condition yet at this point.
+rtrue_mr_ready=""
+for i in $(seq 1 20); do
+    rtrue_mr_ready=$(kubectl get nopresource \
+        -l "crossplane.io/composite=test-composite-ready-rtrue,function-starlark.crossplane.io/resource-name=forced-ready" \
+        -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+    if [ "$rtrue_mr_ready" = "False" ]; then
+        break
+    fi
+    sleep 3
+done
+if [ "$rtrue_mr_ready" = "False" ]; then
+    pass "composite-ready/ready-true: MR's own Ready condition is False (override did the work)"
+else
+    fail "composite-ready/ready-true: MR Ready='$rtrue_mr_ready' (expected False)"
+fi
+
 # ============================================================
 # TEST 10: TRANSITIVE SKIP + DEPENDS_ON TOLERANCE
 # ============================================================
@@ -1085,6 +1272,267 @@ else
 fi
 
 # ============================================================
+# TEST 13: CROSS-STEP CONTEXT + ENVIRONMENT GLOBAL
+# ============================================================
+log ""
+log "===== TEST 13: CROSS-STEP CONTEXT + ENVIRONMENT GLOBAL ====="
+
+log "Creating XR for context-env test"
+kubectl apply -f "$SCRIPT_DIR/xr-context-env.yaml"
+
+log "Waiting for context-env XR to become Ready..."
+if wait_for_condition "xtest/test-context-env" "Ready" 120; then
+    pass "context-env: XR reached Ready"
+else
+    fail "context-env: XR did not reach Ready"
+    kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+fi
+
+env_region=$(get_status_field "xtest/test-context-env" "test.envRegion")
+if [ "$env_region" = "eu-central-1" ]; then
+    pass "context-env: environment global populated from well-known context key"
+else
+    fail "context-env: envRegion='$env_region' (expected eu-central-1)"
+fi
+
+env_tier=$(get_status_field "xtest/test-context-env" "test.envTier")
+if [ "$env_tier" = "gold" ]; then
+    pass "context-env: environment top-level field read"
+else
+    fail "context-env: envTier='$env_tier' (expected gold)"
+fi
+
+env_zone=$(get_status_field "xtest/test-context-env" "test.envZone")
+if [ "$env_zone" = "a" ]; then
+    pass "context-env: nested environment access via get() works"
+else
+    fail "context-env: envZone='$env_zone' (expected a)"
+fi
+
+cross_step=$(get_status_field "xtest/test-context-env" "test.crossStepContext")
+if [ "$cross_step" = "from-step-one" ]; then
+    pass "context-env: custom context key propagated across pipeline steps"
+else
+    fail "context-env: crossStepContext='$cross_step' (expected from-step-one)"
+fi
+
+# ============================================================
+# TEST 14: EXTRA RESOURCES (require -> fulfill -> read)
+# ============================================================
+log ""
+log "===== TEST 14: EXTRA RESOURCES (require -> fulfill -> read) ====="
+
+# Pre-create two standalone cluster-scoped NopResources for the
+# require_extra_resources(match_labels=...) lookup.
+log "Creating standalone NopResources for extra-resources lookup"
+kubectl apply -f - <<EOF
+apiVersion: nop.crossplane.io/v1alpha1
+kind: NopResource
+metadata:
+  name: e2e-extra-nop-1
+  labels:
+    e2e-extra: "true"
+spec:
+  forProvider:
+    conditionAfter:
+      - conditionType: Ready
+        conditionStatus: "True"
+        time: 0s
+---
+apiVersion: nop.crossplane.io/v1alpha1
+kind: NopResource
+metadata:
+  name: e2e-extra-nop-2
+  labels:
+    e2e-extra: "true"
+spec:
+  forProvider:
+    conditionAfter:
+      - conditionType: Ready
+        conditionStatus: "True"
+        time: 0s
+EOF
+
+log "Creating XR for extra-resources test"
+kubectl apply -f "$SCRIPT_DIR/xr-extra-resources.yaml"
+
+log "Waiting for extra-resources XR to become Ready..."
+if wait_for_condition "xtest/test-extra-resources" "Ready" 120; then
+    pass "extra-resources: XR reached Ready"
+else
+    fail "extra-resources: XR did not reach Ready"
+    kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+fi
+
+# Crossplane fulfills requirements within a single reconcile (iterative dance),
+# but poll briefly in case the first Ready reconcile predates the nops.
+log "Waiting for extra resources to be fulfilled..."
+for i in $(seq 1 30); do
+    extra_ready=$(get_status_field "xtest/test-extra-resources" "test.extraResourcesReady" 2>/dev/null || echo "")
+    if [ "$extra_ready" = "true" ]; then
+        break
+    fi
+    sleep 2
+done
+
+if [ "$extra_ready" = "true" ]; then
+    pass "extra-resources: require -> fulfill -> read roundtrip completed"
+else
+    fail "extra-resources: extraResourcesReady='$extra_ready' (expected true)"
+fi
+
+extra_group=$(get_status_field "xtest/test-extra-resources" "test.extraXrdGroup")
+if [ "$extra_group" = "e2e.fn-starlark.io" ]; then
+    pass "extra-resources: get_extra_resource() dot-path read (match_name lookup)"
+else
+    fail "extra-resources: extraXrdGroup='$extra_group' (expected e2e.fn-starlark.io)"
+fi
+
+extra_kind=$(get_status_field "xtest/test-extra-resources" "test.extraXrdKind")
+if [ "$extra_kind" = "CompositeResourceDefinition" ]; then
+    pass "extra-resources: get_extra_resource() full-body read"
+else
+    fail "extra-resources: extraXrdKind='$extra_kind' (expected CompositeResourceDefinition)"
+fi
+
+extra_count=$(get_status_field "xtest/test-extra-resources" "test.extraNopCount")
+if [ "$extra_count" = "2" ]; then
+    pass "extra-resources: require_extra_resources(match_labels) matched both NopResources"
+else
+    fail "extra-resources: extraNopCount='$extra_count' (expected 2)"
+fi
+
+extra_names=$(get_status_field "xtest/test-extra-resources" "test.extraNopNamesSorted")
+if [ "$extra_names" = "e2e-extra-nop-1,e2e-extra-nop-2" ]; then
+    pass "extra-resources: get_extra_resources() mapped dot-path over all matches"
+else
+    fail "extra-resources: extraNopNamesSorted='$extra_names' (expected e2e-extra-nop-1,e2e-extra-nop-2)"
+fi
+
+extra_raw=$(get_status_field "xtest/test-extra-resources" "test.extraRawHasXrd")
+if [ "$extra_raw" = "true" ]; then
+    pass "extra-resources: raw extra_resources global contains requirement key"
+else
+    fail "extra-resources: extraRawHasXrd='$extra_raw' (expected true)"
+fi
+
+# ============================================================
+# TEST 15: TUPLE DEPENDS_ON (FIELD-PATH READINESS)
+# ============================================================
+log ""
+log "===== TEST 15: TUPLE DEPENDS_ON (FIELD-PATH READINESS) ====="
+
+log "Phase 1: creating XR without signal (consumer must be deferred)"
+# Reset any leftover XR from a previous run: phase 2 patches spec.signal onto
+# it, and a plain re-apply would not remove that field (it was never part of
+# the applied manifest), which would break the phase 1 deferral assertions.
+if kubectl get xtest/test-fieldpath-dep &>/dev/null; then
+    log "Deleting leftover test-fieldpath-dep XR from a previous run..."
+    kubectl delete xtest test-fieldpath-dep --wait --timeout=120s 2>/dev/null || true
+fi
+kubectl apply -f "$SCRIPT_DIR/xr-fieldpath-dep.yaml"
+
+if wait_for_reconciled "xtest/test-fieldpath-dep" 60; then
+    pass "fieldpath-dep: XR reconciled by function"
+else
+    fail "fieldpath-dep: XR never Synced within timeout"
+    kubectl get xtest/test-fieldpath-dep -o yaml 2>/dev/null || true
+fi
+
+# Producer must exist (no deps).
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-fieldpath-dep,function-starlark.crossplane.io/resource-name=producer" \
+    -o name 2>/dev/null | grep -q .; then
+    pass "fieldpath-dep: phase 1 - producer created"
+else
+    fail "fieldpath-dep: phase 1 - producer not found"
+fi
+
+# Consumer must be deferred (field path not yet truthy).
+if kubectl get nopresource \
+    -l "crossplane.io/composite=test-fieldpath-dep,function-starlark.crossplane.io/resource-name=consumer" \
+    -o name 2>/dev/null | grep -q .; then
+    fail "fieldpath-dep: phase 1 - consumer exists (should be deferred on field path)"
+else
+    pass "fieldpath-dep: phase 1 - consumer deferred until field path is truthy"
+fi
+
+fp_ready=$(get_condition_field "xtest/test-fieldpath-dep" "Ready" "status")
+if [ "$fp_ready" = "True" ]; then
+    fail "fieldpath-dep: phase 1 - XR Ready=$fp_ready (expected not True while consumer deferred)"
+else
+    pass "fieldpath-dep: phase 1 - XR Ready=$fp_ready (not True, as expected)"
+fi
+
+fp_cond_status=$(get_condition_field "xtest/test-fieldpath-dep" "ComposedResourcesReady" "status")
+fp_cond_reason=$(get_condition_field "xtest/test-fieldpath-dep" "ComposedResourcesReady" "reason")
+if [ "$fp_cond_status" = "False" ] && [ "$fp_cond_reason" = "WaitingForDependencies" ]; then
+    pass "fieldpath-dep: phase 1 - ComposedResourcesReady=False with reason WaitingForDependencies"
+else
+    fail "fieldpath-dep: phase 1 - condition status=$fp_cond_status reason=$fp_cond_reason (expected False / WaitingForDependencies)"
+fi
+
+log "Phase 2: patching XR with signal (producer gains annotation, consumer unblocks)"
+kubectl patch xtest/test-fieldpath-dep --type=merge -p '{"spec":{"signal":"go"}}'
+
+# The producer's annotation must be applied and then OBSERVED on a subsequent
+# reconcile before the consumer is emitted, so allow a generous window.
+log "Waiting for consumer to be created after signal..."
+consumer_created=false
+FP_END=$((SECONDS + 150))
+while [ $SECONDS -lt $FP_END ]; do
+    if kubectl get nopresource \
+        -l "crossplane.io/composite=test-fieldpath-dep,function-starlark.crossplane.io/resource-name=consumer" \
+        -o name 2>/dev/null | grep -q .; then
+        consumer_created=true
+        break
+    fi
+    sleep 3
+done
+
+if [ "$consumer_created" = true ]; then
+    pass "fieldpath-dep: phase 2 - consumer created once field path became truthy"
+else
+    fail "fieldpath-dep: phase 2 - consumer never created after signal"
+fi
+
+if wait_for_condition "xtest/test-fieldpath-dep" "Ready" 120; then
+    pass "fieldpath-dep: phase 2 - XR reached Ready after dependency satisfied"
+else
+    fail "fieldpath-dep: phase 2 - XR did not reach Ready"
+fi
+
+# ============================================================
+# TEST 16: USAGE API VERSION V2 (conditional, Crossplane 2.x only)
+# ============================================================
+log ""
+log "===== TEST 16: USAGE API VERSION V2 (conditional) ====="
+
+if [ "$RENDER_USAGE_V2" = true ]; then
+    log "protection.crossplane.io available - running usageAPIVersion v2 test"
+    kubectl apply -f "$SCRIPT_DIR/composition-usage-v2.yaml"
+    kubectl apply -f "$SCRIPT_DIR/xr-usage-v2.yaml"
+
+    if wait_for_condition "xtest/test-usage-v2" "Ready" 120; then
+        pass "usage-v2: XR reached Ready"
+    else
+        fail "usage-v2: XR did not reach Ready"
+    fi
+
+    # Cluster-scoped XR + v2 API -> ClusterUsage (the v2 Usage kind is namespaced).
+    v2_usage_count=$(kubectl get clusterusages.protection.crossplane.io -o name 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$v2_usage_count" -ge 1 ] 2>/dev/null; then
+        pass "usage-v2: protection.crossplane.io ClusterUsage resource(s) created ($v2_usage_count found)"
+    else
+        fail "usage-v2: no protection.crossplane.io ClusterUsage resources found"
+    fi
+
+    kubectl delete xtest test-usage-v2 --wait=false 2>/dev/null || true
+else
+    log "SKIP: protection.crossplane.io not served (Crossplane 1.x cluster) - usageAPIVersion v2 not testable here"
+fi
+
+# ============================================================
 # CLEANUP
 # ============================================================
 log ""
@@ -1102,8 +1550,14 @@ kubectl delete xtest test-mutable-struct --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-gate --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-optional --wait=false 2>/dev/null || true
 kubectl delete xtest test-composite-ready-explicit --wait=false 2>/dev/null || true
+kubectl delete xtest test-composite-ready-rfalse --wait=false 2>/dev/null || true
+kubectl delete xtest test-composite-ready-rtrue --wait=false 2>/dev/null || true
 kubectl delete xtest test-transitive-skip --wait=false 2>/dev/null || true
 kubectl delete xtest test-transitive-skip-optional --wait=false 2>/dev/null || true
+kubectl delete xtest test-context-env --wait=false 2>/dev/null || true
+kubectl delete xtest test-extra-resources --wait=false 2>/dev/null || true
+kubectl delete xtest test-fieldpath-dep --wait=false 2>/dev/null || true
+kubectl delete nopresource e2e-extra-nop-1 e2e-extra-nop-2 --wait=false 2>/dev/null || true
 
 # Wait for cleanup
 sleep 10

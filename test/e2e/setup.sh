@@ -8,7 +8,10 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLUSTER_NAME="${CLUSTER_NAME:-fn-starlark-e2e}"
 REGISTRY_NAME="${REGISTRY_NAME:-fn-starlark-registry}"
 REGISTRY_PORT="${REGISTRY_PORT:-5050}"
-CROSSPLANE_VERSION="${CROSSPLANE_VERSION:-1.19}"
+# Defaults to the Crossplane 2.x line. The suite is version-portable: on a 2.x
+# cluster run-tests.sh exercises the v2 Usage API (protection.crossplane.io);
+# override to a 1.x version (e.g. CROSSPLANE_VERSION=1.19) to test against v1.
+CROSSPLANE_VERSION="${CROSSPLANE_VERSION:-2.3}"
 PROVIDER_NOP_VERSION="${PROVIDER_NOP_VERSION:-v0.3.0}"
 
 # Reset KUBECONFIG so kind writes to the default ~/.kube/config

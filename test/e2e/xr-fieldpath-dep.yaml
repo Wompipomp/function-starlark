@@ -1,0 +1,11 @@
+# Tuple depends_on field-path test. spec.signal is intentionally absent on
+# creation (phase 1); the runner patches it in for phase 2.
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-fieldpath-dep
+  labels:
+    e2e-test: fieldpath-dep
+spec:
+  compositionRef:
+    name: fieldpath-dep-test

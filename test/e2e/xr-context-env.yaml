@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-context-env
+  labels:
+    e2e-test: context-env
+spec:
+  compositionRef:
+    name: context-env-test
