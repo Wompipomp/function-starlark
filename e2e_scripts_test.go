@@ -33,7 +33,7 @@ import (
 func e2eStarlarkSteps(t *testing.T, file string) map[string]*structpb.Struct {
 	t.Helper()
 
-	data, err := os.ReadFile(filepath.Join("test", "e2e", file))
+	data, err := os.ReadFile(filepath.Join("test", "e2e", file)) //nolint:gosec // fixed in-repo test fixture path
 	if err != nil {
 		t.Fatalf("reading %s: %v", file, err)
 	}
