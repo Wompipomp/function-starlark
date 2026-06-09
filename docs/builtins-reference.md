@@ -952,6 +952,33 @@ bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
 db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
 
+**Tip — copy a whole status subtree in one call:**
+
+`get_observed` returns the node at a path as a **nested object**, and
+`set_xr_status` accepts any value (including a dict). Combining them copies an
+entire observed status subtree to the XR in a single call, with nesting
+preserved — no per-field loop:
+
+```python
+# Tedious: one call per leaf
+set_xr_status("atProvider.objectId", get_observed("core", "status.atProvider.objectId", ""))
+set_xr_status("atProvider.name",     get_observed("core", "status.atProvider.name", ""))
+# ...
+
+# One call, whole subtree (nesting preserved):
+set_xr_status("atProvider", get_observed("core", "status.atProvider", {}))
+```
+
+Notes:
+
+- This **replaces** `status.atProvider` wholesale — it does not merge with any
+  keys already written under it. For an observed→status copy that is usually
+  what you want.
+- Only status fields **declared in your XRD's schema** persist. The API server
+  prunes any status field the XRD doesn't define, so copying a subtree wholesale
+  silently drops undeclared fields. Keep the XRD `status` schema and what you
+  copy in sync — or write only the specific fields you have declared.
+
 ---
 
 ### schema
