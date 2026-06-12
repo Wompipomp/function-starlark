@@ -280,6 +280,11 @@ func getAnnotationImpl(
 // auto-creating intermediate *convert.StarlarkDict entries as needed.
 // It uses mkdir -p semantics: non-dict values at intermediate path segments
 // are silently overwritten with new StarlarkDicts.
+//
+// Returns starlark.True when the value was written, and starlark.False when
+// the value was None and the write was skipped (a JSON null is never useful in
+// desired XR status). Path validation runs before the None check, so a
+// malformed or empty path still raises an error even when value is None.
 func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var path string
 	var value starlark.Value
@@ -295,6 +300,14 @@ func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, 
 	}
 	if strings.HasPrefix(path, ".") || strings.HasSuffix(path, ".") || strings.Contains(path, "..") {
 		return nil, fmt.Errorf("%s: malformed path %q", fnName, path)
+	}
+
+	// Skip None values: a JSON null is never useful in desired XR status.
+	// Only NoneType is skipped — legitimate falsy values ("", 0, False, {}, [])
+	// are still written. Path validation above runs first, so a malformed path
+	// still errors even when value is None.
+	if _, isNone := value.(starlark.NoneType); isNone {
+		return starlark.False, nil
 	}
 
 	// Build full segment list: ["status", ...user segments...].
@@ -345,7 +358,7 @@ func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, 
 		return nil, err
 	}
 
-	return starlark.None, nil
+	return starlark.True, nil
 }
 
 // getObservedImpl implements get_observed(name, path, default=None).
