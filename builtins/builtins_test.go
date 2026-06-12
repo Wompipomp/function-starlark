@@ -1223,12 +1223,13 @@ func TestSetXRStatus(t *testing.T) {
 	thread := new(starlark.Thread)
 
 	tests := []struct {
-		name    string
-		setup   func() *convert.StarlarkDict // build dxr before test
-		path    starlark.Value
-		value   starlark.Value
-		verify  func(t *testing.T, dxr *convert.StarlarkDict) // verify dxr after call
-		wantErr string
+		name       string
+		setup      func() *convert.StarlarkDict // build dxr before test
+		path       starlark.Value
+		value      starlark.Value
+		verify     func(t *testing.T, dxr *convert.StarlarkDict) // verify dxr after call
+		wantErr    string
+		wantReturn starlark.Value // expected return value (defaulted to starlark.True below)
 	}{
 		{
 			name: "nested path atProvider.projectId",
@@ -1502,25 +1503,92 @@ func TestSetXRStatus(t *testing.T) {
 			},
 		},
 		{
-			name: "writing None stores None at path",
+			name: "none value is skipped",
 			setup: func() *convert.StarlarkDict {
 				return convert.NewStarlarkDict(0)
 			},
-			path:  starlark.String("atProvider.projectId"),
-			value: starlark.None,
+			path:       starlark.String("atProvider.projectId"),
+			value:      starlark.None,
+			wantReturn: starlark.False,
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				// No-op: the "status" key must never have been created.
+				_, found, err := dxr.Get(starlark.String("status"))
+				if err != nil {
+					t.Fatalf("dxr.Get(status): %v", err)
+				}
+				if found {
+					t.Error("status key was created for a None value; expected no-op")
+				}
+			},
+		},
+		{
+			name: "empty string is written",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:       starlark.String("note"),
+			value:      starlark.String(""),
+			wantReturn: starlark.True,
 			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
 				status, _ := dxr.Attr("status")
 				sd := status.(*convert.StarlarkDict)
-				ap, _ := sd.Attr("atProvider")
-				apDict := ap.(*convert.StarlarkDict)
-				pid, found, _ := apDict.Get(starlark.String("projectId"))
+				note, found, _ := sd.Get(starlark.String("note"))
 				if !found {
-					t.Fatal("projectId not found")
+					t.Fatal("note not found")
 				}
-				if pid != starlark.None {
-					t.Errorf("projectId = %v, want None", pid)
+				if note != starlark.String("") {
+					t.Errorf("note = %v, want empty string", note)
 				}
 			},
+		},
+		{
+			name: "zero is written",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:       starlark.String("count"),
+			value:      starlark.MakeInt(0),
+			wantReturn: starlark.True,
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				count, found, _ := sd.Get(starlark.String("count"))
+				if !found {
+					t.Fatal("count not found")
+				}
+				if count != starlark.MakeInt(0) {
+					t.Errorf("count = %v, want 0", count)
+				}
+			},
+		},
+		{
+			name: "false is written",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:       starlark.String("ready"),
+			value:      starlark.False,
+			wantReturn: starlark.True,
+			verify: func(t *testing.T, dxr *convert.StarlarkDict) {
+				status, _ := dxr.Attr("status")
+				sd := status.(*convert.StarlarkDict)
+				ready, found, _ := sd.Get(starlark.String("ready"))
+				if !found {
+					t.Fatal("ready not found")
+				}
+				if ready != starlark.False {
+					t.Errorf("ready = %v, want False", ready)
+				}
+			},
+		},
+		{
+			name: "malformed path with none value still errors",
+			setup: func() *convert.StarlarkDict {
+				return convert.NewStarlarkDict(0)
+			},
+			path:    starlark.String(".foo"),
+			value:   starlark.None,
+			wantErr: "malformed path",
 		},
 		{
 			name: "writing a dict replaces at path no deep merge",
@@ -1582,8 +1650,12 @@ func TestSetXRStatus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("set_xr_status() error: %v", err)
 			}
-			if result != starlark.None {
-				t.Errorf("set_xr_status() = %v, want None", result)
+			wantReturn := tt.wantReturn
+			if wantReturn == nil {
+				wantReturn = starlark.True
+			}
+			if result != wantReturn {
+				t.Errorf("set_xr_status() = %v, want %v", result, wantReturn)
 			}
 			if tt.verify != nil {
 				tt.verify(t, dxr)
