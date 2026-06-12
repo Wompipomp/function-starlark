@@ -887,12 +887,21 @@ the same prefix preserve sibling keys.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `path` | string | required | Dot-separated path (e.g., `"atProvider.region"`). Rejects empty paths, leading/trailing dots, and consecutive dots. |
-| `value` | any | required | Value to write at the path. |
+| `value` | any | required | Value to write at the path. A `None` value is skipped (no-op); any other value — including falsy values like `0`, `False`, and `""` — is written. |
 
-**Returns:** None.
+**Returns:** `True` if the value was written; `False` if `value` was `None` and
+the write was skipped.
+
+**No guard needed:** Because `set_xr_status` skips `None` automatically, write
+`set_xr_status("x", maybe_none)` directly. Do **NOT** wrap calls in `if val:` —
+that silently drops legitimate falsy values like `0`, `False`, and `""`, which
+should still be written. (`if val is not None:` is only acceptable if you
+genuinely want to skip writes for some other reason; `None` is already skipped
+for you.)
 
 **Errors:** Fails if path is empty, has leading/trailing dots, or contains
-consecutive dots.
+consecutive dots. Path validation runs before the `None` check, so a malformed
+path still raises even when `value` is `None`.
 
 **Example:**
 

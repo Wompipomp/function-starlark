@@ -163,7 +163,9 @@ set_connection_details({"endpoint": "https://...", "password": pw})
 
 ### set_xr_status(path, value)
 
-Set a status field on the XR at a dot-separated path. Writes to dxr["status"][path segments...], auto-creating intermediate dicts as needed. Uses mkdir-p semantics: non-dict values at intermediate segments are silently overwritten. Path validation rejects empty paths, leading/trailing dots, and consecutive dots. Consecutive writes to the same prefix preserve sibling keys.
+Set a status field on the XR at a dot-separated path. Writes to dxr["status"][path segments...], auto-creating intermediate dicts as needed. Uses mkdir-p semantics: non-dict values at intermediate segments are silently overwritten. Path validation rejects empty paths, leading/trailing dots, and consecutive dots. Consecutive writes to the same prefix preserve sibling keys. Returns True when the value was written, False when the value was None (skipped). None is the only value that is skipped.
+
+No-guard rule: write `set_xr_status("field", maybe_none)` directly — None is skipped for you. Never guard with `if val:`, because that silently skips legitimate falsy values (`0`, `False`, `""`) that should still be written.
 
 ```python
 # Individual field writes (siblings are preserved)
