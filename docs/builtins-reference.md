@@ -887,12 +887,21 @@ the same prefix preserve sibling keys.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `path` | string | required | Dot-separated path (e.g., `"atProvider.region"`). Rejects empty paths, leading/trailing dots, and consecutive dots. |
-| `value` | any | required | Value to write at the path. |
+| `value` | any | required | Value to write at the path. A `None` value is skipped (no-op); any other value — including falsy values like `0`, `False`, and `""` — is written. |
 
-**Returns:** None.
+**Returns:** `True` if the value was written; `False` if `value` was `None` and
+the write was skipped.
+
+**No guard needed:** Because `set_xr_status` skips `None` automatically, write
+`set_xr_status("x", maybe_none)` directly. Do **NOT** wrap calls in `if val:` —
+that silently drops legitimate falsy values like `0`, `False`, and `""`, which
+should still be written. (`if val is not None:` is only acceptable if you
+genuinely want to skip writes for some other reason; `None` is already skipped
+for you.)
 
 **Errors:** Fails if path is empty, has leading/trailing dots, or contains
-consecutive dots.
+consecutive dots. Path validation runs before the `None` check, so a malformed
+path still raises even when `value` is `None`.
 
 **Example:**
 
@@ -951,6 +960,33 @@ bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
 # Safe on first reconciliation when no observed resources exist
 db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
+
+**Tip — copy a whole status subtree in one call:**
+
+`get_observed` returns the node at a path as a **nested object**, and
+`set_xr_status` accepts any value (including a dict). Combining them copies an
+entire observed status subtree to the XR in a single call, with nesting
+preserved — no per-field loop:
+
+```python
+# Tedious: one call per leaf
+set_xr_status("atProvider.objectId", get_observed("core", "status.atProvider.objectId", ""))
+set_xr_status("atProvider.name",     get_observed("core", "status.atProvider.name", ""))
+# ...
+
+# One call, whole subtree (nesting preserved):
+set_xr_status("atProvider", get_observed("core", "status.atProvider", {}))
+```
+
+Notes:
+
+- This **replaces** `status.atProvider` wholesale — it does not merge with any
+  keys already written under it. For an observed→status copy that is usually
+  what you want.
+- Only status fields **declared in your XRD's schema** persist. The API server
+  prunes any status field the XRD doesn't define, so copying a subtree wholesale
+  silently drops undeclared fields. Keep the XRD `status` schema and what you
+  copy in sync — or write only the specific fields you have declared.
 
 ---
 
