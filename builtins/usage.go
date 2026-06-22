@@ -25,8 +25,32 @@ func usageName(dependent, dependency string) string {
 }
 
 // ResourceNameLabel is the label added to each composed resource by Resource()
-// to enable Usage selector matching. The value is the composition-resource-name.
+// to enable Usage selector matching. The value is derived from the
+// composition-resource-name via ResourceNameLabelValue.
 const ResourceNameLabel = "function-starlark.crossplane.io/resource-name"
+
+// maxLabelValueBytes is the Kubernetes limit for a label value. Resource names
+// may be up to 253 bytes, so the composition-resource-name can legally exceed
+// this — but it is also mirrored into ResourceNameLabel, which cannot.
+const maxLabelValueBytes = 63
+
+// ResourceNameLabelValue returns a label-safe (<=63 byte) value for
+// ResourceNameLabel. The label is only an internal join key: collector.go
+// stamps it on each composed resource and buildUsageResource references the
+// same value in the Usage selector, so it need not equal the
+// composition-resource-name — it only has to be stable and identical on both
+// sides. Names within the limit are returned unchanged so already-applied
+// resources and their Usages keep matching; longer names get a truncated
+// prefix plus a sha256 suffix that stays a valid DNS-1123 label value.
+func ResourceNameLabelValue(name string) string {
+	if len(name) <= maxLabelValueBytes {
+		return name
+	}
+	h := sha256.Sum256([]byte(name))
+	const suffixLen = 16 // first 8 bytes of the digest as hex
+	prefix := strings.TrimRight(name[:maxLabelValueBytes-1-suffixLen], "-")
+	return prefix + "-" + fmt.Sprintf("%x", h[:8])
+}
 
 // resourceTypeInfo holds the apiVersion and kind extracted from a composed resource body.
 type resourceTypeInfo struct {
@@ -58,7 +82,7 @@ func buildUsageResource(dependent, dependency, apiVersion, kind string, typeInfo
 					"matchControllerRef": structpb.NewBoolValue(true),
 					"matchLabels": structpb.NewStructValue(&structpb.Struct{
 						Fields: map[string]*structpb.Value{
-							ResourceNameLabel: structpb.NewStringValue(name),
+							ResourceNameLabel: structpb.NewStringValue(ResourceNameLabelValue(name)),
 						},
 					}),
 				},

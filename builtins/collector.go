@@ -658,10 +658,13 @@ func (c *Collector) resourceFn(
 		return nil, err
 	}
 
-	// Inject resource-name label for Usage selector matching.
+	// Inject resource-name label for Usage selector matching. The value is made
+	// label-safe (<=63 bytes) because the composition-resource-name can exceed
+	// the Kubernetes label limit; the same transform is applied to the Usage
+	// selector so both sides still match.
 	metadata := getOrCreateNestedStruct(s, "metadata")
 	labels := getOrCreateNestedStruct(metadata, "labels")
-	labels.Fields[ResourceNameLabel] = structpb.NewStringValue(name)
+	labels.Fields[ResourceNameLabel] = structpb.NewStringValue(ResourceNameLabelValue(name))
 
 	// Convert connection_details dict to map[string][]byte if provided.
 	var cd map[string][]byte
