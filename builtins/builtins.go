@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	fnv1 "github.com/crossplane/function-sdk-go/proto/v1"
@@ -75,59 +76,72 @@ func BuildGlobals(
 		return nil, fmt.Errorf("building extra_resources: %w", err)
 	}
 
-	return starlark.StringDict{
-		"oxr":                    oxr,
-		"dxr":                    dxr,
-		"observed":               observed,
-		"context":                ctxDict,
-		"environment":            envDict,
-		"extra_resources":        extraRes,
-		"Resource":               collector.Builtin(),
-		"When":                   starlark.NewBuiltin("When", whenBuiltin),
-		"skip_resource":          collector.SkipResourceBuiltin(),
-		"get":                    GetBuiltin(),
-		"get_label":              starlark.NewBuiltin("get_label", getLabelImpl),
-		"get_annotation":         starlark.NewBuiltin("get_annotation", getAnnotationImpl),
-		"set_condition":          condCollector.SetConditionBuiltin(),
-		"emit_event":             condCollector.EmitEventBuiltin(),
-		"fatal":                  condCollector.FatalBuiltin(),
-		"set_composite_ready":    collector.SetCompositeReadyBuiltin(),
-		"set_connection_details": connCollector.SetConnectionDetailsBuiltin(),
-		"set_xr_status": starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return setXRStatus(b.Name(), dxr, args, kwargs)
-		}),
-		"get_observed": starlark.NewBuiltin("get_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return getObservedImpl(b.Name(), observed, args, kwargs)
-		}),
-		"require_extra_resource":  reqCollector.RequireExtraResourceBuiltin(),
-		"require_extra_resources": reqCollector.RequireExtraResourcesBuiltin(),
-		"get_extra_resource": starlark.NewBuiltin("get_extra_resource", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return getExtraResourceImpl(b.Name(), extraRes, args, kwargs)
-		}),
-		"get_extra_resources": starlark.NewBuiltin("get_extra_resources", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return getExtraResourcesImpl(b.Name(), extraRes, args, kwargs)
-		}),
-		"is_observed": starlark.NewBuiltin("is_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return isObservedImpl(b.Name(), observed, args, kwargs)
-		}),
-		"observed_body": starlark.NewBuiltin("observed_body", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return observedBodyImpl(b.Name(), observed, args, kwargs)
-		}),
-		"get_condition": starlark.NewBuiltin("get_condition", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return getConditionImpl(b.Name(), observed, args, kwargs)
-		}),
-		"schema":           schema.SchemaBuiltin(),
-		"field":            schema.FieldBuiltin(),
-		"struct":           starlark.NewBuiltin("struct", starlarkstruct.Make),
-		"json":             starlarkjson.Module,
-		"mutable_struct":   starlark.NewBuiltin("mutable_struct", MakeMutableStruct),
-		"crypto":           CryptoModule,
-		"encoding":         EncodingModule,
-		"dict":             DictModule,
-		"regex":            RegexModule,
-		"yaml":             YAMLModule,
-		"set_response_ttl": ttlCollector.SetResponseTTLBuiltin(),
-	}, nil
+	// Start from the shared, stateless builtins (created once) and layer the
+	// per-request, collector-bound entries on top. This avoids re-allocating
+	// ~15 *starlark.Builtin closures on every reconciliation.
+	g := make(starlark.StringDict, len(sharedStatelessBuiltins)+24)
+	maps.Copy(g, sharedStatelessBuiltins)
+
+	g["oxr"] = oxr
+	g["dxr"] = dxr
+	g["observed"] = observed
+	g["context"] = ctxDict
+	g["environment"] = envDict
+	g["extra_resources"] = extraRes
+	g["Resource"] = collector.Builtin()
+	g["skip_resource"] = collector.SkipResourceBuiltin()
+	g["set_condition"] = condCollector.SetConditionBuiltin()
+	g["emit_event"] = condCollector.EmitEventBuiltin()
+	g["fatal"] = condCollector.FatalBuiltin()
+	g["set_composite_ready"] = collector.SetCompositeReadyBuiltin()
+	g["set_connection_details"] = connCollector.SetConnectionDetailsBuiltin()
+	g["set_xr_status"] = starlark.NewBuiltin("set_xr_status", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return setXRStatus(b.Name(), dxr, args, kwargs)
+	})
+	g["get_observed"] = starlark.NewBuiltin("get_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return getObservedImpl(b.Name(), observed, args, kwargs)
+	})
+	g["require_extra_resource"] = reqCollector.RequireExtraResourceBuiltin()
+	g["require_extra_resources"] = reqCollector.RequireExtraResourcesBuiltin()
+	g["get_extra_resource"] = starlark.NewBuiltin("get_extra_resource", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return getExtraResourceImpl(b.Name(), extraRes, args, kwargs)
+	})
+	g["get_extra_resources"] = starlark.NewBuiltin("get_extra_resources", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return getExtraResourcesImpl(b.Name(), extraRes, args, kwargs)
+	})
+	g["is_observed"] = starlark.NewBuiltin("is_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return isObservedImpl(b.Name(), observed, args, kwargs)
+	})
+	g["observed_body"] = starlark.NewBuiltin("observed_body", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return observedBodyImpl(b.Name(), observed, args, kwargs)
+	})
+	g["get_condition"] = starlark.NewBuiltin("get_condition", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return getConditionImpl(b.Name(), observed, args, kwargs)
+	})
+	g["set_response_ttl"] = ttlCollector.SetResponseTTLBuiltin()
+
+	return g, nil
+}
+
+// sharedStatelessBuiltins holds the builtins that carry no per-request state
+// and are safe to share across concurrent reconciliations. They wrap pure
+// functions or are already process-wide module singletons, so a single
+// instance can be reused instead of being rebuilt for every request.
+var sharedStatelessBuiltins = starlark.StringDict{
+	"When":           starlark.NewBuiltin("When", whenBuiltin),
+	"get":            GetBuiltin(),
+	"get_label":      starlark.NewBuiltin("get_label", getLabelImpl),
+	"get_annotation": starlark.NewBuiltin("get_annotation", getAnnotationImpl),
+	"schema":         schema.SchemaBuiltin(),
+	"field":          schema.FieldBuiltin(),
+	"struct":         starlark.NewBuiltin("struct", starlarkstruct.Make),
+	"json":           starlarkjson.Module,
+	"mutable_struct": starlark.NewBuiltin("mutable_struct", MakeMutableStruct),
+	"crypto":         CryptoModule,
+	"encoding":       EncodingModule,
+	"dict":           DictModule,
+	"regex":          RegexModule,
+	"yaml":           YAMLModule,
 }
 
 // BuildObservedDict creates a frozen StarlarkDict of frozen StarlarkDicts
@@ -136,11 +150,11 @@ func BuildObservedDict(req *fnv1.RunFunctionRequest) (*convert.StarlarkDict, err
 	resources := req.GetObserved().GetResources()
 	observed := convert.NewStarlarkDict(len(resources))
 	for name, r := range resources {
-		d, err := convert.StructToStarlark(r.GetResource(), true) // frozen
-		if err != nil {
-			return nil, fmt.Errorf("observed resource %q: %w", name, err)
-		}
-		if err := observed.SetKey(starlark.String(name), d); err != nil {
+		// Lazy: each observed resource body is converted to Starlark on first
+		// access, so resources a script never reads cost nothing. The
+		// observed.Freeze() below marks the bodies frozen; materialization
+		// honors that flag.
+		if err := observed.SetKey(starlark.String(name), convert.NewLazyStarlarkDict(r.GetResource())); err != nil {
 			return nil, fmt.Errorf("observed resource %q: %w", name, err)
 		}
 	}

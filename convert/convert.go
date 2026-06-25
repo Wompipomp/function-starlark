@@ -24,7 +24,13 @@ func StructToStarlark(s *structpb.Struct, freeze bool) (*StarlarkDict, error) {
 		return d, nil
 	}
 
-	fields := s.GetFields()
+	return fieldsToStarlarkDict(s.GetFields(), freeze)
+}
+
+// fieldsToStarlarkDict converts a protobuf field map directly into a
+// *StarlarkDict. Working on the field map avoids reconstructing a wrapper
+// *structpb.Struct for every nested object during recursion.
+func fieldsToStarlarkDict(fields map[string]*structpb.Value, freeze bool) (*StarlarkDict, error) {
 	d := NewStarlarkDict(len(fields))
 
 	for k, v := range fields {
@@ -141,11 +147,14 @@ func isWholeNumber(f float64) bool {
 // protoValueToStarlark converts a single protobuf Value to its Starlark
 // equivalent, producing *StarlarkDict for struct values.
 func protoValueToStarlark(v *structpb.Value, freeze bool) (starlark.Value, error) {
-	return convertProtoValue(v, freeze, func(fields map[string]*structpb.Value, freeze bool) (starlark.Value, error) {
-		// Reconstruct a *structpb.Struct to reuse StructToStarlark's nil
-		// handling and freeze logic.
-		return StructToStarlark(&structpb.Struct{Fields: fields}, freeze)
-	})
+	return convertProtoValue(v, freeze, starlarkDictFactory)
+}
+
+// starlarkDictFactory adapts fieldsToStarlarkDict to the dictFactory signature.
+// It is a package-level function so convertProtoValue does not allocate a fresh
+// closure for every nested struct it converts.
+func starlarkDictFactory(fields map[string]*structpb.Value, freeze bool) (starlark.Value, error) {
+	return fieldsToStarlarkDict(fields, freeze)
 }
 
 // ProtoValueToPlainStarlark converts a single protobuf Value to its Starlark
@@ -179,12 +188,24 @@ func plainDictFactory(fields map[string]*structpb.Value, freeze bool) (starlark.
 // keys and handles nested dicts recursively via starlarkToProtoValue.
 func PlainDictToStruct(d *starlark.Dict) (*structpb.Struct, error) {
 	fields := make(map[string]*structpb.Value, d.Len())
-	for _, item := range d.Items() {
-		k, ok := item[0].(starlark.String)
+
+	// Iterate rather than calling d.Items(), which would allocate a full
+	// []Tuple snapshot of the dict on every conversion (a hot path when
+	// converting composed-resource bodies back to protobuf).
+	iter := d.Iterate()
+	defer iter.Done()
+
+	var key starlark.Value
+	for iter.Next(&key) {
+		k, ok := key.(starlark.String)
 		if !ok {
-			return nil, fmt.Errorf("dict key %v (%T) is not a string", item[0], item[0])
+			return nil, fmt.Errorf("dict key %v (%T) is not a string", key, key)
 		}
-		pv, err := starlarkToProtoValue(item[1])
+		val, _, err := d.Get(key)
+		if err != nil {
+			return nil, fmt.Errorf("field %q: %w", string(k), err)
+		}
+		pv, err := starlarkToProtoValue(val)
 		if err != nil {
 			return nil, fmt.Errorf("field %q: %w", string(k), err)
 		}

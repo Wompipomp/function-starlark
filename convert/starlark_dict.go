@@ -5,9 +5,11 @@ package convert
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // builtinMethodNames lists the dict built-in methods that StarlarkDict exposes.
@@ -37,27 +39,82 @@ var (
 // supporting both dot access (d.key) and bracket access (d["key"]).
 // Missing key via dot access returns starlark.None (not an error),
 // which is lenient behavior for optional Kubernetes fields.
+//
+// A StarlarkDict may be constructed lazily (see NewLazyStarlarkDict): when
+// lazy is non-nil the underlying dict is materialized from the protobuf struct
+// on first access. This lets callers hold many resource bodies (e.g. observed
+// composed resources) without paying the conversion cost for the ones a script
+// never reads. The lazy path is transparent: the type is unchanged, so every
+// existing consumer that type-switches on *StarlarkDict still works.
 type StarlarkDict struct {
 	d *starlark.Dict
+
+	// lazy, when non-nil, is the protobuf struct backing this dict; it is
+	// converted into d on first access. nil for eagerly-built dicts.
+	lazy   *structpb.Struct
+	once   sync.Once
+	err    error // conversion error from lazy materialization, surfaced on access
+	frozen bool  // freeze requested before materialization
 }
 
-// NewStarlarkDict creates a new empty StarlarkDict with an initial capacity hint.
+// NewStarlarkDict creates a new empty StarlarkDict, presizing the underlying
+// hashtable for at least size insertions to avoid incremental rehashing.
 func NewStarlarkDict(size int) *StarlarkDict {
-	_ = size // capacity hint; starlark.Dict does not accept a size hint
-	return &StarlarkDict{d: new(starlark.Dict)}
+	return &StarlarkDict{d: starlark.NewDict(size)}
+}
+
+// NewLazyStarlarkDict returns a StarlarkDict that defers converting s into
+// Starlark values until the dict is first accessed. The materialized dict is
+// frozen iff Freeze is called before first access (which is the normal flow for
+// read-only request data such as observed and required resources).
+func NewLazyStarlarkDict(s *structpb.Struct) *StarlarkDict {
+	return &StarlarkDict{lazy: s}
+}
+
+// ensure materializes the lazy dict on first call and returns any conversion
+// error. For eagerly-built dicts it is a single nil check.
+func (sd *StarlarkDict) ensure() error {
+	if sd.lazy == nil {
+		return nil
+	}
+	sd.once.Do(func() {
+		tmp, err := StructToStarlark(sd.lazy, sd.frozen)
+		if err != nil {
+			// Materialization failed (e.g. a numeric value outside int64
+			// range). Surface the error on access; degrade to an empty dict
+			// so non-error methods stay safe. In practice request data comes
+			// pre-validated from Crossplane, so this path is not expected.
+			sd.err = err
+			sd.d = starlark.NewDict(0)
+			if sd.frozen {
+				sd.d.Freeze()
+			}
+			return
+		}
+		sd.d = tmp.d
+	})
+	return sd.err
+}
+
+// dict materializes (if needed) and returns the underlying *starlark.Dict for
+// methods that cannot propagate a conversion error.
+func (sd *StarlarkDict) dict() *starlark.Dict {
+	_ = sd.ensure()
+	return sd.d
 }
 
 // InternalDict returns the underlying starlark.Dict for direct access
-// by other convert package functions (e.g., conversion).
+// by other convert package functions (e.g., conversion). It materializes a
+// lazy dict on first call.
 func (sd *StarlarkDict) InternalDict() *starlark.Dict {
-	return sd.d
+	return sd.dict()
 }
 
 // --- starlark.Value ---
 
 // String returns the Starlark string representation, delegating to the internal Dict.
 func (sd *StarlarkDict) String() string {
-	return sd.d.String()
+	return sd.dict().String()
 }
 
 // Type returns "dict" to match Starlark dict conventions.
@@ -65,14 +122,22 @@ func (sd *StarlarkDict) Type() string {
 	return "dict"
 }
 
-// Freeze makes the dict and all nested values immutable.
+// Freeze makes the dict and all nested values immutable. For a not-yet
+// materialized lazy dict, freezing is deferred to materialization so that
+// freezing does not force conversion of resource bodies a script never reads.
 func (sd *StarlarkDict) Freeze() {
-	sd.d.Freeze()
+	if sd.lazy != nil && sd.d == nil {
+		sd.frozen = true
+		return
+	}
+	if sd.d != nil {
+		sd.d.Freeze()
+	}
 }
 
 // Truth returns True for non-empty dicts, False for empty.
 func (sd *StarlarkDict) Truth() starlark.Bool {
-	return sd.d.Truth()
+	return sd.dict().Truth()
 }
 
 // Hash returns an error because dicts are unhashable.
@@ -92,7 +157,7 @@ func (sd *StarlarkDict) Attr(name string) (starlark.Value, error) {
 		return b, nil
 	}
 
-	v, found, err := sd.d.Get(starlark.String(name))
+	v, found, err := sd.dict().Get(starlark.String(name))
 	if err != nil {
 		return nil, err
 	}
@@ -104,9 +169,10 @@ func (sd *StarlarkDict) Attr(name string) (starlark.Value, error) {
 
 // AttrNames returns a sorted list of all keys plus built-in method names.
 func (sd *StarlarkDict) AttrNames() []string {
+	d := sd.dict()
 	// Collect data keys.
-	keys := make([]string, 0, sd.d.Len()+len(builtinMethodNames))
-	for _, item := range sd.d.Items() {
+	keys := make([]string, 0, d.Len()+len(builtinMethodNames))
+	for _, item := range d.Items() {
 		if s, ok := item[0].(starlark.String); ok {
 			keys = append(keys, string(s))
 		}
@@ -121,20 +187,23 @@ func (sd *StarlarkDict) AttrNames() []string {
 
 // SetField sets a key by name. Returns an error if the dict is frozen.
 func (sd *StarlarkDict) SetField(name string, val starlark.Value) error {
-	return sd.d.SetKey(starlark.String(name), val)
+	return sd.dict().SetKey(starlark.String(name), val)
 }
 
 // --- starlark.HasSetKey ---
 
 // SetKey sets a key-value pair. Returns an error if the dict is frozen.
 func (sd *StarlarkDict) SetKey(k, v starlark.Value) error {
-	return sd.d.SetKey(k, v)
+	return sd.dict().SetKey(k, v)
 }
 
 // --- starlark.Mapping ---
 
 // Get looks up a key and returns its value.
 func (sd *StarlarkDict) Get(key starlark.Value) (v starlark.Value, found bool, err error) {
+	if err := sd.ensure(); err != nil {
+		return nil, false, err
+	}
 	return sd.d.Get(key)
 }
 
@@ -142,7 +211,7 @@ func (sd *StarlarkDict) Get(key starlark.Value) (v starlark.Value, found bool, e
 
 // Iterate returns an iterator over the dict keys in insertion order.
 func (sd *StarlarkDict) Iterate() starlark.Iterator {
-	return sd.d.Iterate()
+	return sd.dict().Iterate()
 }
 
 // --- starlark.Comparable ---
@@ -154,14 +223,14 @@ func (sd *StarlarkDict) CompareSameType(op syntax.Token, y_ starlark.Value, dept
 		return false, fmt.Errorf("cannot compare dict with %s", y_.Type())
 	}
 	// Delegate to the internal dicts' comparison.
-	return sd.d.CompareSameType(op, other.d, depth)
+	return sd.dict().CompareSameType(op, other.dict(), depth)
 }
 
 // --- Len ---
 
 // Len returns the number of entries in the dict.
 func (sd *StarlarkDict) Len() int {
-	return sd.d.Len()
+	return sd.dict().Len()
 }
 
 // --- Built-in methods ---
@@ -195,7 +264,7 @@ func (sd *StarlarkDict) keysMethod(_ *starlark.Thread, _ *starlark.Builtin, args
 	if err := starlark.UnpackPositionalArgs("keys", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := sd.d.Items()
+	items := sd.dict().Items()
 	keys := make([]starlark.Value, len(items))
 	for i, item := range items {
 		keys[i] = item[0]
@@ -208,7 +277,7 @@ func (sd *StarlarkDict) valuesMethod(_ *starlark.Thread, _ *starlark.Builtin, ar
 	if err := starlark.UnpackPositionalArgs("values", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := sd.d.Items()
+	items := sd.dict().Items()
 	vals := make([]starlark.Value, len(items))
 	for i, item := range items {
 		vals[i] = item[1]
@@ -221,7 +290,7 @@ func (sd *StarlarkDict) itemsMethod(_ *starlark.Thread, _ *starlark.Builtin, arg
 	if err := starlark.UnpackPositionalArgs("items", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := sd.d.Items()
+	items := sd.dict().Items()
 	tuples := make([]starlark.Value, len(items))
 	for i, item := range items {
 		tuples[i] = starlark.Tuple{item[0], item[1]}
@@ -236,7 +305,7 @@ func (sd *StarlarkDict) getMethod(_ *starlark.Thread, _ *starlark.Builtin, args 
 	if err := starlark.UnpackPositionalArgs("get", args, kwargs, 1, &key, &dflt); err != nil {
 		return nil, err
 	}
-	v, found, err := sd.d.Get(key)
+	v, found, err := sd.dict().Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +322,7 @@ func (sd *StarlarkDict) popMethod(_ *starlark.Thread, _ *starlark.Builtin, args 
 	if err := starlark.UnpackPositionalArgs("pop", args, kwargs, 1, &key, &dflt); err != nil {
 		return nil, err
 	}
-	v, found, err := sd.d.Delete(key)
+	v, found, err := sd.dict().Delete(key)
 	if err != nil {
 		return nil, err
 	}
@@ -276,14 +345,14 @@ func (sd *StarlarkDict) updateMethod(_ *starlark.Thread, _ *starlark.Builtin, ar
 	// Accept *StarlarkDict, *starlark.Dict, or any iterable of pairs.
 	switch o := other.(type) {
 	case *StarlarkDict:
-		for _, item := range o.d.Items() {
-			if err := sd.d.SetKey(item[0], item[1]); err != nil {
+		for _, item := range o.dict().Items() {
+			if err := sd.dict().SetKey(item[0], item[1]); err != nil {
 				return nil, err
 			}
 		}
 	case *starlark.Dict:
 		for _, item := range o.Items() {
-			if err := sd.d.SetKey(item[0], item[1]); err != nil {
+			if err := sd.dict().SetKey(item[0], item[1]); err != nil {
 				return nil, err
 			}
 		}
@@ -299,7 +368,7 @@ func (sd *StarlarkDict) clearMethod(_ *starlark.Thread, _ *starlark.Builtin, arg
 	if err := starlark.UnpackPositionalArgs("clear", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	if err := sd.d.Clear(); err != nil {
+	if err := sd.dict().Clear(); err != nil {
 		return nil, err
 	}
 	return starlark.None, nil
@@ -312,14 +381,14 @@ func (sd *StarlarkDict) setdefaultMethod(_ *starlark.Thread, _ *starlark.Builtin
 	if err := starlark.UnpackPositionalArgs("setdefault", args, kwargs, 1, &key, &dflt); err != nil {
 		return nil, err
 	}
-	v, found, err := sd.d.Get(key)
+	v, found, err := sd.dict().Get(key)
 	if err != nil {
 		return nil, err
 	}
 	if found {
 		return v, nil
 	}
-	if err := sd.d.SetKey(key, dflt); err != nil {
+	if err := sd.dict().SetKey(key, dflt); err != nil {
 		return nil, err
 	}
 	return dflt, nil

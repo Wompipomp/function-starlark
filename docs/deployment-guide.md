@@ -132,6 +132,57 @@ spec:
 
 For inline scripts (the common case), skip this step.
 
+### Tuning the Go runtime (optional)
+
+function-starlark is a long-running Go process. Its memory and CPU profile can
+be tuned with two standard Go runtime environment variables, read automatically
+by the binary -- no flags or code changes required. They are **separate,
+complementary** knobs:
+
+| Variable | Default | What it controls |
+|---|---|---|
+| `GOGC` | `100` | Garbage-collection *frequency*. The GC runs when the heap grows by this percentage since the last cycle. Higher = fewer GC cycles (less CPU) at the cost of higher peak memory. |
+| `GOMEMLIMIT` | `off` | A *soft memory ceiling*. As the heap approaches this limit the GC runs more aggressively to stay under it, trading CPU to avoid an OOM kill. Accepts a unit suffix, e.g. `230MiB`. |
+
+Guidance:
+
+- **`GOGC`** — a Crossplane function pod is mostly idle between reconciliations,
+  so raising `GOGC` (e.g. to `200`) reduces GC CPU with a modest memory
+  increase. Lower it (e.g. `50`) only if you are memory-constrained and can
+  spend CPU to stay small.
+- **`GOMEMLIMIT`** — set this as a safety ceiling, typically ~10% below the
+  container's `resources.limits.memory`, so the GC reclaims hard before the
+  kubelet OOM-kills the pod. It is a soft limit (the runtime may still exceed it
+  briefly), so keep a real `limits.memory` as the hard backstop.
+
+Set both via the pod environment in a DeploymentRuntimeConfig:
+
+```yaml
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: function-starlark-tuned
+spec:
+  deploymentTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              env:
+                - name: GOGC
+                  value: "200"          # fewer GC cycles, a little more memory
+                - name: GOMEMLIMIT
+                  value: "230MiB"        # ~10% under limits.memory below
+              resources:
+                limits:
+                  memory: 256Mi          # hard backstop
+```
+
+These are pure runtime tuning: they change only the memory/CPU tradeoff and have
+no effect on composition behavior or function output. Leaving both unset uses
+Go's defaults, which are fine for most deployments.
+
 ## Step 4: Apply the XRD and Composition
 
 Apply the example XBucket XRD:
