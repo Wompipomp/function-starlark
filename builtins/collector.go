@@ -215,6 +215,7 @@ type Collector struct {
 	dependencies   []DependencyPair
 	cc             *ConditionCollector
 	scriptName     string
+	compositeKind  string                // observed XR kind, used to label metrics (e.g. "XCluster")
 	oxr            *structpb.Struct      // frozen observed XR; currently unused, kept for API stability
 	observed       *convert.StarlarkDict // frozen observed composed resources; may be nil
 }
@@ -228,12 +229,13 @@ type Collector struct {
 // representation of observed composed resources; it may be nil.
 func NewCollector(cc *ConditionCollector, scriptName string, oxr *structpb.Struct, observed *convert.StarlarkDict) *Collector {
 	return &Collector{
-		resources:  make(map[string]CollectedResource),
-		skipped:    make(map[string]bool),
-		cc:         cc,
-		scriptName: scriptName,
-		oxr:        oxr,
-		observed:   observed,
+		resources:     make(map[string]CollectedResource),
+		skipped:       make(map[string]bool),
+		cc:            cc,
+		scriptName:    scriptName,
+		compositeKind: oxr.GetFields()["kind"].GetStringValue(),
+		oxr:           oxr,
+		observed:      observed,
 	}
 }
 
@@ -338,7 +340,7 @@ func (c *Collector) recordSkip(name, reason string, gate bool) {
 	}
 	c.mu.Unlock()
 
-	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName).Inc()
+	metrics.ResourcesSkippedTotal.WithLabelValues(c.scriptName, c.compositeKind).Inc()
 
 	severity := "Warning"
 	msg := fmt.Sprintf("Skipping resource %q: %s", name, reason)

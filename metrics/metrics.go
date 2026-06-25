@@ -1,6 +1,13 @@
 // Package metrics defines Prometheus metrics for function-starlark.
 // All metrics register automatically with prometheus.DefaultRegisterer
 // via promauto and are served by the function-sdk-go metrics endpoint.
+//
+// Every metric is labeled by `script`. The per-reconciliation "work" metrics
+// additionally carry `composite_kind` — the observed XR kind (e.g.
+// "XCluster") — so per-composition behaviour is distinguishable even
+// though every composition's entry script is "composition.star". The cache
+// metrics keep only `script`: the bytecode cache is shared across compositions,
+// so attributing hits/misses to a composite kind would be misleading.
 package metrics
 
 import (
@@ -17,7 +24,7 @@ var ExecutionDurationSeconds = promauto.NewHistogramVec(
 		Help:    "Time spent executing Starlark scripts (compilation + Init).",
 		Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )
 
 // ReconciliationDurationSeconds measures the full RunFunction handler
@@ -28,7 +35,7 @@ var ReconciliationDurationSeconds = promauto.NewHistogramVec(
 		Help:    "Total RunFunction handler duration.",
 		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )
 
 // OCIResolveDurationSeconds measures the time spent resolving OCI modules.
@@ -38,7 +45,7 @@ var OCIResolveDurationSeconds = promauto.NewHistogramVec(
 		Help:    "Time spent resolving OCI modules.",
 		Buckets: []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )
 
 // CacheHitsTotal counts bytecode cache hits, labeled by script filename.
@@ -65,7 +72,7 @@ var ResourcesEmittedTotal = promauto.NewCounterVec(
 		Name: "function_starlark_resources_emitted_total",
 		Help: "Total composed resources emitted.",
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )
 
 // ResourcesSkippedTotal counts resources skipped via skip_resource().
@@ -75,7 +82,7 @@ var ResourcesSkippedTotal = promauto.NewCounterVec(
 		Name: "function_starlark_resources_skipped_total",
 		Help: "Total resources skipped via skip_resource().",
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )
 
 // ReconciliationsTotal counts RunFunction invocations.
@@ -84,7 +91,7 @@ var ReconciliationsTotal = promauto.NewCounterVec(
 		Name: "function_starlark_reconciliations_total",
 		Help: "Total RunFunction calls.",
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )
 
 // ResourcesDeferredTotal counts resources deferred by creation sequencing.
@@ -94,5 +101,5 @@ var ResourcesDeferredTotal = promauto.NewCounterVec(
 		Name: "function_starlark_resources_deferred_total",
 		Help: "Total resources deferred by creation sequencing.",
 	},
-	[]string{"script"},
+	[]string{"script", "composite_kind"},
 )

@@ -43,18 +43,24 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 	log := f.log.WithValues("tag", req.GetMeta().GetTag())
 	log.Debug("Running function")
 
+	// composite_kind labels the per-reconciliation metrics by the observed XR
+	// kind (e.g. "XCluster") so per-composition behaviour is
+	// distinguishable even though every composition's entry script is
+	// "composition.star". Empty on early failures / passthrough.
+	kind := req.GetObserved().GetComposite().GetResource().GetFields()["kind"].GetStringValue()
+
 	// Metrics: track reconciliation duration and count with final filename label.
 	// Guard: skip recording when filename was never resolved (early failures).
 	filename := "unknown"
 	reconcileTimer := prometheus.NewTimer(prometheus.ObserverFunc(func(v float64) {
 		if filename != "unknown" {
-			metrics.ReconciliationDurationSeconds.WithLabelValues(filename).Observe(v)
+			metrics.ReconciliationDurationSeconds.WithLabelValues(filename, kind).Observe(v)
 		}
 	}))
 	defer reconcileTimer.ObserveDuration()
 	defer func() {
 		if filename != "unknown" {
-			metrics.ReconciliationsTotal.WithLabelValues(filename).Inc()
+			metrics.ReconciliationsTotal.WithLabelValues(filename, kind).Inc()
 		}
 	}()
 
@@ -231,7 +237,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 
 			resolver := oci.NewResolver(f.ociCache, keychain, fetcher, log, defaultRegistry, insecureRegistries)
 
-			ociTimer := prometheus.NewTimer(metrics.OCIResolveDurationSeconds.WithLabelValues(filename))
+			ociTimer := prometheus.NewTimer(metrics.OCIResolveDurationSeconds.WithLabelValues(filename, kind))
 			resolvedModules, resolveErr := resolver.Resolve(ctx, ociTargets)
 			ociTimer.ObserveDuration()
 			if resolveErr != nil {
@@ -272,7 +278,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			return rsp, nil
 		}
 
-		execTimer := prometheus.NewTimer(metrics.ExecutionDurationSeconds.WithLabelValues(filename))
+		execTimer := prometheus.NewTimer(metrics.ExecutionDurationSeconds.WithLabelValues(filename, kind))
 		_, err = f.runtime.Execute(source, globals, filename, loader.LoadFunc())
 		execTimer.ObserveDuration()
 		if err != nil {
@@ -366,7 +372,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				collector.RemoveResources(result.Deferred)
 
 				// Record metric.
-				metrics.ResourcesDeferredTotal.WithLabelValues(filename).Add(float64(len(result.Deferred)))
+				metrics.ResourcesDeferredTotal.WithLabelValues(filename, kind).Add(float64(len(result.Deferred)))
 
 				// Override response TTL for faster requeue (SEQ-05).
 				rsp.Meta.Ttl = durationpb.New(seqTTLDuration)
@@ -403,7 +409,7 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			fatal(errors.Wrapf(err, "applying composed resources"))
 			return rsp, nil
 		}
-		metrics.ResourcesEmittedTotal.WithLabelValues(filename).Add(float64(len(collector.Resources())))
+		metrics.ResourcesEmittedTotal.WithLabelValues(filename, kind).Add(float64(len(collector.Resources())))
 
 		// Apply dxr status changes to response desired composite.
 		if err := builtins.ApplyDXR(rsp, globals["dxr"]); err != nil {

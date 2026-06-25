@@ -55,11 +55,11 @@ may appear in observed state before the inner resource's status fields are
 populated. Use tuple syntax to wait for a specific field:
 
 ```python
-# The Object is observed, but the inner WizEntraIDGroup may not have
-# its objectId yet. Tuple syntax defers until the field is truthy.
-group = Resource("group", object_wrapping_entra_group)
-Resource("mapping", saml_mapping_body, depends_on=[
-    (group, "status.atProvider.manifest.status.atProvider.objectId"),
+# The Object is observed, but the inner resource may not have
+# its id yet. Tuple syntax defers until the field is truthy.
+db = Resource("db", object_wrapping_database)
+Resource("app-config", app_config_body, depends_on=[
+    (db, "status.atProvider.manifest.status.atProvider.id"),
 ])
 ```
 

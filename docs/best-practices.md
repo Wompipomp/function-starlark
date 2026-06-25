@@ -219,18 +219,18 @@ guards:
 
 ```python
 # Instead of:
-#   group_oid = get(observed, "group.status.atProvider.manifest.status.atProvider.objectId", "")
-#   if group_oid:
-#       Resource("mapping", {...})
+#   db_id = get(observed, "db.status.atProvider.manifest.status.atProvider.id", "")
+#   if db_id:
+#       Resource("app-config", {...})
 
 # Use tuple syntax:
-group = Resource("group", object_body)
-Resource("mapping", {
-    "spec": {"forProvider": {"groupId": get(observed, "group.status.atProvider.manifest.status.atProvider.objectId", "")}},
-}, depends_on=[(group, "status.atProvider.manifest.status.atProvider.objectId")])
+db = Resource("db", object_body)
+Resource("app-config", {
+    "spec": {"forProvider": {"databaseId": get(observed, "db.status.atProvider.manifest.status.atProvider.id", "")}},
+}, depends_on=[(db, "status.atProvider.manifest.status.atProvider.id")])
 ```
 
-This is cleaner and ensures the SAML mapping is deferred until the field is
+This is cleaner and ensures the dependent resource is deferred until the field is
 truthy, while still generating Usage resources for deletion ordering.
 
 ### No circular dependencies

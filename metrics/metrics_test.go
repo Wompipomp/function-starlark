@@ -16,14 +16,14 @@ func TestMetricsRegistered(t *testing.T) {
 		name string
 		call func()
 	}{
-		{"ExecutionDurationSeconds", func() { ExecutionDurationSeconds.WithLabelValues("reg-test.star") }},
-		{"ReconciliationDurationSeconds", func() { ReconciliationDurationSeconds.WithLabelValues("reg-test.star") }},
-		{"OCIResolveDurationSeconds", func() { OCIResolveDurationSeconds.WithLabelValues("reg-test.star") }},
+		{"ExecutionDurationSeconds", func() { ExecutionDurationSeconds.WithLabelValues("reg-test.star", "") }},
+		{"ReconciliationDurationSeconds", func() { ReconciliationDurationSeconds.WithLabelValues("reg-test.star", "") }},
+		{"OCIResolveDurationSeconds", func() { OCIResolveDurationSeconds.WithLabelValues("reg-test.star", "") }},
 		{"CacheHitsTotal", func() { CacheHitsTotal.WithLabelValues("reg-test.star") }},
 		{"CacheMissesTotal", func() { CacheMissesTotal.WithLabelValues("reg-test.star") }},
-		{"ResourcesEmittedTotal", func() { ResourcesEmittedTotal.WithLabelValues("reg-test.star") }},
-		{"ResourcesSkippedTotal", func() { ResourcesSkippedTotal.WithLabelValues("reg-test.star") }},
-		{"ReconciliationsTotal", func() { ReconciliationsTotal.WithLabelValues("reg-test.star") }},
+		{"ResourcesEmittedTotal", func() { ResourcesEmittedTotal.WithLabelValues("reg-test.star", "") }},
+		{"ResourcesSkippedTotal", func() { ResourcesSkippedTotal.WithLabelValues("reg-test.star", "") }},
+		{"ReconciliationsTotal", func() { ReconciliationsTotal.WithLabelValues("reg-test.star", "") }},
 	}
 	for _, m := range metrics {
 		t.Run(m.name, func(t *testing.T) {
@@ -34,15 +34,16 @@ func TestMetricsRegistered(t *testing.T) {
 
 func TestCounterNaming(t *testing.T) {
 	counters := []struct {
-		name     string
-		wantName string
-		metric   *prometheus.CounterVec
+		name        string
+		wantName    string
+		metric      *prometheus.CounterVec
+		extraLabels []string // values for labels beyond "script" (e.g. composite_kind)
 	}{
-		{"CacheHitsTotal", "function_starlark_cache_hits_total", CacheHitsTotal},
-		{"CacheMissesTotal", "function_starlark_cache_misses_total", CacheMissesTotal},
-		{"ResourcesEmittedTotal", "function_starlark_resources_emitted_total", ResourcesEmittedTotal},
-		{"ResourcesSkippedTotal", "function_starlark_resources_skipped_total", ResourcesSkippedTotal},
-		{"ReconciliationsTotal", "function_starlark_reconciliations_total", ReconciliationsTotal},
+		{"CacheHitsTotal", "function_starlark_cache_hits_total", CacheHitsTotal, nil},
+		{"CacheMissesTotal", "function_starlark_cache_misses_total", CacheMissesTotal, nil},
+		{"ResourcesEmittedTotal", "function_starlark_resources_emitted_total", ResourcesEmittedTotal, []string{""}},
+		{"ResourcesSkippedTotal", "function_starlark_resources_skipped_total", ResourcesSkippedTotal, []string{""}},
+		{"ReconciliationsTotal", "function_starlark_reconciliations_total", ReconciliationsTotal, []string{""}},
 	}
 	for _, tc := range counters {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,9 +57,9 @@ func TestCounterNaming(t *testing.T) {
 			}
 
 			// Verify the counter is functional (Inc does not panic).
-			label := tc.name + "-naming.star"
-			tc.metric.WithLabelValues(label).Inc()
-			got := testutil.ToFloat64(tc.metric.WithLabelValues(label))
+			labels := append([]string{tc.name + "-naming.star"}, tc.extraLabels...)
+			tc.metric.WithLabelValues(labels...).Inc()
+			got := testutil.ToFloat64(tc.metric.WithLabelValues(labels...))
 			if got != 1 {
 				t.Errorf("%s after Inc() = %v, want 1", tc.name, got)
 			}
@@ -97,14 +98,14 @@ func TestScriptLabel(t *testing.T) {
 	// Counters.
 	CacheHitsTotal.WithLabelValues(label).Inc()
 	CacheMissesTotal.WithLabelValues(label).Inc()
-	ResourcesEmittedTotal.WithLabelValues(label).Inc()
-	ResourcesSkippedTotal.WithLabelValues(label).Inc()
-	ReconciliationsTotal.WithLabelValues(label).Inc()
+	ResourcesEmittedTotal.WithLabelValues(label, "").Inc()
+	ResourcesSkippedTotal.WithLabelValues(label, "").Inc()
+	ReconciliationsTotal.WithLabelValues(label, "").Inc()
 
 	// Histograms.
-	ExecutionDurationSeconds.WithLabelValues(label).Observe(0.001)
-	ReconciliationDurationSeconds.WithLabelValues(label).Observe(0.01)
-	OCIResolveDurationSeconds.WithLabelValues(label).Observe(0.01)
+	ExecutionDurationSeconds.WithLabelValues(label, "").Observe(0.001)
+	ReconciliationDurationSeconds.WithLabelValues(label, "").Observe(0.01)
+	OCIResolveDurationSeconds.WithLabelValues(label, "").Observe(0.01)
 
 	// If any of the above panicked, the test fails. Additionally verify
 	// counter values to ensure they actually incremented.
@@ -119,7 +120,7 @@ func TestHistogramBuckets_Execution(t *testing.T) {
 	wantBuckets := []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5}
 
 	// Ensure at least one observation exists so Gather returns the metric.
-	ExecutionDurationSeconds.WithLabelValues("bucket-test.star").Observe(0.001)
+	ExecutionDurationSeconds.WithLabelValues("bucket-test.star", "").Observe(0.001)
 
 	// Collect metric families from the default gatherer.
 	families, err := prometheus.DefaultGatherer.Gather()

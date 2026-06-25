@@ -1341,7 +1341,7 @@ func TestCollector_SkipResource_Metrics(t *testing.T) {
 	thread := new(starlark.Thread)
 
 	label := "skip-metrics-test.star"
-	baseSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	baseSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	// First skip_resource("x", "reason") -- should increment by 1.
 	_, err := starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
@@ -1352,13 +1352,13 @@ func TestCollector_SkipResource_Metrics(t *testing.T) {
 		t.Fatalf("first skip_resource() error: %v", err)
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - baseSkipped
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - baseSkipped
 	if delta != 1 {
 		t.Errorf("skip counter delta after first skip = %v, want 1", delta)
 	}
 
 	// Duplicate skip_resource("x", "other") -- should NOT increment (dedup).
-	baseSkipped = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	baseSkipped = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 	_, err = starlark.Call(thread, c.SkipResourceBuiltin(), starlark.Tuple{
 		starlark.String("x"),
 		starlark.String("other"),
@@ -1367,7 +1367,7 @@ func TestCollector_SkipResource_Metrics(t *testing.T) {
 		t.Fatalf("second skip_resource() error: %v", err)
 	}
 
-	delta = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - baseSkipped
+	delta = testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - baseSkipped
 	if delta != 0 {
 		t.Errorf("skip counter delta after dedup skip = %v, want 0", delta)
 	}
@@ -1979,7 +1979,7 @@ func TestCollector_RecordSkip_Basic(t *testing.T) {
 	c := NewCollector(cc, "test.star", nil, nil)
 
 	label := "test.star"
-	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	c.recordSkip("my-resource", "not needed", true)
 
@@ -1998,7 +1998,7 @@ func TestCollector_RecordSkip_Basic(t *testing.T) {
 		t.Errorf("event target = %q, want %q", events[0].Target, "Composite")
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - base
 	if delta != 1 {
 		t.Errorf("metric delta = %v, want 1", delta)
 	}
@@ -2009,7 +2009,7 @@ func TestCollector_RecordSkip_Dedup(t *testing.T) {
 	c := NewCollector(cc, "recordskip-dedup.star", nil, nil)
 
 	label := "recordskip-dedup.star"
-	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	c.recordSkip("x", "r1", true)
 	c.recordSkip("x", "r2", true)
@@ -2019,7 +2019,7 @@ func TestCollector_RecordSkip_Dedup(t *testing.T) {
 		t.Fatalf("expected 1 event after dedup, got %d", len(events))
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - base
 	if delta != 1 {
 		t.Errorf("metric delta = %v, want 1 (dedup)", delta)
 	}
@@ -2030,7 +2030,7 @@ func TestCollector_RecordSkip_DifferentNames(t *testing.T) {
 	c := NewCollector(cc, "recordskip-diff.star", nil, nil)
 
 	label := "recordskip-diff.star"
-	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	c.recordSkip("a", "r1", true)
 	c.recordSkip("b", "r2", true)
@@ -2040,7 +2040,7 @@ func TestCollector_RecordSkip_DifferentNames(t *testing.T) {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - base
 	if delta != 2 {
 		t.Errorf("metric delta = %v, want 2", delta)
 	}
@@ -2096,7 +2096,7 @@ func TestCollector_RecordSkip_Concurrent(t *testing.T) {
 	c := NewCollector(cc, "recordskip-concurrent.star", nil, nil)
 
 	label := "recordskip-concurrent.star"
-	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	var wg sync.WaitGroup
 	for range 100 {
@@ -2113,7 +2113,7 @@ func TestCollector_RecordSkip_Concurrent(t *testing.T) {
 		t.Errorf("expected exactly 1 event after concurrent dedup, got %d", len(events))
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - base
 	if delta != 1 {
 		t.Errorf("metric delta = %v, want 1", delta)
 	}
@@ -2182,7 +2182,7 @@ func TestCollector_WhenFalse_SkipsResource_Metrics(t *testing.T) {
 	thread := new(starlark.Thread)
 
 	label := "gate01-metrics.star"
-	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	body := new(starlark.Dict)
 	_ = body.SetKey(starlark.String("kind"), starlark.String("Bucket"))
@@ -2197,7 +2197,7 @@ func TestCollector_WhenFalse_SkipsResource_Metrics(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - base
 	if delta != 1 {
 		t.Errorf("metric delta = %v, want 1", delta)
 	}
@@ -3089,7 +3089,7 @@ func TestCollector_KeepIfExists_NoSkipMetric(t *testing.T) {
 	c := NewCollector(cc, label, nil, observed)
 	thread := new(starlark.Thread)
 
-	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label))
+	base := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, ""))
 
 	_, err := starlark.Call(thread, c.Builtin(), starlark.Tuple{
 		starlark.String("db"),
@@ -3101,7 +3101,7 @@ func TestCollector_KeepIfExists_NoSkipMetric(t *testing.T) {
 		t.Fatalf("Resource() error: %v", err)
 	}
 
-	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label)) - base
+	delta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(label, "")) - base
 	if delta != 0 {
 		t.Errorf("metric delta = %v, want 0 (preservation is not a skip)", delta)
 	}

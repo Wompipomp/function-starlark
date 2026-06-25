@@ -4429,9 +4429,9 @@ skip_resource("metrics-skipped", "not needed for metrics test")
 	scriptLabel := "composition.star"
 
 	// Capture baseline counter values (global registry is shared across tests).
-	baseReconciliations := testutil.ToFloat64(metrics.ReconciliationsTotal.WithLabelValues(scriptLabel))
-	baseResourcesEmitted := testutil.ToFloat64(metrics.ResourcesEmittedTotal.WithLabelValues(scriptLabel))
-	baseResourcesSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel))
+	baseReconciliations := testutil.ToFloat64(metrics.ReconciliationsTotal.WithLabelValues(scriptLabel, ""))
+	baseResourcesEmitted := testutil.ToFloat64(metrics.ResourcesEmittedTotal.WithLabelValues(scriptLabel, ""))
+	baseResourcesSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel, ""))
 	baseCacheMisses := testutil.ToFloat64(metrics.CacheMissesTotal.WithLabelValues(scriptLabel))
 	baseCacheHits := testutil.ToFloat64(metrics.CacheHitsTotal.WithLabelValues(scriptLabel))
 
@@ -4481,17 +4481,17 @@ skip_resource("metrics-skipped", "not needed for metrics test")
 	}
 
 	// Assert counter deltas.
-	reconciliationsDelta := testutil.ToFloat64(metrics.ReconciliationsTotal.WithLabelValues(scriptLabel)) - baseReconciliations
+	reconciliationsDelta := testutil.ToFloat64(metrics.ReconciliationsTotal.WithLabelValues(scriptLabel, "")) - baseReconciliations
 	if reconciliationsDelta != 1 {
 		t.Errorf("ReconciliationsTotal delta = %v, want 1", reconciliationsDelta)
 	}
 
-	resourcesEmittedDelta := testutil.ToFloat64(metrics.ResourcesEmittedTotal.WithLabelValues(scriptLabel)) - baseResourcesEmitted
+	resourcesEmittedDelta := testutil.ToFloat64(metrics.ResourcesEmittedTotal.WithLabelValues(scriptLabel, "")) - baseResourcesEmitted
 	if resourcesEmittedDelta != 1 {
 		t.Errorf("ResourcesEmittedTotal delta = %v, want 1", resourcesEmittedDelta)
 	}
 
-	resourcesSkippedDelta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel)) - baseResourcesSkipped
+	resourcesSkippedDelta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel, "")) - baseResourcesSkipped
 	if resourcesSkippedDelta != 1 {
 		t.Errorf("ResourcesSkippedTotal delta = %v, want 1", resourcesSkippedDelta)
 	}
@@ -5030,8 +5030,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	scriptLabel := "composition.star"
 
 	// Capture baseline counter values.
-	baseDeferred := testutil.ToFloat64(metrics.ResourcesDeferredTotal.WithLabelValues(scriptLabel))
-	baseSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel))
+	baseDeferred := testutil.ToFloat64(metrics.ResourcesDeferredTotal.WithLabelValues(scriptLabel, ""))
+	baseSkipped := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel, ""))
 
 	req := &fnv1.RunFunctionRequest{
 		Input: resource.MustStructJSON(fmt.Sprintf(`{
@@ -5049,13 +5049,13 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	assertNormalResult(t, rsp)
 
 	// ResourcesDeferredTotal should increment by 1 (one resource deferred: "app").
-	deferredDelta := testutil.ToFloat64(metrics.ResourcesDeferredTotal.WithLabelValues(scriptLabel)) - baseDeferred
+	deferredDelta := testutil.ToFloat64(metrics.ResourcesDeferredTotal.WithLabelValues(scriptLabel, "")) - baseDeferred
 	if deferredDelta != 1 {
 		t.Errorf("ResourcesDeferredTotal delta = %v, want 1", deferredDelta)
 	}
 
 	// ResourcesSkippedTotal should NOT increment (sequencing != skip_resource).
-	skippedDelta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel)) - baseSkipped
+	skippedDelta := testutil.ToFloat64(metrics.ResourcesSkippedTotal.WithLabelValues(scriptLabel, "")) - baseSkipped
 	if skippedDelta != 0 {
 		t.Errorf("ResourcesSkippedTotal delta = %v, want 0 (sequencing should not use skip metric)", skippedDelta)
 	}
