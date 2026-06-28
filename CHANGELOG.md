@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.11.0](https://github.com/Wompipomp/function-starlark/compare/v0.10.0...v0.11.0) (2026-06-12)
+
+
+### Features
+
+* **11:** add package-local OCI detector and scanner wiring ([e35672d](https://github.com/Wompipomp/function-starlark/commit/e35672dfb51e53fc7980357ddf1042f61e82656a))
+* **11:** document package-local load scheme and add e2e fixture ([19e86e4](https://github.com/Wompipomp/function-starlark/commit/19e86e42be363d19c512b5cca898c4026c37e54c))
+* **11:** wire package-local loads into loader and resolver ([728e390](https://github.com/Wompipomp/function-starlark/commit/728e39002d6da156ff5afde3325c5b8231496537))
+* **17-01:** implement MutableStruct type and constructor ([2d1c277](https://github.com/Wompipomp/function-starlark/commit/2d1c277c6911cd312b261c2b3232fe21dba4012a))
+* **17-01:** register mutable_struct in runtime and test-runner globals ([d17e19a](https://github.com/Wompipomp/function-starlark/commit/d17e19a931d1cca36e8608429ac6843ed7e87b6b))
+* **36-01:** implement recursive dict.compact with depth guard ([b9a3411](https://github.com/Wompipomp/function-starlark/commit/b9a3411d277907a4f22c61d48ce8376e87903977))
+* **37-01:** add observed dict to Collector and update all call sites ([03911c4](https://github.com/Wompipomp/function-starlark/commit/03911c4842c122be399aa95110ee546301626141))
+* **37-01:** extract recordSkip method and refactor skipResourceFn ([99d24f4](https://github.com/Wompipomp/function-starlark/commit/99d24f435136dfe82f22e7331ac37ab584cbc613))
+* **38-01:** implement when/skip_reason/preserve_observed gate logic ([82b8b5e](https://github.com/Wompipomp/function-starlark/commit/82b8b5e749de50c0352fd46f739199ca0c81c5bc))
+* **38-02:** implement preserve_observed path with observed body lookup ([a4f3b2e](https://github.com/Wompipomp/function-starlark/commit/a4f3b2e4926132876b718c6df5692d4218301120))
+* **39-01:** add dict.compact reference documentation ([9c2df82](https://github.com/Wompipomp/function-starlark/commit/9c2df82276fa64f6e71ed49d36816f9cc05a83d9))
+* **39-01:** add Resource() gating kwargs documentation with state table ([2dbd09b](https://github.com/Wompipomp/function-starlark/commit/2dbd09bf478dee1d8c2482194aff7ec51c6c130c))
+* **39-03:** add dict.compact and when=False E2E test scenarios ([c2cd5e9](https://github.com/Wompipomp/function-starlark/commit/c2cd5e9576b2028e141b0e6e3c10612409695172))
+* **39-03:** add preserve_observed two-phase reconciliation E2E test ([4a39859](https://github.com/Wompipomp/function-starlark/commit/4a39859ea9ed94cc1949932c53e0a29dfa297937))
+* **41-01:** implement filesystem relative-path resolution in loader and fn.go ([073bdf1](https://github.com/Wompipomp/function-starlark/commit/073bdf12304cb5508b95bb77d8a3dcf9e6c8ffdd))
+* **42-01:** add _test.star production guard and export GetBuiltin ([9f2c3dd](https://github.com/Wompipomp/function-starlark/commit/9f2c3dd2405811031e14d24918866a188f60341e))
+* **42-01:** implement testrunner package with discovery, execution, and output ([468522d](https://github.com/Wompipomp/function-starlark/commit/468522da06025f0a2ba09c9aa831c131f4108ced))
+* **43-01:** enable path-based inline module keys in loader ([de915be](https://github.com/Wompipomp/function-starlark/commit/de915be6877d538ce2a7b24a70dec5e2cc2a2cd2))
+* **45-01:** wire MutableStruct through pipeline via InternalDict ([b23ab0c](https://github.com/Wompipomp/function-starlark/commit/b23ab0caf0ec81643f61d4071ef7073d48f851dc))
+* **46-01:** export ValidateMutation/ValidateFields on SchemaCallable, wire schema= kwarg to MutableStruct ([fb7f049](https://github.com/Wompipomp/function-starlark/commit/fb7f049422d71498fe6c86515435cb7d0a054252))
+* **46-02:** implement schema-aware SetField with validate-before-store ([2cec8bc](https://github.com/Wompipomp/function-starlark/commit/2cec8bc818327ffcc4fa3dbc99c54a77376a5e18))
+* **47-01:** implement schema-aware Binary() merge and String() prefix ([802b821](https://github.com/Wompipomp/function-starlark/commit/802b821be9372cc738a001b149f83aceeed2b611))
+* add dict.compact builtin to remove None-valued entries from dictionaries ([386adfb](https://github.com/Wompipomp/function-starlark/commit/386adfbb40bda537952db51ee0949a7f8f8d0c6f))
+* add mutable_struct support with schema validation and integration ([117bb64](https://github.com/Wompipomp/function-starlark/commit/117bb64d9d87fed6d2b17aa1bd1538468302f59c))
+* add OCI pull policy support to control tag revalidation behavior ([a14e741](https://github.com/Wompipomp/function-starlark/commit/a14e741055aa38015652a265fc53f37d80d4c867))
+* implement composite readiness gating with optional resource support and set_composite_ready builtin ([0d205dd](https://github.com/Wompipomp/function-starlark/commit/0d205dd4cd0ba0266c42b41f78161f6bb39b9f2f))
+* implement transitive skipping and deferred dependency gating for conditional resources ([52889eb](https://github.com/Wompipomp/function-starlark/commit/52889eb7a3c8bc732fa08c6f69fce4ff8680bad8))
+* **quick-13:** auto-compact Resource() body to strip None-valued entries ([6cdfae4](https://github.com/Wompipomp/function-starlark/commit/6cdfae4d78e239ded5dd109d62b09e5ee50cdeb2))
+* **quick-14:** allow skip_reason with when=True in Resource() ([886e9d7](https://github.com/Wompipomp/function-starlark/commit/886e9d7552bbb20d46573a277adda736251e0274))
+* **quick-15:** make skip_reason mandatory when when is provided and default preserve_observed ([e6d174a](https://github.com/Wompipomp/function-starlark/commit/e6d174afb4fff4d978360e2596a55ba62a2a6e17))
+* **quick-16-01:** implement Kubernetes Object nested condition checking in sequencer ([a44971b](https://github.com/Wompipomp/function-starlark/commit/a44971b5e14e6533019cbb003a90e7175466ecf9))
+* **quick-16-01:** implement WhenValue type and refactor resourceFn ([43ed10c](https://github.com/Wompipomp/function-starlark/commit/43ed10c936e137c14a678aea1ad4d8f41a613625))
+* **quick-260612-eed-01:** skip None in set_xr_status and return bool ([26d9388](https://github.com/Wompipomp/function-starlark/commit/26d93889e8fa8d444f133231388cda5c6ec4c058))
+* remove crossplane.io label auto-injection from Resource() ([cf64be3](https://github.com/Wompipomp/function-starlark/commit/cf64be3efaadb9d98274243650e6780fc8eff8ab))
+
+
+### Bug Fixes
+
+* **11:** replace if-else chain with switch in ExpandPackageLocal ([f04257f](https://github.com/Wompipomp/function-starlark/commit/f04257fff143d22543d310a3b3f0ca7e2de56b38))
+* **42-01:** use any instead of interface{} and tidy go.mod ([95cbed2](https://github.com/Wompipomp/function-starlark/commit/95cbed2e30821df34785972cb92a3217c0adab07))
+* **ci:** standardize render-check on crossplane v2 engine ([882223c](https://github.com/Wompipomp/function-starlark/commit/882223cf983ce52ebb6fe0c1e033887f004f1efa))
+* **collector:** update event severity and message for gating and non-gating skips ([01c3780](https://github.com/Wompipomp/function-starlark/commit/01c3780998543a5264d37bb0f0bf2da21e880b37))
+* **e2e:** update optional-cascade test expectations for always-propagate behavior ([b71d654](https://github.com/Wompipomp/function-starlark/commit/b71d6546b1721f1c43f5c57a73a9d3acf3322558))
+* enhance composite readiness handling with converged state tracking ([fc0999c](https://github.com/Wompipomp/function-starlark/commit/fc0999ccf7a947ea814f83b0d1af70adb0024bee))
+* filter out version-dependent unready resource messages in render-check and update expected output accordingly ([8812579](https://github.com/Wompipomp/function-starlark/commit/8812579e556a7f3d191862d8b84387a26c70b007))
+* goimports alignment in runtime and testrunner ([4c78378](https://github.com/Wompipomp/function-starlark/commit/4c7837892b6293cfb9eb9f8afdfd8c12ead4bb64))
+* implement callable module wrapper for dict to support both namespace access and constructor calls ([2550aa8](https://github.com/Wompipomp/function-starlark/commit/2550aa8d9e82c1005ea1d911c7389dd20ece2dae))
+* linting ([49bc297](https://github.com/Wompipomp/function-starlark/commit/49bc2971e8f2f8b191ace438f47e0f58545ede7e))
+* lowercase When() error strings for Go lint ST1005 ([583af9a](https://github.com/Wompipomp/function-starlark/commit/583af9acfa4a9467c6ef86fa1e223e7594364ed4))
+* normalize render output for crossplane v1/v2 compatibility ([b0b33ad](https://github.com/Wompipomp/function-starlark/commit/b0b33ad17b17927c2c4295e5d79199891009adf1))
+* **quick-16-01:** rename preserve_observed comment to keep_if_exists in e2e yaml ([049f466](https://github.com/Wompipomp/function-starlark/commit/049f46698e172edb3a5997b03518eb499371459d))
+* **quick-16-01:** replace interface{} with any in sequencer tests ([e03485a](https://github.com/Wompipomp/function-starlark/commit/e03485ae62139de246292e93a635232d05481dc3))
+* render check ([ac348aa](https://github.com/Wompipomp/function-starlark/commit/ac348aa71a33496dad5748f8377de8fb927bc1ec))
+* replace awk normalizer with Python for crossplane v1/v2 compat ([bec2921](https://github.com/Wompipomp/function-starlark/commit/bec29216804cdd4261fda8f2c6524e787d8d5c82))
+* resolve all golangci-lint issues for CI ([19a53b1](https://github.com/Wompipomp/function-starlark/commit/19a53b1b2ae5ae3bb65e13db3f86006339b57ee8))
+* strip read-only metadata fields for preserve_observed and sanitize module scan thread names for package-local imports ([4aa7309](https://github.com/Wompipomp/function-starlark/commit/4aa73092b24c133351ef61a72d182d49808ec60b))
+* **tests:** add nolint directive for test file writes to t.TempDir ([61aabd9](https://github.com/Wompipomp/function-starlark/commit/61aabd96c1fe81dae90262b9cfa5b6c07697cafd))
+* update expected output and documentation for ClusterUsage kind in YAML files ([95d609b](https://github.com/Wompipomp/function-starlark/commit/95d609b01b6f9452e544cb9aba8984accab52a43))
+* update import path and propagate errors from mutable struct dictionary deletion ([47ac3ad](https://github.com/Wompipomp/function-starlark/commit/47ac3ad2d4e90d084781427c4b557c6a73e17ead))
+* **usage:** remove metadata from Usage resource as it is auto-generated ([8241ba2](https://github.com/Wompipomp/function-starlark/commit/8241ba2b56f2049b01a85c47022a92a43d7f2721))
+
+
+### Performance Improvements
+
+* implement lazy allocation in compactDict and compactList to avoid unnecessary copying ([f97aaf1](https://github.com/Wompipomp/function-starlark/commit/f97aaf12392794beb65f1f40b0f0e134b3aaaa06))
+
 ## [0.10.0](https://github.com/Wompipomp/function-starlark/compare/v0.9.0...v0.10.0) (2026-04-13)
 
 
