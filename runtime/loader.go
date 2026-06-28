@@ -394,6 +394,16 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 	if m.expanding[filename] {
 		return source, nil
 	}
+
+	// Fast path: if this exact (source, filename) was previously scanned and
+	// found to have no star imports, skip the full parse entirely. The parse
+	// is otherwise repeated on every reconciliation even though the bytecode
+	// is already cached, making it the dominant per-request cost.
+	scanKey := starScanKey(source, filename)
+	if m.rt.hasNoStarImports(scanKey) {
+		return source, nil
+	}
+
 	m.expanding[filename] = true
 	defer delete(m.expanding, filename)
 
@@ -430,6 +440,10 @@ func (m *ModuleLoader) ResolveStarImports(source, filename string) (string, erro
 	}
 
 	if len(starLoads) == 0 {
+		// Memoize: this source has no star imports, so future calls can skip
+		// the parse above. Only the negative result is cached -- sources that
+		// DO use star imports must be re-expanded against the live module set.
+		m.rt.markNoStarImports(scanKey)
 		return source, nil
 	}
 

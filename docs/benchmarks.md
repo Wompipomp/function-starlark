@@ -36,6 +36,56 @@ The ~600 us gap between in-process (126 us) and gRPC-over-Docker (724 us) is
 gRPC + protobuf serialization + Docker network overhead -- constant regardless
 of workload size.
 
+> The comparison tables above are a v1.3 snapshot. Per-request overhead has
+> since been reduced (script star-import scan memoized, fewer allocations in the
+> protobuf conversion and globals construction). The relative ordering versus
+> other functions is unchanged; re-run the comparative suite to refresh absolute
+> figures.
+
+### Star-import scan cost (in-process)
+
+Before each execution, the script is scanned for star imports
+(`load("m.star", "*")`) so they can be expanded before compilation. A script
+with **no** star imports is scanned once and the verdict is memoized; a script
+that uses star imports is re-scanned and re-expanded on every reconciliation
+(its expansion depends on the live module set). The
+`BenchmarkResolveStarImports` benchmark measures the steady-state per-call cost
+of each path:
+
+| Import style | Latency | Allocs | Notes |
+|---|---|---|---|
+| Explicit named imports (memoized) | ~0.2 us | 4 | `load("m.star", "a", "b")` |
+| Star import (re-scanned each call) | ~5.4 us | 125 | `load("m.star", "*")` |
+
+The memoized path is ~27x faster and allocates ~31x less per reconciliation.
+This is the basis for the recommendation to prefer explicit named imports on
+latency-sensitive hot paths -- see
+[Star-import scan memoization](module-system.md#star-import-scan-memoization).
+The absolute cost of star imports (single-digit microseconds) is negligible for
+most compositions; the recommendation matters for high-frequency reconciliation.
+
+### Lazy observed materialization (in-process)
+
+Observed composed resources and required (extra) resources are converted from
+protobuf to Starlark values *lazily* -- each resource body is converted on first
+access, so the bodies of resources a script never reads cost nothing. This
+matters for composites with many composed resources where the script inspects
+only a few. `BenchmarkBuildObservedDict` builds the observed map and reads 2
+resources:
+
+| Observed resources (read 2) | Latency | B/op | Allocs |
+|---|---|---|---|
+| 10 — eager (previous) | 22.6 us | 57 KB | 501 |
+| 10 — lazy | 5.4 us | 13.5 KB | 127 |
+| 50 — eager (previous) | 111 us | 282 KB | 2,461 |
+| 50 — lazy | 7.9 us | 19.7 KB | 207 |
+
+At 50 observed resources reading 2, building the observed environment is ~93%
+faster and allocates ~93% less, because the 48 unread bodies are never
+converted. Cost now tracks the number of resources *read*, not the number
+*present*. Reading a resource converts its full body once (then caches it), so
+read-heavy compositions see the same cost as before.
+
 ### Container image size
 
 | Function | Image Size |
@@ -125,6 +175,12 @@ go test -bench=BenchmarkRunFunction -benchmem -count=5 -run='^$' .
 
 # Runtime-only execution + memory
 go test -bench=Benchmark -benchmem -count=5 -run='^$' ./runtime/
+
+# Star-import scan cost: explicit (memoized) vs star (re-scanned) imports
+go test -bench=BenchmarkResolveStarImports -benchmem -count=5 -run='^$' ./runtime/
+
+# Lazy observed materialization: cost vs number of observed resources read
+go test -bench=BenchmarkBuildObservedDict -benchmem -count=5 -run='^$' ./builtins/
 ```
 
 ### CI regression detection

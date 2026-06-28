@@ -237,6 +237,11 @@ load("source", "name1", "name2")
 - Aliased imports are supported: `load("module.star", renamed = "original")`
 - Star imports bring in all public exports: `load("module.star", "*")`
 
+> **Tip:** On latency-sensitive hot paths, prefer explicit named imports over
+> star imports. Star imports are re-scanned and re-expanded on every
+> reconciliation, while scripts without them are scanned only once per pod.
+> See [Star-import scan memoization](#star-import-scan-memoization).
+
 ### Relative loads
 
 Modules can load siblings and subdirectory modules using the `./` prefix:
@@ -421,7 +426,7 @@ For full function signatures and documentation, see the
 
 ## Caching
 
-function-starlark uses two caching layers to minimize overhead across
+function-starlark uses three caching layers to minimize overhead across
 reconciliation cycles.
 
 ### Bytecode caching
@@ -433,6 +438,33 @@ Prometheus metrics:
 
 - `function_starlark_cache_hits_total` -- bytecode cache hits
 - `function_starlark_cache_misses_total` -- bytecode cache misses
+
+### Star-import scan memoization
+
+Before execution, the script is scanned once for star imports
+(`load("m.star", "*")` and namespace aliases like `load("m.star", ns="*")`),
+which must be expanded into explicit names before compilation. The result of
+this scan is memoized per script: a script with **no** star imports is parsed
+for the scan exactly once for the pod's lifetime, then reuses the cached "no
+expansion needed" verdict on every subsequent reconciliation.
+
+Scripts that **do** use star imports are re-scanned and re-expanded on every
+reconciliation, because their expansion depends on the live set of loaded
+modules and their exported names, which cannot be safely cached across calls.
+
+**Performance note.** For latency-sensitive or high-frequency compositions,
+prefer explicit named imports over star imports on the hot path:
+
+```python
+load("helpers.star", "create_bucket", "validate")   # parsed once, then memoized
+# vs.
+load("helpers.star", "*")                            # re-parsed every reconciliation
+```
+
+The difference is one source parse per reconciliation (tens of microseconds for
+a typical script). Star imports remain fully supported and are the right tool
+when you genuinely want all exports or need [namespace aliases](#namespace-alias-imports)
+to resolve name conflicts -- they simply forgo the scan memoization.
 
 ### OCI tag resolution caching
 

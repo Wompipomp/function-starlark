@@ -1,13 +1,13 @@
 package runtime
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/crossplane/function-sdk-go/logging"
+	"github.com/zeebo/blake3"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 
@@ -21,14 +21,46 @@ type Runtime struct {
 	mu    sync.RWMutex
 	cache map[string]*starlark.Program
 	log   logging.Logger
+
+	// noStarImports memoizes the result of star-import scanning. A present
+	// key (content hash of source+filename) means the source was scanned and
+	// found to contain NO star imports, so ResolveStarImports can return it
+	// unchanged without re-parsing -- the dominant per-request cost on the
+	// cached execution path. Sources that DO contain star imports are
+	// intentionally not cached here: their expansion depends on the live
+	// module set, so they must be re-expanded on each call.
+	starMu        sync.RWMutex
+	noStarImports map[string]struct{}
 }
 
 // NewRuntime creates a Runtime with an empty program cache.
 func NewRuntime(log logging.Logger) *Runtime {
 	return &Runtime{
-		cache: make(map[string]*starlark.Program),
-		log:   log,
+		cache:         make(map[string]*starlark.Program),
+		noStarImports: make(map[string]struct{}),
+		log:           log,
 	}
+}
+
+// hasNoStarImports reports whether (source, filename) was previously scanned
+// and found to contain no star imports.
+func (r *Runtime) hasNoStarImports(key string) bool {
+	r.starMu.RLock()
+	_, ok := r.noStarImports[key]
+	r.starMu.RUnlock()
+	return ok
+}
+
+// markNoStarImports records that (source, filename) contains no star imports.
+func (r *Runtime) markNoStarImports(key string) {
+	r.starMu.Lock()
+	r.noStarImports[key] = struct{}{}
+	r.starMu.Unlock()
+}
+
+// starScanKey derives the memoization key for star-import scanning.
+func starScanKey(source, filename string) string {
+	return contentHash(source + "\x00" + filename)
 }
 
 // Execute compiles (or retrieves from cache) and runs the Starlark source.
@@ -138,8 +170,13 @@ func fileOptions() *syntax.FileOptions {
 	}
 }
 
-// contentHash returns the SHA-256 hex digest of the source.
+// contentHash returns the BLAKE3-256 hex digest of the source. BLAKE3 is used
+// over SHA-256 because this digest is computed on every request to key the
+// in-memory bytecode and star-scan caches; BLAKE3 is several times faster while
+// remaining cryptographically collision-resistant. The digest never leaves the
+// process (it is only ever a map key and a debug-log prefix), so the algorithm
+// is a free internal implementation detail.
 func contentHash(source string) string {
-	h := sha256.Sum256([]byte(source))
+	h := blake3.Sum256([]byte(source))
 	return hex.EncodeToString(h[:])
 }

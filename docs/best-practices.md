@@ -322,6 +322,26 @@ Use standard library modules for common patterns (networking, naming, labels,
 conditions) rather than reimplementing. See the
 [standard library reference](stdlib-reference.md).
 
+### Prefer explicit imports on the hot path
+
+A script with no star imports is scanned for star imports exactly once per pod
+and reuses that result on every reconciliation. A script that uses
+`load("m.star", "*")` (or namespace aliases like `load("m.star", ns="*")`) is
+re-scanned and re-expanded on every reconciliation, because the expansion
+depends on the live set of loaded module exports.
+
+```python
+load("helpers.star", "create_bucket", "validate")   # scanned once, then memoized
+load("helpers.star", "*")                            # re-scanned every reconciliation
+```
+
+The cost is one source parse per reconciliation -- tens of microseconds for a
+typical script. For most compositions it is negligible; for high-frequency or
+latency-sensitive compositions, prefer explicit named imports. Star imports are
+not deprecated -- they remain the right tool when you genuinely want all exports
+or need namespace aliasing (below). See
+[Star-import scan memoization](module-system.md#star-import-scan-memoization).
+
 ### Namespace aliases for provider schemas
 
 When multiple schema packages export the same type name (common with cloud

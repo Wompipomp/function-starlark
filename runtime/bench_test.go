@@ -8,6 +8,88 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// starBenchModule is a small library module with several public exports,
+// shared by the explicit-vs-star import benchmarks below.
+const starBenchModule = `
+def make_name(prefix, i):
+    return "%s-%d" % (prefix, i)
+
+def make_tags(env):
+    return {"managed-by": "starlark", "env": env}
+
+DEFAULT_REGION = "us-east-1"
+DEFAULT_ENV = "prod"
+MAX_REPLICAS = 5
+`
+
+// explicitImportScript imports specific names. It contains no star import, so
+// the pre-execution star-import scan is memoized after the first call and
+// skipped on every subsequent reconciliation.
+const explicitImportScript = `
+load("m.star", "make_name", "make_tags", "DEFAULT_REGION", "DEFAULT_ENV")
+names = [make_name("bucket", i) for i in range(10)]
+tags = make_tags(DEFAULT_ENV)
+region = DEFAULT_REGION
+`
+
+// starImportScript imports all exports via "*". Star expansion depends on the
+// live module set, so it cannot be memoized -- the script is re-scanned and
+// re-expanded on every reconciliation.
+const starImportScript = `
+load("m.star", "*")
+names = [make_name("bucket", i) for i in range(10)]
+tags = make_tags(DEFAULT_ENV)
+region = DEFAULT_REGION
+`
+
+// BenchmarkResolveStarImports measures the per-reconciliation cost of the
+// star-import scan that runs before every execution, contrasting the two paths:
+//
+//   - "explicit": named imports only. The scan finds no star import and
+//     memoizes that verdict on the shared Runtime, so later calls skip the parse.
+//   - "star": load("m.star", "*"). Expansion depends on the live module set, so
+//     the script is re-scanned and re-expanded (including a module export scan)
+//     on every call.
+//
+// The explicit path should be substantially cheaper, which is why named imports
+// are recommended on latency-sensitive hot paths. See docs/module-system.md
+// ("Star-import scan memoization").
+func BenchmarkResolveStarImports(b *testing.B) {
+	cases := []struct {
+		name   string
+		source string
+	}{
+		{"explicit", explicitImportScript},
+		{"star", starImportScript},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			// The memoization cache lives on the Runtime, which is shared across
+			// reconciliations; the ModuleLoader is per-reconciliation but its
+			// fast-path check consults the shared Runtime cache.
+			rt := NewRuntime(&testLogger{})
+			inline := map[string]string{"m.star": starBenchModule}
+			loader := NewModuleLoader(inline, nil, starlark.StringDict{}, rt, "")
+
+			// Warm up: first call performs the scan (and, for the explicit case,
+			// caches the "no star imports" verdict).
+			if _, err := loader.ResolveStarImports(tc.source, "composition.star"); err != nil {
+				b.Fatalf("warm-up failed: %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				if _, err := loader.ResolveStarImports(tc.source, "composition.star"); err != nil {
+					b.Fatalf("ResolveStarImports failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
 // fixtureScript is a non-trivial Starlark script (~25 lines) that exercises
 // the core interpreter: loops, conditionals, string formatting, dict manipulation.
 // It creates 10 resource-like dicts to simulate a typical composition workload.

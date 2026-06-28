@@ -223,14 +223,11 @@ func buildExtraResourcesDict(req *fnv1.RunFunctionRequest) (*starlark.Dict, erro
 			continue
 		}
 
-		// Build list of frozen resource dicts.
+		// Build list of resource dicts. Each body is converted lazily on first
+		// access; list.Freeze() below marks them frozen.
 		elems := make([]starlark.Value, 0, len(items))
 		for _, item := range items {
-			rd, err := convert.StructToStarlark(item.GetResource(), true) // frozen
-			if err != nil {
-				return nil, fmt.Errorf("extra resource %q: %w", name, err)
-			}
-			elems = append(elems, rd)
+			elems = append(elems, convert.NewLazyStarlarkDict(item.GetResource()))
 		}
 		list := starlark.NewList(elems)
 		list.Freeze()
