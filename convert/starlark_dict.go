@@ -49,11 +49,20 @@ var (
 type StarlarkDict struct {
 	d *starlark.Dict
 
-	// lazy, when non-nil, is the protobuf struct backing this dict; it is
-	// converted into d on first access. nil for eagerly-built dicts.
-	lazy   *structpb.Struct
+	// lazy, when non-nil, holds the deferred-materialization state for a dict
+	// built from a protobuf struct (see NewLazyStarlarkDict). It is nil for
+	// eagerly-built dicts, keeping the common case two pointers wide instead of
+	// embedding the sync.Once/error/flag by value in every StarlarkDict.
+	lazy *lazyState
+}
+
+// lazyState holds the deferred conversion state for a lazily-built StarlarkDict.
+// It is heap-allocated only for lazy dicts, so eager dicts (oxr, dxr, and every
+// nested converted body) do not pay for the sync.Once, error, and flag fields.
+type lazyState struct {
+	src    *structpb.Struct // protobuf struct converted into the dict on first access
 	once   sync.Once
-	err    error // conversion error from lazy materialization, surfaced on access
+	err    error // conversion error from materialization, surfaced on access
 	frozen bool  // freeze requested before materialization
 }
 
@@ -68,7 +77,7 @@ func NewStarlarkDict(size int) *StarlarkDict {
 // frozen iff Freeze is called before first access (which is the normal flow for
 // read-only request data such as observed and required resources).
 func NewLazyStarlarkDict(s *structpb.Struct) *StarlarkDict {
-	return &StarlarkDict{lazy: s}
+	return &StarlarkDict{lazy: &lazyState{src: s}}
 }
 
 // ensure materializes the lazy dict on first call and returns any conversion
@@ -76,33 +85,31 @@ func NewLazyStarlarkDict(s *structpb.Struct) *StarlarkDict {
 func (sd *StarlarkDict) ensure() error {
 	if sd.lazy == nil {
 		if sd.d == nil {
-			// Constructed from a nil struct (e.g. a resource with no body):
-			// materialize an empty dict so accessors don't nil-deref, matching
-			// the old StructToStarlark(nil) behavior.
+			// Defensive: eagerly-built dicts always have d set; guard a
+			// zero-value StarlarkDict so accessors never nil-deref.
 			sd.d = starlark.NewDict(0)
-			if sd.frozen {
-				sd.d.Freeze()
-			}
 		}
 		return nil
 	}
-	sd.once.Do(func() {
-		tmp, err := StructToStarlark(sd.lazy, sd.frozen)
+	sd.lazy.once.Do(func() {
+		// A nil src (a resource with no body) converts to an empty dict via
+		// StructToStarlark's nil handling, so absent bodies never panic.
+		tmp, err := StructToStarlark(sd.lazy.src, sd.lazy.frozen)
 		if err != nil {
 			// Materialization failed (e.g. a numeric value outside int64
 			// range). Surface the error on access; degrade to an empty dict
 			// so non-error methods stay safe. In practice request data comes
 			// pre-validated from Crossplane, so this path is not expected.
-			sd.err = err
+			sd.lazy.err = err
 			sd.d = starlark.NewDict(0)
-			if sd.frozen {
+			if sd.lazy.frozen {
 				sd.d.Freeze()
 			}
 			return
 		}
 		sd.d = tmp.d
 	})
-	return sd.err
+	return sd.lazy.err
 }
 
 // dict materializes (if needed) and returns the underlying *starlark.Dict for
@@ -110,6 +117,15 @@ func (sd *StarlarkDict) ensure() error {
 func (sd *StarlarkDict) dict() *starlark.Dict {
 	_ = sd.ensure()
 	return sd.d
+}
+
+// materialized is dict() for callers that can return an error: it surfaces a
+// lazy-conversion failure instead of silently degrading to an empty dict.
+func (sd *StarlarkDict) materialized() (*starlark.Dict, error) {
+	if err := sd.ensure(); err != nil {
+		return nil, err
+	}
+	return sd.d, nil
 }
 
 // InternalDict returns the underlying starlark.Dict for direct access
@@ -135,13 +151,15 @@ func (sd *StarlarkDict) Type() string {
 // materialized lazy dict, freezing is deferred to materialization so that
 // freezing does not force conversion of resource bodies a script never reads.
 func (sd *StarlarkDict) Freeze() {
-	if sd.d == nil {
-		// Not yet materialized (lazy, or built from a nil struct): defer the
-		// freeze to materialization so we don't force conversion early.
-		sd.frozen = true
+	if sd.lazy != nil && sd.d == nil {
+		// Not yet materialized: defer the freeze so we don't force conversion
+		// of a body the script may never read.
+		sd.lazy.frozen = true
 		return
 	}
-	sd.d.Freeze()
+	if sd.d != nil {
+		sd.d.Freeze()
+	}
 }
 
 // Truth returns True for non-empty dicts, False for empty.
@@ -278,7 +296,11 @@ func (sd *StarlarkDict) keysMethod(_ *starlark.Thread, _ *starlark.Builtin, args
 	if err := starlark.UnpackPositionalArgs("keys", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := sd.dict().Items()
+	d, err := sd.materialized()
+	if err != nil {
+		return nil, err
+	}
+	items := d.Items()
 	keys := make([]starlark.Value, len(items))
 	for i, item := range items {
 		keys[i] = item[0]
@@ -291,7 +313,11 @@ func (sd *StarlarkDict) valuesMethod(_ *starlark.Thread, _ *starlark.Builtin, ar
 	if err := starlark.UnpackPositionalArgs("values", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := sd.dict().Items()
+	d, err := sd.materialized()
+	if err != nil {
+		return nil, err
+	}
+	items := d.Items()
 	vals := make([]starlark.Value, len(items))
 	for i, item := range items {
 		vals[i] = item[1]
@@ -304,7 +330,11 @@ func (sd *StarlarkDict) itemsMethod(_ *starlark.Thread, _ *starlark.Builtin, arg
 	if err := starlark.UnpackPositionalArgs("items", args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := sd.dict().Items()
+	d, err := sd.materialized()
+	if err != nil {
+		return nil, err
+	}
+	items := d.Items()
 	tuples := make([]starlark.Value, len(items))
 	for i, item := range items {
 		tuples[i] = starlark.Tuple{item[0], item[1]}
@@ -319,7 +349,11 @@ func (sd *StarlarkDict) getMethod(_ *starlark.Thread, _ *starlark.Builtin, args 
 	if err := starlark.UnpackPositionalArgs("get", args, kwargs, 1, &key, &dflt); err != nil {
 		return nil, err
 	}
-	v, found, err := sd.dict().Get(key)
+	d, err := sd.materialized()
+	if err != nil {
+		return nil, err
+	}
+	v, found, err := d.Get(key)
 	if err != nil {
 		return nil, err
 	}

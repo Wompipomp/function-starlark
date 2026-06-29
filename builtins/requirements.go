@@ -198,8 +198,9 @@ func ApplyRequirements(rsp *fnv1.RunFunctionResponse, reqs []CollectedRequiremen
 
 // buildExtraResourcesDict builds a frozen starlark.Dict from request extra
 // resources. It prefers RequiredResources (current) and falls back to
-// ExtraResources (deprecated). Each resource is converted to a frozen
-// StarlarkDict via convert.StructToStarlark.
+// ExtraResources (deprecated). Each resource body is wrapped in a lazily-
+// materialized StarlarkDict (convert.NewLazyStarlarkDict) and frozen via the
+// enclosing list's Freeze, so bodies a script never reads are not converted.
 func buildExtraResourcesDict(req *fnv1.RunFunctionRequest) (*starlark.Dict, error) {
 	d := new(starlark.Dict)
 

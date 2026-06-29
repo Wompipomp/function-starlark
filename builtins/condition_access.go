@@ -51,7 +51,10 @@ func getConditionImpl(
 		return starlark.None, nil
 	}
 	statusVal, found, err := resMapping.Get(starlark.String("status"))
-	if err != nil || !found || statusVal == starlark.None {
+	if err != nil {
+		return nil, err
+	}
+	if !found || statusVal == starlark.None {
 		return starlark.None, nil
 	}
 
@@ -61,7 +64,10 @@ func getConditionImpl(
 		return starlark.None, nil
 	}
 	conditionsVal, found, err := statusMapping.Get(starlark.String("conditions"))
-	if err != nil || !found || conditionsVal == starlark.None {
+	if err != nil {
+		return nil, err
+	}
+	if !found || conditionsVal == starlark.None {
 		return starlark.None, nil
 	}
 

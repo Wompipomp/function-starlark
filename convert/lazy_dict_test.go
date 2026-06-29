@@ -2,6 +2,7 @@ package convert
 
 import (
 	"testing"
+	"unsafe"
 
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -201,5 +202,39 @@ func TestStarlarkToStructSurfacesLazyError(t *testing.T) {
 
 	if _, err := StarlarkToStruct(lazy); err == nil {
 		t.Fatal("StarlarkToStruct returned nil error for an unconvertible body, want error")
+	}
+}
+
+// TestLazyDictMethodsSurfaceConversionError verifies the error-returning dict
+// methods (get/keys/values/items) propagate a deferred conversion error instead
+// of silently degrading to an empty result.
+func TestLazyDictMethodsSurfaceConversionError(t *testing.T) {
+	bad := func() *StarlarkDict {
+		d := NewLazyStarlarkDict(mustStruct(t, map[string]any{"big": 1e19}))
+		d.Freeze()
+		return d
+	}
+	if _, err := bad().keysMethod(nil, nil, nil, nil); err == nil {
+		t.Error("keys() swallowed deferred conversion error")
+	}
+	if _, err := bad().valuesMethod(nil, nil, nil, nil); err == nil {
+		t.Error("values() swallowed deferred conversion error")
+	}
+	if _, err := bad().itemsMethod(nil, nil, nil, nil); err == nil {
+		t.Error("items() swallowed deferred conversion error")
+	}
+	if _, err := bad().getMethod(nil, nil, starlark.Tuple{starlark.String("big")}, nil); err == nil {
+		t.Error("get() swallowed deferred conversion error")
+	}
+}
+
+// TestStarlarkDictStaysSmall guards the #7 optimization: the lazy-materialization
+// state lives behind a pointer (lazyState), so every StarlarkDict -- including
+// the many eager ones -- stays two pointers wide instead of embedding the
+// sync.Once/error/flag by value (which previously made it ~56 bytes).
+func TestStarlarkDictStaysSmall(t *testing.T) {
+	const maxSize = 16 // two pointers on a 64-bit platform
+	if got := unsafe.Sizeof(StarlarkDict{}); got > maxSize {
+		t.Errorf("sizeof(StarlarkDict) = %d, want <= %d (lazy state should be behind a pointer)", got, maxSize)
 	}
 }

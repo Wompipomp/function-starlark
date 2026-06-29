@@ -70,7 +70,10 @@ func getExtraResourceImpl(
 			return dflt, nil
 		}
 		v, found, err := mapping.Get(starlark.String(key))
-		if err != nil || !found || v == starlark.None {
+		if err != nil {
+			return nil, err
+		}
+		if !found || v == starlark.None {
 			return dflt, nil
 		}
 		current = v
@@ -142,7 +145,10 @@ func getExtraResourcesImpl(
 				break
 			}
 			v, exists, err := mapping.Get(starlark.String(key))
-			if err != nil || !exists || v == starlark.None {
+			if err != nil {
+				return nil, err
+			}
+			if !exists || v == starlark.None {
 				found = false
 				break
 			}

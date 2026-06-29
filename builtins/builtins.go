@@ -144,8 +144,10 @@ var sharedStatelessBuiltins = starlark.StringDict{
 	"yaml":           YAMLModule,
 }
 
-// BuildObservedDict creates a frozen StarlarkDict of frozen StarlarkDicts
-// from the observed composed resources in the request.
+// BuildObservedDict creates a frozen StarlarkDict whose entries are the observed
+// composed resources. Each body is wrapped in a lazily-materialized StarlarkDict
+// (converted to Starlark on first access and frozen via the Freeze below), so
+// resources a script never reads cost nothing.
 func BuildObservedDict(req *fnv1.RunFunctionRequest) (*convert.StarlarkDict, error) {
 	resources := req.GetObserved().GetResources()
 	observed := convert.NewStarlarkDict(len(resources))
@@ -418,11 +420,15 @@ func getObservedImpl(
 
 	// Step 1: Look up resource by name in observed dict.
 	res, found, err := observed.Get(starlark.String(name))
-	if err != nil || !found || res == starlark.None {
+	if err != nil {
+		return nil, err
+	}
+	if !found || res == starlark.None {
 		return dflt, nil
 	}
 
-	// Step 2: Walk the path (same as getFnImpl loop).
+	// Step 2: Walk the path (same as getFnImpl loop). A conversion error from
+	// lazy materialization propagates; only a genuine miss yields the default.
 	current := res
 	for _, key := range keys {
 		mapping, ok := current.(starlark.Mapping)
@@ -430,7 +436,10 @@ func getObservedImpl(
 			return dflt, nil
 		}
 		v, found, err := mapping.Get(starlark.String(key))
-		if err != nil || !found || v == starlark.None {
+		if err != nil {
+			return nil, err
+		}
+		if !found || v == starlark.None {
 			return dflt, nil
 		}
 		current = v

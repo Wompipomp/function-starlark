@@ -222,11 +222,10 @@ type Collector struct {
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
 // emit Warning events when the external_name kwarg conflicts with an existing
-// annotation. The scriptName is recorded for use in metric labels. The oxr
-// parameter is currently unused (label auto-injection was removed; Crossplane
-// sets its traceability labels itself after the pipeline) and is kept to avoid
-// churning every call site. The observed dict holds the frozen Starlark
-// representation of observed composed resources; it may be nil.
+// annotation. The scriptName is recorded for use in metric labels. The oxr is
+// read for its kind to label metrics (compositeKind); a nil oxr yields an empty
+// kind label. The observed dict holds the frozen Starlark representation of
+// observed composed resources; it may be nil.
 func NewCollector(cc *ConditionCollector, scriptName string, oxr *structpb.Struct, observed *convert.StarlarkDict) *Collector {
 	return &Collector{
 		resources:     make(map[string]CollectedResource),
