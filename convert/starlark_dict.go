@@ -75,6 +75,15 @@ func NewLazyStarlarkDict(s *structpb.Struct) *StarlarkDict {
 // error. For eagerly-built dicts it is a single nil check.
 func (sd *StarlarkDict) ensure() error {
 	if sd.lazy == nil {
+		if sd.d == nil {
+			// Constructed from a nil struct (e.g. a resource with no body):
+			// materialize an empty dict so accessors don't nil-deref, matching
+			// the old StructToStarlark(nil) behavior.
+			sd.d = starlark.NewDict(0)
+			if sd.frozen {
+				sd.d.Freeze()
+			}
+		}
 		return nil
 	}
 	sd.once.Do(func() {
@@ -126,13 +135,13 @@ func (sd *StarlarkDict) Type() string {
 // materialized lazy dict, freezing is deferred to materialization so that
 // freezing does not force conversion of resource bodies a script never reads.
 func (sd *StarlarkDict) Freeze() {
-	if sd.lazy != nil && sd.d == nil {
+	if sd.d == nil {
+		// Not yet materialized (lazy, or built from a nil struct): defer the
+		// freeze to materialization so we don't force conversion early.
 		sd.frozen = true
 		return
 	}
-	if sd.d != nil {
-		sd.d.Freeze()
-	}
+	sd.d.Freeze()
 }
 
 // Truth returns True for non-empty dicts, False for empty.
@@ -157,7 +166,12 @@ func (sd *StarlarkDict) Attr(name string) (starlark.Value, error) {
 		return b, nil
 	}
 
-	v, found, err := sd.dict().Get(starlark.String(name))
+	// Materialize and surface any lazy-conversion error, consistent with Get;
+	// routing through dict() would discard it and degrade to None (data loss).
+	if err := sd.ensure(); err != nil {
+		return nil, err
+	}
+	v, found, err := sd.d.Get(starlark.String(name))
 	if err != nil {
 		return nil, err
 	}

@@ -118,6 +118,19 @@ func TestLazyStarlarkDictDefersConversion(t *testing.T) {
 	}
 }
 
+// TestLazyStarlarkDictAttrSurfacesConversionError verifies dot access (Attr)
+// propagates a deferred conversion error rather than swallowing it and
+// degrading to None, matching Get's behavior on bracket access.
+func TestLazyStarlarkDictAttrSurfacesConversionError(t *testing.T) {
+	bad := mustStruct(t, map[string]any{"big": 1e19}) // exceeds int64 range
+
+	lazy := NewLazyStarlarkDict(bad)
+
+	if _, err := lazy.Attr("big"); err == nil {
+		t.Fatal("expected deferred conversion error on dot access, got nil")
+	}
+}
+
 // TestLazyStarlarkDictTruthAndLenWithoutError verifies the cheap metadata
 // methods work on a well-formed lazy dict.
 func TestLazyStarlarkDictTruthAndLen(t *testing.T) {
@@ -150,5 +163,43 @@ func TestLazyStarlarkDictRoundTripsBackToStruct(t *testing.T) {
 	}
 	if got := out.GetFields()["kind"].GetStringValue(); got != "Widget" {
 		t.Errorf("round-tripped kind = %q, want Widget", got)
+	}
+}
+
+// TestLazyStarlarkDictNilStructIsEmptyNotPanic verifies a lazy dict built from a
+// nil struct (e.g. a resource whose body is unset) behaves like a frozen empty
+// dict on every access instead of panicking, matching StructToStarlark(nil).
+func TestLazyStarlarkDictNilStructIsEmptyNotPanic(t *testing.T) {
+	var s *structpb.Struct // nil, as r.GetResource() returns when the body is unset
+	lazy := NewLazyStarlarkDict(s)
+	lazy.Freeze()
+
+	if lazy.Len() != 0 {
+		t.Errorf("Len = %d, want 0", lazy.Len())
+	}
+	if lazy.Truth() {
+		t.Error("Truth() = true, want false for empty dict")
+	}
+	if _, found, err := lazy.Get(starlark.String("anything")); err != nil || found {
+		t.Errorf("Get on nil-struct dict: found=%v err=%v, want false,nil", found, err)
+	}
+	// Frozen: writes must be rejected, matching the old eager frozen-empty dict.
+	if err := lazy.SetKey(starlark.String("x"), starlark.MakeInt(1)); err == nil {
+		t.Error("SetKey on frozen nil-struct lazy dict succeeded, want error")
+	}
+	if _, err := StarlarkToStruct(lazy); err != nil {
+		t.Errorf("StarlarkToStruct(nil-struct lazy): %v", err)
+	}
+}
+
+// TestStarlarkToStructSurfacesLazyError verifies the round-trip path propagates a
+// deferred conversion error rather than silently emitting an empty struct.
+func TestStarlarkToStructSurfacesLazyError(t *testing.T) {
+	bad := mustStruct(t, map[string]any{"big": 1e19, "kind": "Widget"}) // exceeds int64 range
+	lazy := NewLazyStarlarkDict(bad)
+	lazy.Freeze()
+
+	if _, err := StarlarkToStruct(lazy); err == nil {
+		t.Fatal("StarlarkToStruct returned nil error for an unconvertible body, want error")
 	}
 }

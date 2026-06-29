@@ -216,6 +216,12 @@ func PlainDictToStruct(d *starlark.Dict) (*structpb.Struct, error) {
 
 // StarlarkToStruct converts a StarlarkDict back to a protobuf Struct.
 func StarlarkToStruct(d *StarlarkDict) (*structpb.Struct, error) {
+	// Surface any deferred lazy-conversion error instead of silently emitting
+	// an empty struct (d.Len()/d.Iterate() below would otherwise degrade to an
+	// empty dict and drop the body).
+	if err := d.ensure(); err != nil {
+		return nil, err
+	}
 	fields := make(map[string]*structpb.Value, d.Len())
 
 	iter := d.Iterate()

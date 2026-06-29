@@ -28,14 +28,18 @@ Resource("bucket", bucket_config)
 
 ### Pattern: Conditional resources
 
-Prefer `Resource(..., when=..., skip_reason=...)` over `if`-wrapped emissions
-for conditional resources. `when=` makes the skip observable as a Warning
-event and -- by default -- gates the XR's Ready condition to False until the
-condition becomes true. That prevents claims from flipping to Ready
-prematurely while a dependency is still pending.
+Prefer `Resource(..., when=When(...))` over `if`-wrapped emissions for
+conditional resources. `when=` makes the skip observable (it records the reason
+and emits a Warning event) and -- by default -- gates the XR's Ready condition to
+False until the condition becomes true. A bare `if` silently omits the resource:
+the XR can flip Ready=True with no record of why the resource is missing.
 
 ```python
-# GATES the XR -- XR stays Ready=False until the cluster is ready.
+# Avoid -- silent omission; no readiness gating, no recorded reason.
+if cluster_ready:
+    Resource("db-replica", replica_body)
+
+# Prefer -- GATES the XR (stays Ready=False until the cluster is ready) and records why.
 # When() signature: When(condition, reason, keep_if_exists, optional=False)
 Resource("db-replica", replica_body,
     when=When(cluster_ready, "waiting for cluster to provision", keep_if_exists=False))
@@ -123,6 +127,25 @@ set_xr_status("atProvider.arn", arn)
 set_xr_status("region", region)
 ```
 
+`set_xr_status` skips `None` automatically, so write a maybe-missing value
+directly -- do **not** wrap it in `if val:`. The skip is `None`-only on purpose:
+`""`, `0`, and `False` are legitimate values and are written, so a blanket
+`if val:` guard would silently drop them.
+
+```python
+# None is skipped for you; "" / 0 / False are written.
+set_xr_status("atProvider.region", region)   # not: if region: set_xr_status(...)
+```
+
+When you specifically want a field omitted for empty values **too** (e.g., an
+optional display name where `""` is meaningless), opt in explicitly with
+`or None` -- it collapses any falsy value to `None`, which is then skipped:
+
+```python
+# "" (and any other falsy value) -> None -> field omitted; non-empty -> written.
+set_xr_status("atProvider.applicationDisplayName", app_display_name or None)
+```
+
 ## Label strategy
 
 ### Default: Let Crossplane handle its own labels
@@ -178,6 +201,13 @@ for i in range(count):
 ```
 
 ## Dependency patterns
+
+Use `depends_on=` for creation ordering and readiness gating between resources --
+do not hand-roll sequencing with `if is_observed(...)` / `if get_observed(...)`
+guards. `depends_on=` handles creation order, deletion order (via generated Usage
+resources), and field-path readiness gating, none of which a manual `if` provides.
+Reserve `if is_observed(...)` / `get_observed(...)` for *reading* observed values,
+not for controlling whether a dependent resource is created.
 
 ### Simple chain
 
@@ -386,6 +416,38 @@ For observed resources, use `get_observed()` to avoid manual existence checks:
 ```python
 # One call instead of checking "bucket" in observed first
 arn = get_observed("bucket", "status.atProvider.arn", "pending")
+```
+
+### Use the safe accessors, not raw dict navigation
+
+Every request global has a one-call accessor that handles missing keys, `None`,
+and (for extra resources) the list-vs-single and no-match cases. Prefer these
+over `.get()` / bracket chains on `oxr`, `observed`, `extra_resources`, or
+`environment`:
+
+| Instead of raw navigation | Use |
+|---|---|
+| `oxr["spec"]["region"]` | `get(oxr, "spec.region", default)` |
+| `observed.get(name)` / `observed[name][...]` | `get_observed(name, "path", default)` |
+| `extra_resources.get(name)[0][...]` | `get_extra_resource(name, "path", default)` |
+| `extra_resources.get(name)` (all matches) | `get_extra_resources(name)` |
+| `get(oxr, "metadata.labels.app.kubernetes.io/name")` | `get_label(oxr, "app.kubernetes.io/name", default)` |
+| hand-navigating `status.conditions[]` | `get_condition(name, "Ready")` |
+
+`extra_resources.get(name)` is an especially common AI mistake. It returns a
+**list** of matched bodies (or `None` when nothing matched), not a single
+resource — so `extra_resources.get(name)[0]["spec"]...` breaks the moment a
+requirement matches nothing or was never requested. And because the value is a
+list (not a mapping), `get(extra_resources[name], "path")` silently returns its
+default. Use the accessor instead:
+
+```python
+# Avoid -- value is a list-or-None: no [0], no path, no default, get() fails silently
+host = extra_resources.get("db")[0]["status"]["atProvider"]["address"]
+host = get(extra_resources["db"], "status.atProvider.address", "")  # always returns ""
+
+# Prefer -- first match, path-traversed, safe default
+host = get_extra_resource("db", "status.atProvider.address", "")
 ```
 
 ### Check before access
@@ -650,61 +712,49 @@ full signature and behavior details.
 
 ### Pattern: Gated / preservable resources
 
-Three progressive patterns for controlling resource emission declaratively,
-from simple conditional skipping to cliff-guard preservation.
+Control conditional emission with the flags on `When()`. There is **no**
+`skip_reason`, `preserve_observed`, or `optional` parameter on `Resource()`
+itself, and `when=` must be a `When()` value (a bare bool is rejected) -- the
+gating, the skip reason, the cliff guard, and the non-gating opt-out all live on
+`When(condition, reason, keep_if_exists, optional=False)`.
 
-**(a) Simple conditional emission with when/skip_reason:**
-
-Skip a resource when a feature is disabled. Replaces wrapping `Resource()` in
-`if/else` blocks with `skip_resource()`:
+**(a) Simple conditional skip** -- `keep_if_exists=False` (gates the XR by default):
 
 ```python
-# Skip resource when feature is disabled (gates XR by default; use optional=True to opt out)
 feature_enabled = get(oxr, "spec.features.monitoring", False)
 Resource("monitoring-stack", monitoring_body,
     when=When(feature_enabled, "monitoring disabled in spec", keep_if_exists=False))
 ```
 
-**(b) Cliff guard with preserve_observed:**
-
-When config comes from an extra resource that may not exist on the first
-reconciliation (e.g., Azure connection config), use `preserve_observed` to keep
-the resource alive while the config source is temporarily unavailable:
+**(b) Cliff guard** -- `keep_if_exists=True` keeps an already-created resource
+alive while a config source is temporarily missing. When the condition is False,
+the function emits the *observed* body if the resource already exists (so it is
+not deleted), and skips only if it was never created:
 
 ```python
-# Extra resource may not exist on first reconciliation
+# Azure connection config may be absent on early reconciliations.
 azure_config = get_extra_resource("azure-conn", "data.config", None)
-body = {
+Resource("azure-dep", {
     "apiVersion": "nop.crossplane.io/v1alpha1",
     "kind": "NopResource",
     "spec": {"forProvider": {"config": azure_config}},
-} if azure_config else None
-
-Resource("azure-dep", body, preserve_observed=True)
-# First reconcile (no extra resource yet): body=None, emits observed body if it
-#   exists, skips if not
-# Subsequent reconciles: body=dict, emitted normally (preserve_observed is a no-op)
+}, when=When(azure_config != None, "azure connection config not yet available", keep_if_exists=True))
+# config absent  -> condition False + keep_if_exists True -> keep existing observed body
+# config present -> condition True -> emitted normally
 ```
 
-**(c) Combined: when + preserve_observed:**
-
-Gate on an explicit toggle while also preserving the observed body when config
-is absent:
+**(c) Optional (absent by design)** -- `optional=True` so the absence does NOT
+gate readiness (feature flags, tier add-ons):
 
 ```python
-# Gate + preserve: skip when explicitly disabled, preserve observed when body absent
-enabled = get(oxr, "spec.features.cache", True)
-cache_config = get(oxr, "spec.cacheConfig", None)
-body = build_cache(cache_config) if cache_config else None
-
-Resource("cache", body,
-    when=enabled, skip_reason="cache disabled",
-    preserve_observed=True)
+enabled = get(oxr, "spec.features.cache", False)
+Resource("cache", cache_body,
+    when=When(enabled, "cache add-on not enabled", keep_if_exists=False, optional=True))
 ```
 
 See [builtins reference](builtins-reference.md#resource) for the full behavior
-state table covering all combinations of `when`, `body`, and
-`preserve_observed`.
+table covering all combinations of the `When()` condition, `keep_if_exists`, and
+`optional`.
 
 ## See also
 

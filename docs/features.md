@@ -343,19 +343,25 @@ require_extra_resources("subnets", "ec2.aws.upbound.io/v1beta1", "Subnet",
 
 ### Accessing extra resources
 
-Required resources are available via the `extra_resources` global dict:
+Read required resources with the `get_extra_resource()` / `get_extra_resources()`
+accessors. (The raw `extra_resources[name]` value is a list of matched bodies, so
+prefer the accessors — they handle the first-match, no-match, and path cases for
+you.)
 
 ```python
 require_extra_resource("vpc", "ec2.aws.upbound.io/v1beta1", "VPC", match_name="my-vpc")
 
-# Access the result (available after Crossplane fulfills the requirement)
-vpc = extra_resources.get("vpc")
-if vpc:
-    vpc_cidr = get(vpc[0], "spec.forProvider.cidrBlock", "10.0.0.0/16")
+# Read the result (available after Crossplane fulfills the requirement).
+# get_extra_resource returns the first match's field with a safe default.
+vpc_id = get_extra_resource("vpc", "metadata.name", "")
+if vpc_id:
     Resource("subnet", {
         "apiVersion": "ec2.aws.upbound.io/v1beta1",
         "kind": "Subnet",
-        "spec": {"forProvider": {"vpcId": get(vpc[0], "metadata.name"), "cidrBlock": vpc_cidr}},
+        "spec": {"forProvider": {
+            "vpcId": vpc_id,
+            "cidrBlock": get_extra_resource("vpc", "spec.forProvider.cidrBlock", "10.0.0.0/16"),
+        }},
     })
 ```
 

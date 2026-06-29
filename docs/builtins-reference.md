@@ -161,14 +161,20 @@ Extra resources requested via `require_extra_resource()` or `require_extra_resou
 Keyed by the request name passed to those functions. This is a plain Starlark
 dict (not a StarlarkDict).
 
+**Each value is a LIST of matched resource bodies** (or absent/`None` when a
+requirement matched nothing). Do not navigate this dict directly — use the
+`get_extra_resource()` / `get_extra_resources()` accessors, which handle the
+list-vs-single, no-match, and path-traversal cases for you. In particular,
+`get(extra_resources[name], "path")` does **not** work: the value is a list, not
+a mapping, so `get()` always returns its default.
+
 ```python
 require_extra_resource("config", "v1", "ConfigMap",
     match_name="my-config")
 
 # After the function re-runs with the extra resource available:
-if "config" in extra_resources:
-    config = extra_resources["config"]
-    value = get(config, "data.my-key", "default")
+value = get_extra_resource("config", "data.my-key", "default")   # first match, safe default
+all_configs = get_extra_resources("config")                      # list of all matches (or [])
 ```
 
 Extra resources follow a two-pass pattern: on the first pass your script
@@ -728,8 +734,9 @@ require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=Non
 ```
 
 Request a single extra resource from the Crossplane API server. At least one of
-`match_name` or `match_labels` must be provided. Access the result via
-`extra_resources[name]` on the next reconciliation.
+`match_name` or `match_labels` must be provided. Read the result via
+`get_extra_resource(name, "path", default)` on the next reconciliation (the raw
+`extra_resources[name]` value is a list of matched bodies, so prefer the accessor).
 
 **Parameters:**
 
@@ -752,9 +759,10 @@ takes precedence and `match_labels` is ignored (a warning is emitted).
 # Request a ConfigMap by name
 require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
 
-# On next reconciliation, access the result
-if "config" in extra_resources:
-    db_host = get(extra_resources["config"], "data.DB_HOST", "localhost")
+# On next reconciliation, read the result with the accessor (NOT
+# get(extra_resources["config"], ...) -- that value is a list, so get() would
+# always return the default).
+db_host = get_extra_resource("config", "data.DB_HOST", "localhost")
 ```
 
 ---
@@ -766,8 +774,9 @@ require_extra_resources(name, apiVersion, kind, match_labels)
 ```
 
 Request multiple extra resources matching a label selector. Unlike
-`require_extra_resource`, `match_labels` is required (not optional). Access results
-via `extra_resources[name]` on the next reconciliation.
+`require_extra_resource`, `match_labels` is required (not optional). Read the
+results via `get_extra_resources(name)` on the next reconciliation (returns the
+list of matched bodies, or `[]`).
 
 **Parameters:**
 
@@ -787,10 +796,10 @@ via `extra_resources[name]` on the next reconciliation.
 require_extra_resources("certs", "v1", "Secret",
     match_labels={"app": "my-app", "type": "tls"})
 
-# On next reconciliation, iterate the results
-if "certs" in extra_resources:
-    for cert in extra_resources["certs"]:
-        name = get(cert, "metadata.name", "unknown")
+# On next reconciliation, iterate the results. get_extra_resources returns the
+# list of matched bodies (or [] when none matched), so no existence guard needed.
+for cert in get_extra_resources("certs"):
+    name = get(cert, "metadata.name", "unknown")
 ```
 
 ---

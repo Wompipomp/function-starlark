@@ -45,17 +45,18 @@ spec:
 
 ## Predeclared functions
 
-### When(condition, reason, keep_if_exists)
+### When(condition, reason, keep_if_exists, optional=False)
 
-Create a gating struct for Resource(). All three parameters mandatory.
+Create a gating struct for Resource(). First three parameters mandatory; optional defaults to False.
 
 - condition: bool (strict). False skips the resource.
 - reason: string, non-empty. Human-readable reason for skipping.
 - keep_if_exists: bool (strict). When True and condition is False, emit observed body if found (cliff guard).
+- optional: bool. When False (default), a skip gates the XR to Ready=False and emits a ComposedResourcesReady=False condition. Set True for resources expected to be absent by design (feature flags, tier add-ons) so the absence does not block the XR.
 
-Returns a When struct with .condition, .reason, .keep_if_exists attributes. Truthy when condition is True.
+Returns a When struct with .condition, .reason, .keep_if_exists, .optional attributes. Truthy when condition is True. NOTE: optional is a parameter of When(), NOT of Resource().
 
-### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=None, optional=False)
+### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=None)
 
 Register a desired composed resource. This is the primary function.
 
@@ -66,8 +67,7 @@ Register a desired composed resource. This is the primary function.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
 - depends_on: List of dependency items. Accepted types: ResourceRef, SkippedRef, string, tuple (ref, field_path), or None (silently dropped). Non-optional SkippedRef triggers transitive skip of the dependent. Optional SkippedRef is dropped from the list. Plain refs/strings check existence. Tuples check that the field path has a non-empty value. Generates Crossplane Usage resources.
 - external_name: Sugar for crossplane.io/external-name annotation.
-- when: Optional When() struct. Omit for unconditional emission. When(condition, reason, keep_if_exists) controls gating: condition=False skips with reason; keep_if_exists=True emits observed body if found (cliff guard). Bare bools rejected -- must use When().
-- optional: When False (default), a skip (When(False, ...) without a successful cliff guard) gates the XR to Ready=False and emits a ComposedResourcesReady=False condition. Set True for resources that are expected to be absent by design (feature flags, tier add-ons).
+- when: Optional When() struct for conditional emission. Omit for unconditional emission. When(condition, reason, keep_if_exists, optional=False) controls gating: condition=False skips with reason; keep_if_exists=True emits observed body if found (cliff guard); optional=True makes the skip non-gating. Bare bools rejected -- must use When(). The `optional` flag lives on When(), not on Resource(). Prefer `when=` over wrapping Resource() in an `if` -- see "Idiomatic Starlark".
 - Returns: ResourceRef when emitted (with .name attribute), or SkippedRef when any skip path was taken (with .name and .optional attrs; falsy in Starlark so `if ref:` works). SkippedRef can be passed to depends_on of downstream Resources for transitive skip.
 
 Sequencer-deferred resources (depends_on unmet) also flip ComposedResourcesReady=False with reason WaitingForDependencies. The old Synced=False/CreationSequencing signal has been removed -- composition-level gating lives on ComposedResourcesReady; Synced is reserved for provider/cloud sync.
@@ -166,6 +166,12 @@ set_connection_details({"endpoint": "https://...", "password": pw})
 Set a status field on the XR at a dot-separated path. Writes to dxr["status"][path segments...], auto-creating intermediate dicts as needed. Uses mkdir-p semantics: non-dict values at intermediate segments are silently overwritten. Path validation rejects empty paths, leading/trailing dots, and consecutive dots. Consecutive writes to the same prefix preserve sibling keys. Returns True when the value was written, False when the value was None (skipped). None is the only value that is skipped.
 
 No-guard rule: write `set_xr_status("field", maybe_none)` directly — None is skipped for you. Never guard with `if val:`, because that silently skips legitimate falsy values (`0`, `False`, `""`) that should still be written.
+
+Opt in to skipping empties: when you DO want a field omitted for empty values too (e.g. an optional display name where `""` is meaningless), pass `value or None` — any falsy value collapses to None and is skipped, non-empty values are written. Prefer this one-liner over an `if` guard:
+
+```python
+set_xr_status("atProvider.applicationDisplayName", app_display_name or None)
+```
 
 ```python
 # Individual field writes (siblings are preserved)
@@ -456,6 +462,8 @@ load("module.star", "SpecificFunc", ns="*")
 
 Backwards compatible -- plain `load("mod", "*")` still works for flat imports.
 
+Performance note: a script with no star imports is scanned for them once per pod and the result is memoized; any script that uses `load(..., "*")` (or `alias="*"`) is re-parsed and re-expanded on every reconciliation, because the expansion depends on the live module set. On latency-sensitive / high-frequency compositions, prefer explicit named imports (`load("m.star", "fn")`) on the hot path. Star imports remain fully supported -- use them when you want all exports or need namespace aliasing for conflict resolution.
+
 ## Standard library (oci://ghcr.io/wompipomp/starlark-stdlib:v1/)
 
 ### naming.star
@@ -491,8 +499,158 @@ bucket_config = {
 Resource("bucket", bucket_config)
 ```
 
+## Idiomatic Starlark: write declarative, inlined resource bodies
+
+Resource bodies are data. Build them as a single dict literal with values computed inline -- do NOT assemble them imperatively with intermediate variables, mutation, and if/elif/else blocks. Inlined code is shorter, carries no temporary state to track, and reads top-to-bottom like the YAML it produces. AI-generated code tends to over-use statements; prefer expressions. The transforms below all produce identical output (verified) -- write the second form.
+
+### Select values with `or` and conditional expressions, not if/elif/else
+
+Starlark has Python truthiness and the ternary operator. `a or b` yields `a` if truthy else `b`; `x if cond else y` selects inline. Chain them for elif logic. Empty string/list/dict and `0`/`False`/`None` are falsy.
+
+```python
+# Avoid -- imperative selection
+if len(owners) > 0:
+    eff_owners = owners
+elif entra_sp_id != "":
+    eff_owners = [{"id": entra_sp_id, "type": "objectid"}]
+else:
+    eff_owners = []
+
+# Prefer -- one expression
+eff_owners = owners or ([{"id": entra_sp_id, "type": "objectid"}] if entra_sp_id else [])
+```
+
+### Omit optional keys with `dict.compact()` + `or None`, not build-then-mutate
+
+To conditionally include a key, write it in the literal as `key: value or None` and wrap the dict in `dict.compact()`. compact() prunes None values (real K8s empties `""` / `[]` / `{}` are kept), so an empty or missing value drops the key entirely.
+
+```python
+# Avoid -- build then conditionally add keys
+params = {"name": display_name, "description": description, "integration": "default"}
+if len(owners) > 0:
+    params["owners"] = owners
+if len(members) > 0:
+    params["members"] = members
+
+# Prefer -- one literal; compact() drops the empties
+params = dict.compact({
+    "name": display_name,
+    "description": description,
+    "integration": "default",
+    "owners": owners or None,    # empty list -> None -> key dropped
+    "members": members or None,
+})
+```
+
+### Transform collections with comprehensions, not loop-and-append
+
+```python
+# Avoid
+names = []
+for r in rules:
+    names.append(r["name"])
+
+# Prefer
+names = [r["name"] for r in rules]                # map
+by_name = {r["name"]: r for r in rules}           # build a lookup dict
+enabled = [r for r in rules if r.get("enabled")]  # filter inline
+```
+
+### Return the body as a single literal from helpers
+
+A helper that builds a resource should `return {...}` directly with computed values inlined, rather than constructing it piece by piece. Full worked example -- the imperative version and this one are behaviorally identical; this is the one to write:
+
+```python
+def entra_group(inner_name, display_name, description, policies, owners, members):
+    eff_owners = owners or ([{"id": entra_sp_id, "type": "objectid"}] if entra_sp_id else [])
+    return {
+        "apiVersion": ENTRA_API,
+        "kind": "EntraIDGroup",
+        "metadata": {"name": inner_name, "namespace": claim_namespace},
+        "spec": {
+            "managementPolicies": policies,
+            "providerConfigRef": {"azuread": {"name": entra_azuread}},
+            "parameters": dict.compact({
+                "name": display_name,
+                "description": description,
+                "integration": "default",
+                "owners": eff_owners or None,
+                "members": members or None,
+            }),
+        },
+    }
+```
+
+### Use the safe accessors, not raw dict navigation
+
+Every request global has a one-call accessor that handles missing keys, None, and (for extra resources) the list-vs-single and no-match cases. Use them instead of `.get()` / bracket chains on `oxr`, `observed`, `extra_resources`, or `environment`.
+
+| Instead of raw navigation | Use |
+|---|---|
+| `oxr["spec"]["region"]` | `get(oxr, "spec.region", default)` |
+| `observed.get(name)` / `observed[name][...]` | `get_observed(name, "path", default)` |
+| `extra_resources.get(name)[0][...]` | `get_extra_resource(name, "path", default)` |
+| `extra_resources.get(name)` (all matches) | `get_extra_resources(name)` |
+| `get(oxr, "metadata.labels.app.kubernetes.io/name")` | `get_label(oxr, "app.kubernetes.io/name", default)` |
+| hand-navigating `status.conditions[]` | `get_condition(name, "Ready")` |
+
+`extra_resources.get(name)` is a common mistake: the value is a **list** of matched bodies (or None when nothing matched), not a single resource. So `extra_resources.get(name)[0][...]` breaks when a requirement matches nothing, and `get(extra_resources[name], "path")` silently returns its default (a list is not a mapping). Use the accessor:
+
+```python
+# Avoid -- list-or-None: no [0], no path, no default; get() fails silently
+host = extra_resources.get("db")[0]["status"]["atProvider"]["address"]
+
+# Prefer -- first match, path-traversed, safe default
+host = get_extra_resource("db", "status.atProvider.address", "")
+```
+
+### Conditional resources and ordering: use When() and depends_on=, not `if`
+
+Two patterns AIs get wrong: wrapping `Resource()` in `if cond:`, and gating creation order with `if is_observed(...)`. Both throw away the gating, observability, and deletion-ordering the dedicated parameters provide.
+
+Conditional resources -- use `when=When(...)`:
+
+```python
+# Avoid -- the resource silently vanishes; the XR can still flip Ready=True, and
+# nothing records why it is missing.
+if env == "prod":
+    Resource("dashboard", dashboard_body)
+
+# Prefer -- When() records the reason and (optional=False, the default) gates the
+# XR to Ready=False with ComposedResourcesReady=False while the resource is absent.
+Resource("dashboard", dashboard_body,
+    when=When(env == "prod", "monitoring only in prod", keep_if_exists=False))
+
+# For an add-on absent BY DESIGN that should NOT gate readiness, set optional=True on When():
+Resource("dashboard", dashboard_body,
+    when=When(env == "prod", "monitoring only in prod", keep_if_exists=False, optional=True))
+```
+
+Ordering / dependencies -- use `depends_on=`:
+
+```python
+# Avoid -- manual sequencing: imperative, no deletion ordering, doesn't gate readiness
+db = Resource("db", db_body)
+if get_observed("db", "status.atProvider.id"):
+    Resource("app", app_body)
+
+# Prefer -- depends_on handles creation order, deletion order (via Usage), and
+# field-path readiness gating (ComposedResourcesReady=False/WaitingForDependencies)
+db = Resource("db", db_body)
+Resource("app", app_body, depends_on=[(db, "status.atProvider.id")])
+```
+
+`if` is still right for non-resource control flow (computing values, looping, branches that do several things). It is the wrong tool for "should this resource exist" or "create B after A".
+
+### When NOT to inline
+
+Inlining removes accidental statements; it is not about maximizing density. Keep a named variable when a value is reused or the expression is complex. Keep an `if` statement when a branch does several things (emits resources, sets conditions, other side effects). Do not nest more than ~2 conditional expressions on one line -- past that, a variable or an `if` reads better. Readability wins.
+
 ## Best practices
 
+- Build resource bodies as single dict literals with inlined conditionals (`or`, ternary, `dict.compact()`) -- see "Idiomatic Starlark". Do not assemble dicts imperatively with intermediate variables and conditional key mutation.
+- Use `Resource(..., when=When(cond, reason, keep_if_exists, optional=False))` for conditional resources and `depends_on=` for ordering -- do NOT wrap `Resource()` in `if cond:` or gate creation with `if is_observed(...)`. Bare-`if` forms drop readiness gating, the recorded skip reason, and deletion ordering. See "Idiomatic Starlark".
+- Prefer explicit named imports `load("m.star", "fn")` over `load("m.star", "*")` on hot paths: star imports are re-parsed and re-expanded on every reconciliation, while explicit imports are scanned once and memoized. Star imports still work and are fine when you genuinely want all exports or need namespace aliasing.
 - Use get() for all nested access -- never raw bracket chains on XR/observed data.
 - Use get_label()/get_annotation() instead of get() for dotted label/annotation keys -- get() splits on dots, so "app.kubernetes.io/name" won't work as a dot-path.
 - Use get_observed() for one-call observed resource field access instead of manual "if name in observed" existence checks.

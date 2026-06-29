@@ -68,8 +68,8 @@ see the [builtins reference](builtins-reference.md).
 | Create composed resource | Return in manifest list | `items = [resource]` | `Resource(name, body)` |
 | Resource naming | Annotation-based | `krm.kcl.dev/composition-resource-name` | First arg to `Resource()` |
 | Safe nested access | Nested `.` with `default` | `x?.field` | `get(obj, "path", default)` |
-| Conditional resource | `{{- if }}` blocks | `if condition:` | `if condition:` + `Resource()` |
-| Conditional resource skip | `{{- if }}` with removal | `if condition:` with `items.remove()` | `Resource(..., when=enabled, skip_reason="reason")` |
+| Conditional resource | `{{- if }}` blocks | `if condition:` | `Resource(..., when=When(cond, "reason", keep_if_exists=False))` (not `if cond: Resource()`) |
+| Conditional resource skip (non-gating) | `{{- if }}` with removal | `if condition:` with `items.remove()` | `Resource(..., when=When(cond, "reason", keep_if_exists=False, optional=True))` |
 | Loop resources | `{{- range }}` | `for x in list:` | `for x in list:` + `Resource()` |
 | XR status write | Direct `.desired` assignment | `dxr.status.field = val` | `set_xr_status("field", val)` |
 | Connection details | Per-resource annotations | Per-resource annotations | `connection_details=` kwarg or `set_connection_details()` |
