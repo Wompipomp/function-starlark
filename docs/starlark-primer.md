@@ -36,14 +36,17 @@ except KeyError:
 value = get(oxr, "spec.key", "default")
 ```
 
-**No while loops** -- only `for` loops with finite iterables.
+**`while` loops are supported** (this runtime enables them), but every execution
+has a step limit, so they cannot run forever. A `for` loop over a finite
+iterable is often clearer.
 
 ```python
-# Python
-while not ready:
-    check()
+# Starlark -- while is allowed (bounded by the step limit)
+i = 0
+while i < 100 and not is_ready(i):
+    i += 1
 
-# Starlark -- use for with range()
+# ...or use for with range()
 for i in range(100):
     if is_ready(i):
         break
@@ -122,14 +125,16 @@ for k, v in overrides.items():
 
 ### Behavioral differences
 
-**Global variables are immutable after top-level assignment.** You cannot
-reassign a global variable inside a function.
+**A plain assignment inside a function creates a *local*, not a write to the
+global** (top-level globals themselves can be reassigned at the top level). So a
+function cannot update a global by assignment -- use a mutable container instead.
 
 ```python
 count = 0
+count = 5  # OK: globals are reassignable at the top level
 
 def increment():
-    count = count + 1  # ERROR: local variable referenced before assignment
+    count = count + 1  # ERROR: 'count' is a local here, referenced before assignment
 
 # Instead, use a mutable container:
 state = {"count": 0}
@@ -181,18 +186,18 @@ for k in to_remove:
 
 ### String formatting
 
-Starlark supports **only** the `%` operator for string formatting:
+Use the `%` operator or `str.format()`. f-strings are **not** supported:
 
 ```python
-# Works
+# Works -- % operator
 name = "hello %s" % user
 msg = "%s has %d items" % (user, count)
 
+# Works -- str.format()
+name = "hello {}".format(user)
+
 # Does NOT work -- f-strings are invalid
 name = f"hello {user}"
-
-# Does NOT work -- .format() does not exist
-name = "hello {}".format(user)
 ```
 
 ## Available types
@@ -247,15 +252,16 @@ function-starlark-specific:
 
 ## function-starlark builtins
 
-On top of standard Starlark, function-starlark adds 35 predeclared names:
+On top of standard Starlark, function-starlark adds 37 predeclared names:
 6 globals (`oxr`, `dxr`, `observed`, `context`, `environment`,
-`extra_resources`), 23 functions (`Resource`, `skip_resource`, `get`,
+`extra_resources`), 25 functions (`Resource`, `skip_resource`, `When`, `get`,
 `get_label`, `get_annotation`, `set_condition`, `emit_event`, `fatal`,
 `set_composite_ready`, `set_connection_details`, `set_xr_status`,
 `get_observed`, `require_extra_resource`, `require_extra_resources`,
-`schema`, `field`, `struct`, `get_extra_resource`, `get_extra_resources`,
-`is_observed`, `observed_body`, `get_condition`, `set_response_ttl`), and
-6 namespace modules (`json`, `crypto`, `encoding`, `dict`, `regex`, `yaml`).
+`schema`, `field`, `struct`, `mutable_struct`, `get_extra_resource`,
+`get_extra_resources`, `is_observed`, `observed_body`, `get_condition`,
+`set_response_ttl`), and 6 namespace modules (`json`, `crypto`, `encoding`,
+`dict`, `regex`, `yaml`).
 
 See the [builtins reference](builtins-reference.md) for complete signatures,
 parameter types, defaults, and examples.
@@ -273,13 +279,15 @@ name = get(oxr, "metadata.name", "unknown")
 
 ```python
 env = get(oxr, "spec.environment", "dev")
-if env == "prod":
-    Resource("monitoring", {
-        "apiVersion": "monitoring.example.io/v1",
-        "kind": "Dashboard",
-        "spec": {"enabled": True},
-    })
+Resource("monitoring", {
+    "apiVersion": "monitoring.example.io/v1",
+    "kind": "Dashboard",
+    "spec": {"enabled": True},
+}, when=When(env == "prod", "monitoring only in prod", keep_if_exists=False))
 ```
+
+Prefer `when=When(...)` over wrapping `Resource()` in a bare `if`: it records
+why the resource was skipped and preserves deletion ordering.
 
 ### Loop-based resource creation
 

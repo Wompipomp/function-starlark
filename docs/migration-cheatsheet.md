@@ -74,7 +74,7 @@ see the [builtins reference](builtins-reference.md).
 | XR status write | Direct `.desired` assignment | `dxr.status.field = val` | `set_xr_status("field", val)` |
 | Connection details | Per-resource annotations | Per-resource annotations | `connection_details=` kwarg or `set_connection_details()` |
 | Dependency ordering | Not built-in | Not built-in | `depends_on=` kwarg on `Resource()` |
-| Labels | Manual | Manual via annotations | Auto-injected + `labels=` kwarg |
+| Labels | Manual | Manual via annotations | `labels=` kwarg (Crossplane sets traceability labels itself) |
 | Extra resources | ExtraResources spec field | ExtraResources spec field | `require_extra_resource()` + `get_extra_resource()` |
 | Halt on error | Not built-in (`fail`) | `assert cond, msg` | `if not cond: fatal(msg)` |
 | Events | Not built-in | Not built-in | `emit_event(severity, message)` |

@@ -183,13 +183,14 @@ go test -bench=BenchmarkResolveStarImports -benchmem -count=5 -run='^$' ./runtim
 go test -bench=BenchmarkBuildObservedDict -benchmem -count=5 -run='^$' ./builtins/
 ```
 
-### CI regression detection
+### Running the full suite
 
-The CI pipeline runs benchmarks on every push with a 140% alert threshold:
+Benchmarks are run locally (there is no automated benchmark job in CI). Use
+`make bench`, or run them directly:
 
 ```bash
 go test -bench=. -benchmem -count=5 -run='^$' ./...
 ```
 
-Results are tracked over time via
-[github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark).
+Compare runs over time with
+[benchstat](https://pkg.go.dev/golang.org/x/perf/cmd/benchstat).

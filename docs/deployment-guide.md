@@ -7,7 +7,7 @@ and verifying the function with the example XBucket composition.
 ## Prerequisites
 
 - Kubernetes cluster (v1.28+) with kubectl access
-- [Crossplane](https://crossplane.io/) installed (v1.17+)
+- [Crossplane](https://crossplane.io/) installed (v1.17+ or v2.x; both are supported, and v2 is the default render/Usage target)
 - Docker for building the function image
 - A container registry accessible from the cluster (e.g., GHCR, ECR, Docker Hub)
 

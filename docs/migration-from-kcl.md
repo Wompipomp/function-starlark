@@ -154,16 +154,16 @@ items = _monitoring + _other_resources
 
 **Starlark:**
 ```python
-if env == "prod":
-    Resource("dashboard", {
-        "apiVersion": "monitoring.example.io/v1",
-        "kind": "Dashboard",
-        "spec": {"enabled": True},
-    })
+Resource("dashboard", {
+    "apiVersion": "monitoring.example.io/v1",
+    "kind": "Dashboard",
+    "spec": {"enabled": True},
+}, when=When(env == "prod", "monitoring only in prod", keep_if_exists=False))
 ```
 
-Starlark uses standard `if` statements. No need to build conditional lists
-and concatenate them.
+Prefer `when=When(...)` over a bare `if env == "prod": Resource(...)`: the skip
+is recorded with a reason and deletion ordering stays correct. A bare `if` works
+but silently drops the resource with no observability.
 
 ### Loop-based resource creation
 

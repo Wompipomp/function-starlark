@@ -354,15 +354,14 @@ require_extra_resource("vpc", "ec2.aws.upbound.io/v1beta1", "VPC", match_name="m
 # Read the result (available after Crossplane fulfills the requirement).
 # get_extra_resource returns the first match's field with a safe default.
 vpc_id = get_extra_resource("vpc", "metadata.name", "")
-if vpc_id:
-    Resource("subnet", {
-        "apiVersion": "ec2.aws.upbound.io/v1beta1",
-        "kind": "Subnet",
-        "spec": {"forProvider": {
-            "vpcId": vpc_id,
-            "cidrBlock": get_extra_resource("vpc", "spec.forProvider.cidrBlock", "10.0.0.0/16"),
-        }},
-    })
+Resource("subnet", {
+    "apiVersion": "ec2.aws.upbound.io/v1beta1",
+    "kind": "Subnet",
+    "spec": {"forProvider": {
+        "vpcId": vpc_id,
+        "cidrBlock": get_extra_resource("vpc", "spec.forProvider.cidrBlock", "10.0.0.0/16"),
+    }},
+}, when=When(vpc_id != "", "waiting for VPC extra-resource to be fulfilled", keep_if_exists=False))
 ```
 
 Use case: Reading existing resources to derive configuration (e.g., reading a

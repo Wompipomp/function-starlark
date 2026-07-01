@@ -455,9 +455,14 @@ host = get_extra_resource("db", "status.atProvider.address", "")
 Use `if "key" in dict:` before accessing optional fields:
 
 ```python
-if "monitoring" in get(oxr, "spec", {}):
-    Resource("dashboard", {...})
+spec = get(oxr, "spec", {})
+if "monitoring" in spec:
+    monitoring_cfg = spec["monitoring"]
+    # ... read monitoring_cfg fields ...
 ```
+
+(For *conditional resource emission* use `Resource(..., when=When(...))` rather
+than a bare `if` -- see "Conditional resources" above.)
 
 ### Fail fast
 

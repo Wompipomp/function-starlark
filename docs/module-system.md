@@ -81,12 +81,12 @@ When a [default OCI registry](#configuring-the-default-oci-registry) is
 configured, use the concise short-form syntax:
 
 ```python
-load("function-starlark-stdlib:v1/naming.star", "resource_name")
+load("starlark-stdlib:v1/naming.star", "resource_name")
 ```
 
 The short-form `package:tag/file.star` is expanded using the configured default
 registry. For example, with registry `ghcr.io/wompipomp`, the load above
-becomes `oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star`.
+becomes `oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star`.
 
 ### OCI modules (explicit full URL)
 
@@ -159,7 +159,7 @@ environment variable is used. If neither is configured and a short-form load
 target is encountered, the function returns a fatal error:
 
 ```
-load target "function-starlark-stdlib:v1/naming.star" requires a default OCI registry;
+load target "starlark-stdlib:v1/naming.star" requires a default OCI registry;
 set STARLARK_OCI_DEFAULT_REGISTRY env var on the function pod or spec.ociDefaultRegistry in function input
 ```
 
@@ -338,16 +338,16 @@ load("./helpers.star", "my_func")
 load("helpers.star", "my_func")
 
 # 3. Short-form OCI module (requires default registry configured)
-load("function-starlark-stdlib:v1/naming.star", "resource_name")
+load("starlark-stdlib:v1/naming.star", "resource_name")
 
 # 4. Explicit OCI module (full URL, no default registry needed)
 load("oci://ghcr.io/myorg/starlark-libs/networking:v1.0.0/helpers.star", "subnet_cidr")
 
 # 5. Standard library (using short-form with default registry)
-load("function-starlark-stdlib:v1/networking.star", "subnet_cidr")
-load("function-starlark-stdlib:v1/naming.star", "resource_name")
-load("function-starlark-stdlib:v1/labels.star", "standard_labels")
-load("function-starlark-stdlib:v1/conditions.star", "degraded")
+load("starlark-stdlib:v1/networking.star", "subnet_cidr")
+load("starlark-stdlib:v1/naming.star", "resource_name")
+load("starlark-stdlib:v1/labels.star", "standard_labels")
+load("starlark-stdlib:v1/conditions.star", "degraded")
 ```
 
 ## Inline modules

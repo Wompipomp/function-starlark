@@ -56,7 +56,7 @@ Create a gating struct for Resource(). First three parameters mandatory; optiona
 
 Returns a When struct with .condition, .reason, .keep_if_exists, .optional attributes. Truthy when condition is True. NOTE: optional is a parameter of When(), NOT of Resource().
 
-### Resource(name, body, ready=None, labels=<auto>, connection_details=None, depends_on=None, external_name=None, when=None)
+### Resource(name, body, ready=None, labels=None, connection_details=None, depends_on=None, external_name=None, when=None)
 
 Register a desired composed resource. This is the primary function.
 
@@ -391,7 +391,7 @@ Load shared code via standard Starlark load():
 
 ```python
 # Short-form OCI load (recommended, requires default registry configured)
-load("function-starlark-stdlib:v1/naming.star", "resource_name")
+load("starlark-stdlib:v1/naming.star", "resource_name")
 
 # Explicit full OCI URL (always works)
 load("oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star", "resource_name")
@@ -433,7 +433,7 @@ Configuration (spec fields override env vars):
 - `STARLARK_OCI_CACHE_TTL` env var (pod-level only, default 5m)
 
 Expansion example with registry `ghcr.io/wompipomp`:
-- `function-starlark-stdlib:v1/naming.star` becomes `oci://ghcr.io/wompipomp/function-starlark-stdlib:v1/naming.star`
+- `starlark-stdlib:v1/naming.star` becomes `oci://ghcr.io/wompipomp/starlark-stdlib:v1/naming.star`
 
 Valid short-form patterns:
 - `package:tag/file.star` (tag reference)
@@ -763,7 +763,7 @@ Schema constructors return dict-compatible values that work transparently with R
 
 Starlark is Python-like but NOT Python:
 - No classes, exceptions, try/except, import, with, yield, async/await
-- No set type (use dict with None values)
+- `set` type IS available (the runtime enables sets via the `set()` builtin)
 - No **kwargs or *args
 - Strings are immutable, no f-strings (use % or .format())
 - Variables assigned in if/for are visible in outer scope

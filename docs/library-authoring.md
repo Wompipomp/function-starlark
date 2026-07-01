@@ -105,11 +105,10 @@ the main script. These are available inside function bodies:
 | `oxr` | Observed composite resource dict | No -- value changes per reconciliation |
 | `dxr` | Desired composite resource dict | No -- value changes per reconciliation |
 | `observed` | All observed composed resources | No -- value changes per reconciliation |
-| `desired` | All desired composed resources | No -- value changes per reconciliation |
 | `set_condition(...)` | Set XR status condition | No -- side effect |
 | `emit_event(...)` | Emit Kubernetes event | No -- side effect |
 
-**Critical rule:** Never access `oxr`, `dxr`, `observed`, or `desired` at
+**Critical rule:** Never access `oxr`, `dxr`, or `observed` at
 module top level. Module globals are frozen after first load and cached. If you
 read `oxr` at module level, you get the value from the first reconciliation and
 it never updates. Always read these inside function bodies.
@@ -250,7 +249,7 @@ def merge(base, overrides):
 
 Module globals are cached after first load. If you read `oxr` at module level,
 the value is from the first reconciliation and never updates. Always read
-`oxr`, `dxr`, `observed`, and `desired` inside function bodies.
+`oxr`, `dxr`, and `observed` inside function bodies.
 
 ### Bitwise NOT produces negative numbers
 

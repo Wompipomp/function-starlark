@@ -1,6 +1,6 @@
 # Builtins reference
 
-function-starlark provides 36 predeclared names -- 6 globals, 24 functions, and
+function-starlark provides 37 predeclared names -- 6 globals, 25 functions, and
 6 namespace modules -- that are automatically available in every Starlark script
 without import. These are the core API for interacting with Crossplane's
 composite resource model.
@@ -242,7 +242,7 @@ When(False, "no users in role", keep_if_exists=False, optional=True)
 ### Resource
 
 ```python
-ref = Resource(name, body, ready=None, labels=<auto>, connection_details=None,
+ref = Resource(name, body, ready=None, labels=None, connection_details=None,
                depends_on=None, external_name=None,
                when=None)
 ```
@@ -562,7 +562,7 @@ signals -- they do **not** control XR readiness (readiness is managed by the
 | `status` | string | required | `"True"`, `"False"`, or `"Unknown"`. |
 | `reason` | string | required | Machine-readable reason (e.g., `"Available"`, `"ReconcileError"`). |
 | `message` | string | required | Human-readable message. |
-| `target` | string | `"Composite"` | Always `"Composite"` (XR-level condition). |
+| `target` | string | `"Composite"` | `"Composite"` (XR-level, default) or `"CompositeAndClaim"` to also propagate the condition to the claim. |
 
 **Returns:** None.
 
@@ -593,7 +593,7 @@ Emit an event on the composite resource.
 |-----------|------|---------|-------------|
 | `severity` | string | required | `"Normal"` or `"Warning"`. |
 | `message` | string | required | Event message. |
-| `target` | string | `"Composite"` | Always `"Composite"`. |
+| `target` | string | `"Composite"` | `"Composite"` (default) or `"CompositeAndClaim"` to also surface the event on the claim. |
 
 **Returns:** None.
 
