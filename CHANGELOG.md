@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.1](https://github.com/Wompipomp/function-starlark/compare/v0.11.0...v0.11.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* enhance deletion order logging in depends_on tests for accurate resourceVersion tracking ([1f9e21c](https://github.com/Wompipomp/function-starlark/commit/1f9e21c0d34b6bfcd2ed2a9b319a5f4561258240))
+* propagate conversion errors in lazy StarlarkDict methods and improve documentation ([573eb20](https://github.com/Wompipomp/function-starlark/commit/573eb20d9199d00fbed372bb2f8d9dd7ded6b815))
+* surface deferred conversion errors in StarlarkDict and improve documentation on resource access patterns ([6f54e52](https://github.com/Wompipomp/function-starlark/commit/6f54e5269d0db413c9cbb50680a1a1340e0077d5))
+
 ## [0.11.0](https://github.com/Wompipomp/function-starlark/compare/v0.10.0...v0.11.0) (2026-06-12)
 
 
