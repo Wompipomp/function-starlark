@@ -107,21 +107,22 @@ def evens(n):
 evens = [i for i in range(n) if i % 2 == 0]
 ```
 
-**No \*\*kwargs spread** -- no `{**a, **b}` dict merging.
+**No dict-literal unpacking** -- `{**a, **b}` is invalid. Use the `update()`
+method (mutates in place) or, in function-starlark, `dict.merge()` /
+`dict.deep_merge()` (which return a new dict). Function *definitions* do support
+`*args` and `**kwargs`.
 
 ```python
 # Python
 merged = {**defaults, **overrides}
 
-# Starlark -- merge manually
-merged = {}
-for k, v in defaults.items():
-    merged[k] = v
-for k, v in overrides.items():
-    merged[k] = v
-```
+# Starlark -- update() mutates in place
+merged = dict(defaults)
+merged.update(overrides)
 
-**No dict.update()** -- merge dicts manually with a loop (see above).
+# function-starlark helper -- dict.merge() returns a new dict (right-wins)
+merged = dict.merge(defaults, overrides)
+```
 
 ### Behavioral differences
 

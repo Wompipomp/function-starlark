@@ -764,7 +764,7 @@ Schema constructors return dict-compatible values that work transparently with R
 Starlark is Python-like but NOT Python:
 - No classes, exceptions, try/except, import, with, yield, async/await
 - `set` type IS available (the runtime enables sets via the `set()` builtin)
-- No **kwargs or *args
+- No `{**a, **b}` dict-literal unpacking (function defs DO support `*args`/`**kwargs`); no `**` power operator
 - Strings are immutable, no f-strings (use % or .format())
 - Variables assigned in if/for are visible in outer scope
 - Top-level code executes sequentially (no main function)
