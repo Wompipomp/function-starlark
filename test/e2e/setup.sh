@@ -45,6 +45,8 @@ containerdConfigPatches:
     endpoint = ["http://${REGISTRY_NAME}:5000"]
   [plugins."io.containerd.grpc.v1.cri".registry.mirrors."e2e-registry.default.svc.cluster.local:5000"]
     endpoint = ["http://${REGISTRY_NAME}:5000"]
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."e2e-registry.localhost:5000"]
+    endpoint = ["http://${REGISTRY_NAME}:5000"]
 EOF
     # Connect registry to kind network
     docker network connect "kind" "$REGISTRY_NAME" 2>/dev/null || true
@@ -56,8 +58,17 @@ kubectl cluster-info --context "kind-${CLUSTER_NAME}"
 REGISTRY_IP="$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' "$REGISTRY_NAME")"
 echo "    Registry IP (in-cluster): $REGISTRY_IP"
 
-# In-cluster registry address used by Crossplane pods (via K8s Service DNS)
+# In-cluster registry address used by function pods for OCI module loads
+# (via K8s Service DNS; the function's OCI resolver handles plain HTTP).
 INCLUSTER_REGISTRY="e2e-registry.default.svc.cluster.local:5000"
+
+# Registry address for the Function *package* ref. Crossplane's package
+# manager (go-containerregistry) only speaks plain HTTP to localhost,
+# *.localhost and loopback registries — newer ggcr (vendored since
+# Crossplane ~2.3.4) no longer treats *.svc.cluster.local as insecure.
+# The name resolves inside the crossplane pod via hostAliases (patched
+# after install below) and on the kind node via the containerd mirror.
+PACKAGE_REGISTRY="e2e-registry.localhost:5000"
 
 # --- Crossplane ---
 echo "==> Installing Crossplane ${CROSSPLANE_VERSION}"
@@ -70,6 +81,11 @@ helm upgrade --install crossplane crossplane-stable/crossplane \
 
 echo "==> Waiting for Crossplane pods"
 kubectl wait --for=condition=Ready pods -l app=crossplane -n crossplane-system --timeout=120s
+
+echo "==> Pointing crossplane at the local package registry (hostAliases)"
+kubectl patch deployment crossplane -n crossplane-system --type=strategic -p \
+    "{\"spec\":{\"template\":{\"spec\":{\"hostAliases\":[{\"ip\":\"${REGISTRY_IP}\",\"hostnames\":[\"e2e-registry.localhost\"]}]}}}}"
+kubectl rollout status deployment crossplane -n crossplane-system --timeout=120s
 
 # --- In-cluster Service for local registry (so pods can reach it via K8s DNS) ---
 echo "==> Creating K8s Service for local registry"
@@ -176,7 +192,7 @@ kind: Function
 metadata:
   name: function-starlark
 spec:
-  package: "${INCLUSTER_REGISTRY}/function-starlark:e2e"
+  package: "${PACKAGE_REGISTRY}/function-starlark:e2e"
   runtimeConfigRef:
     name: fn-starlark-e2e
 EOF
