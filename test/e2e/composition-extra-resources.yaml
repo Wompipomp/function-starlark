@@ -11,6 +11,9 @@
 #
 # The runner pre-creates two standalone NopResources labeled e2e-extra=true
 # (matched by label) and relies on the suite's own XRD (matched by name).
+# Both targets are cluster-scoped, so this composition runs on Crossplane
+# 1.x and 2.x alike. Namespaced selectors (namespace= kwarg, v2-only) are
+# covered by composition-extra-resources-ns.yaml.
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:

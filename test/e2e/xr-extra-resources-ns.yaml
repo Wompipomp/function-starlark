@@ -1,0 +1,9 @@
+apiVersion: e2e.fn-starlark.io/v1
+kind: XTest
+metadata:
+  name: test-extra-resources-ns
+  labels:
+    e2e-test: extra-resources-ns
+spec:
+  compositionRef:
+    name: extra-resources-ns-test

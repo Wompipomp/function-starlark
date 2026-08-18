@@ -170,7 +170,7 @@ a mapping, so `get()` always returns its default.
 
 ```python
 require_extra_resource("config", "v1", "ConfigMap",
-    match_name="my-config")
+    match_name="my-config", namespace="my-namespace")
 
 # After the function re-runs with the extra resource available:
 value = get_extra_resource("config", "data.my-key", "default")   # first match, safe default
@@ -730,7 +730,7 @@ set_connection_details({
 ### require_extra_resource
 
 ```python
-require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)
+require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None, namespace=None)
 ```
 
 Request a single extra resource from the Crossplane API server. At least one of
@@ -747,17 +747,33 @@ Request a single extra resource from the Crossplane API server. At least one of
 | `kind` | string | required | Kind to match (e.g., `"ConfigMap"`). |
 | `match_name` | string \| None | None | Match by resource name. |
 | `match_labels` | dict \| None | None | Match by labels. |
+| `namespace` | string \| None | None | Namespace to fetch from (Crossplane v2+; see below). |
 
 **Returns:** None.
 
 **Note:** If both `match_name` and `match_labels` are provided, `match_name`
 takes precedence and `match_labels` is ignored (a warning is emitted).
 
+**Namespaced resources (Crossplane v2+):** Fetching a *namespaced* resource by
+name requires `namespace=` — without it, Crossplane cannot resolve the name and
+the lookup fails. Omit `namespace` for cluster-scoped resources. With
+`match_labels`, omitting `namespace` matches across **all** namespaces, while
+setting it scopes the match to that namespace. The `namespace` selector field
+exists only in the Crossplane v2 function protocol: v1.x servers (up to and
+including v1.20) silently ignore it, so on v1.x clusters namespaced resources
+can only be matched by labels (across all namespaces). Scripts that don't pass
+`namespace` send requests identical to previous versions on any server.
+
 **Example:**
 
 ```python
-# Request a ConfigMap by name
-require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
+# Request a ConfigMap by name from a namespace (Crossplane v2+)
+require_extra_resource("config", "v1", "ConfigMap",
+    match_name="my-config", namespace="my-namespace")
+
+# Cluster-scoped resources need no namespace (works on v1.x and v2)
+require_extra_resource("env", "apiextensions.crossplane.io/v1beta1",
+    "EnvironmentConfig", match_name="prod-env")
 
 # On next reconciliation, read the result with the accessor (NOT
 # get(extra_resources["config"], ...) -- that value is a list, so get() would
@@ -770,7 +786,7 @@ db_host = get_extra_resource("config", "data.DB_HOST", "localhost")
 ### require_extra_resources
 
 ```python
-require_extra_resources(name, apiVersion, kind, match_labels)
+require_extra_resources(name, apiVersion, kind, match_labels, namespace=None)
 ```
 
 Request multiple extra resources matching a label selector. Unlike
@@ -786,15 +802,20 @@ list of matched bodies, or `[]`).
 | `apiVersion` | string | required | API version to match. |
 | `kind` | string | required | Kind to match. |
 | `match_labels` | dict | required | Label selector (required). |
+| `namespace` | string \| None | None | Scope the label match to one namespace (Crossplane v2+). Omitted: matches across all namespaces. Ignored by v1.x servers. |
 
 **Returns:** None.
 
 **Example:**
 
 ```python
-# Request all Secrets with a specific label
+# Request all Secrets with a specific label (all namespaces)
 require_extra_resources("certs", "v1", "Secret",
     match_labels={"app": "my-app", "type": "tls"})
+
+# Scope the match to one namespace (Crossplane v2+)
+require_extra_resources("team-certs", "v1", "Secret",
+    match_labels={"type": "tls"}, namespace="team-a")
 
 # On next reconciliation, iterate the results. get_extra_resources returns the
 # list of matched bodies (or [] when none matched), so no existence guard needed.
@@ -1348,7 +1369,8 @@ reconciliations).
 
 ```python
 # Request an extra resource (first reconciliation)
-require_extra_resource("cluster", "v1", "ConfigMap", match_name="cluster-info")
+require_extra_resource("cluster", "v1", "ConfigMap",
+    match_name="cluster-info", namespace="kube-public")
 
 # Read a field from the extra resource (subsequent reconciliation)
 region = get_extra_resource("cluster", "spec.region", "us-west-2")

@@ -341,6 +341,25 @@ require_extra_resources("subnets", "ec2.aws.upbound.io/v1beta1", "Subnet",
     match_labels={"network": "main"})
 ```
 
+### Namespaced resources (Crossplane v2+)
+
+Both builtins accept a `namespace=` kwarg for namespaced resources. Fetching a
+namespaced resource *by name* requires it; with `match_labels` it scopes the
+match to one namespace (omitted, labels match across all namespaces):
+
+```python
+require_extra_resource("config", "v1", "ConfigMap",
+    match_name="app-config", namespace="team-a")
+require_extra_resources("team-secrets", "v1", "Secret",
+    match_labels={"type": "tls"}, namespace="team-a")
+```
+
+The namespace selector exists only in the Crossplane v2 function protocol.
+Crossplane v1.x (up to v1.20) ignores it, so on v1.x clusters namespaced
+resources can only be matched by labels across all namespaces. Omitting
+`namespace=` keeps requests identical to previous function versions on any
+server.
+
 ### Accessing extra resources
 
 Read required resources with the `get_extra_resource()` / `get_extra_resources()`
