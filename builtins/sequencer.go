@@ -142,14 +142,22 @@ func (s *Sequencer) Evaluate() SequencerResult {
 	}
 }
 
-// isKubernetesObject returns true if the resource is a Kubernetes Object
-// (apiVersion contains "kubernetes.crossplane.io/" and kind == "Object").
+// isKubernetesObject returns true if the resource is a provider-kubernetes
+// Object. Two API groups carry the kind: "kubernetes.crossplane.io/"
+// (cluster-scoped) and "kubernetes.m.crossplane.io/" (namespace-scoped, added
+// by provider-kubernetes for Crossplane v2). The kind stays "Object" in both,
+// so only the group check needs to accept the namespaced variant.
 func isKubernetesObject(s *structpb.Struct) bool {
 	if s == nil {
 		return false
 	}
 	av := s.GetFields()["apiVersion"]
-	if av == nil || !strings.Contains(av.GetStringValue(), "kubernetes.crossplane.io/") {
+	if av == nil {
+		return false
+	}
+	apiVersion := av.GetStringValue()
+	if !strings.Contains(apiVersion, "kubernetes.crossplane.io/") &&
+		!strings.Contains(apiVersion, "kubernetes.m.crossplane.io/") {
 		return false
 	}
 	k := s.GetFields()["kind"]

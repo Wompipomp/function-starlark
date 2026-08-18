@@ -50,7 +50,8 @@ for database").
 ### Field path readiness
 
 By default, `depends_on` checks whether the dependency exists in observed state.
-For resources wrapped in a `kubernetes.crossplane.io Object`, the outer Object
+For resources wrapped in a provider-kubernetes `Object` (`kubernetes.crossplane.io`,
+or the namespaced `kubernetes.m.crossplane.io` on Crossplane v2), the outer Object
 may appear in observed state before the inner resource's status fields are
 populated. Use tuple syntax to wait for a specific field:
 
