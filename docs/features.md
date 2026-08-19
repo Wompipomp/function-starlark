@@ -50,7 +50,8 @@ for database").
 ### Field path readiness
 
 By default, `depends_on` checks whether the dependency exists in observed state.
-For resources wrapped in a `kubernetes.crossplane.io Object`, the outer Object
+For resources wrapped in a provider-kubernetes `Object` (`kubernetes.crossplane.io`,
+or the namespaced `kubernetes.m.crossplane.io` on Crossplane v2), the outer Object
 may appear in observed state before the inner resource's status fields are
 populated. Use tuple syntax to wait for a specific field:
 
@@ -340,6 +341,25 @@ Request multiple resources by label selector:
 require_extra_resources("subnets", "ec2.aws.upbound.io/v1beta1", "Subnet",
     match_labels={"network": "main"})
 ```
+
+### Namespaced resources (Crossplane v2+)
+
+Both builtins accept a `namespace=` kwarg for namespaced resources. Fetching a
+namespaced resource *by name* requires it; with `match_labels` it scopes the
+match to one namespace (omitted, labels match across all namespaces):
+
+```python
+require_extra_resource("config", "v1", "ConfigMap",
+    match_name="app-config", namespace="team-a")
+require_extra_resources("team-secrets", "v1", "Secret",
+    match_labels={"type": "tls"}, namespace="team-a")
+```
+
+The namespace selector exists only in the Crossplane v2 function protocol.
+Crossplane v1.x (up to v1.20) ignores it, so on v1.x clusters namespaced
+resources can only be matched by labels across all namespaces. Omitting
+`namespace=` keeps requests identical to previous function versions on any
+server.
 
 ### Accessing extra resources
 

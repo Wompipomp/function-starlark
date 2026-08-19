@@ -242,7 +242,8 @@ Resource("route-table", {...}, depends_on=[ref1, ref2, ref3])
 
 ### Field path readiness (Object wrappers)
 
-When a resource is wrapped in a `kubernetes.crossplane.io Object`, the Object
+When a resource is wrapped in a provider-kubernetes `Object` (`kubernetes.crossplane.io`,
+or the namespaced `kubernetes.m.crossplane.io` on Crossplane v2), the Object
 appears in observed state before the inner resource has its status populated.
 Use tuple syntax to wait for a specific field instead of manual observed-state
 guards:

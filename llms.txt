@@ -199,16 +199,16 @@ bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
 db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
 
-### require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)
+### require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None, namespace=None)
 
-Request a single extra resource. Access via extra_resources[name] on next reconciliation.
+Request a single extra resource. Access via extra_resources[name] on next reconciliation. Namespaced resources need namespace= when matched by name (Crossplane v2+ only; v1.x servers ignore the field).
 ```python
-require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
+require_extra_resource("config", "v1", "ConfigMap", match_name="my-config", namespace="my-ns")
 ```
 
-### require_extra_resources(name, apiVersion, kind, match_labels)
+### require_extra_resources(name, apiVersion, kind, match_labels, namespace=None)
 
-Request multiple extra resources by label selector.
+Request multiple extra resources by label selector. namespace= scopes the match to one namespace (Crossplane v2+); omitted, labels match across all namespaces.
 ```python
 require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
 ```
@@ -764,7 +764,7 @@ Schema constructors return dict-compatible values that work transparently with R
 Starlark is Python-like but NOT Python:
 - No classes, exceptions, try/except, import, with, yield, async/await
 - `set` type IS available (the runtime enables sets via the `set()` builtin)
-- No **kwargs or *args
+- No `{**a, **b}` dict-literal unpacking (function defs DO support `*args`/`**kwargs`); no `**` power operator
 - Strings are immutable, no f-strings (use % or .format())
 - Variables assigned in if/for are visible in outer scope
 - Top-level code executes sequentially (no main function)

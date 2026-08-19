@@ -142,6 +142,12 @@ if kubectl get crd usages.protection.crossplane.io &>/dev/null; then
     RENDER_USAGE_V2=true
 fi
 
+# The same detection doubles as a general "Crossplane 2.x" gate. The
+# extra-resources namespace selector exists only in the v2 function protocol
+# (1.x servers strip the field and error on namespaced by-name lookups), so
+# the namespaced extra-resources sub-test only runs on 2.x.
+CROSSPLANE_V2="$RENDER_USAGE_V2"
+
 # Applies a composition file, rendering usageAPIVersion for the cluster.
 apply_composition() {
     if [ "$RENDER_USAGE_V2" = true ]; then
@@ -1444,6 +1450,85 @@ if [ "$extra_raw" = "true" ]; then
     pass "extra-resources: raw extra_resources global contains requirement key"
 else
     fail "extra-resources: extraRawHasXrd='$extra_raw' (expected true)"
+fi
+
+# --- Namespaced extra resources (Crossplane 2.x only) ---
+if [ "$CROSSPLANE_V2" = true ]; then
+    log "Creating namespaces + ConfigMaps for namespaced extra-resources test"
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-extra-ns-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-extra-ns-b
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-extra-cm
+  namespace: e2e-extra-ns-a
+  labels:
+    e2e-extra-cm: "true"
+data:
+  hello: from-ns-a
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e-extra-cm-b
+  namespace: e2e-extra-ns-b
+  labels:
+    e2e-extra-cm: "true"
+data:
+  hello: from-ns-b
+EOF
+
+    kubectl apply -f "$SCRIPT_DIR/composition-extra-resources-ns.yaml"
+    log "Creating XR for namespaced extra-resources test"
+    kubectl apply -f "$SCRIPT_DIR/xr-extra-resources-ns.yaml"
+
+    if wait_for_condition "xtest/test-extra-resources-ns" "Ready" 120; then
+        pass "extra-resources-ns: XR reached Ready"
+    else
+        fail "extra-resources-ns: XR did not reach Ready"
+        kubectl logs -n crossplane-system -l pkg.crossplane.io/function=function-starlark --tail=50 2>/dev/null || true
+    fi
+
+    log "Waiting for namespaced extra resources to be fulfilled..."
+    for i in $(seq 1 30); do
+        ns_ready=$(get_status_field "xtest/test-extra-resources-ns" "test.extraNsReady" 2>/dev/null || echo "")
+        if [ "$ns_ready" = "true" ]; then
+            break
+        fi
+        sleep 2
+    done
+
+    ns_by_name=$(get_status_field "xtest/test-extra-resources-ns" "test.extraNsByNameValue")
+    if [ "$ns_by_name" = "from-ns-a" ]; then
+        pass "extra-resources-ns: by-name lookup with namespace= fetched namespaced ConfigMap"
+    else
+        fail "extra-resources-ns: extraNsByNameValue='$ns_by_name' (expected from-ns-a)"
+    fi
+
+    ns_scoped=$(get_status_field "xtest/test-extra-resources-ns" "test.extraNsScopedNamesSorted")
+    if [ "$ns_scoped" = "e2e-extra-cm" ]; then
+        pass "extra-resources-ns: label match with namespace= scoped to one namespace"
+    else
+        fail "extra-resources-ns: extraNsScopedNamesSorted='$ns_scoped' (expected e2e-extra-cm)"
+    fi
+
+    ns_all=$(get_status_field "xtest/test-extra-resources-ns" "test.extraNsAllNamesSorted")
+    if [ "$ns_all" = "e2e-extra-cm,e2e-extra-cm-b" ]; then
+        pass "extra-resources-ns: label match without namespace= matched across all namespaces"
+    else
+        fail "extra-resources-ns: extraNsAllNamesSorted='$ns_all' (expected e2e-extra-cm,e2e-extra-cm-b)"
+    fi
+else
+    log "SKIP: Crossplane 1.x cluster - namespace selector not in v1 protocol (namespaced extra resources unavailable)"
 fi
 
 # ============================================================
