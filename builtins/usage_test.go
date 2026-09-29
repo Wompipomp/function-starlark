@@ -39,6 +39,58 @@ func TestUsageName(t *testing.T) {
 	})
 }
 
+func TestResourceNameLabelValue(t *testing.T) {
+	t.Run("short name unchanged", func(t *testing.T) {
+		name := "env-app-core" // <=63 bytes
+		if got := ResourceNameLabelValue(name); got != name {
+			t.Errorf("ResourceNameLabelValue(%q) = %q, want unchanged", name, got)
+		}
+	})
+
+	t.Run("exactly 63 bytes unchanged", func(t *testing.T) {
+		name := strings.Repeat("a", 63)
+		if got := ResourceNameLabelValue(name); got != name {
+			t.Errorf("63-byte name should be unchanged, got %q (len %d)", got, len(got))
+		}
+	})
+
+	t.Run("over-limit name is hashed and label-safe", func(t *testing.T) {
+		// A composition-resource-name of 68 bytes: legal as a name, too long
+		// as a label value.
+		name := "env-a1b2c3d4-sample-database-services-admin-2026-03-19-08-x7k2q9-core"
+		if len(name) <= maxLabelValueBytes {
+			t.Fatalf("test precondition: name should exceed %d bytes", maxLabelValueBytes)
+		}
+		got := ResourceNameLabelValue(name)
+		if len(got) > maxLabelValueBytes {
+			t.Errorf("hashed value %q is %d bytes, must be <= %d", got, len(got), maxLabelValueBytes)
+		}
+		if strings.HasPrefix(got, "-") || strings.HasSuffix(got, "-") {
+			t.Errorf("hashed value %q must be a valid label (no leading/trailing dash)", got)
+		}
+		// Deterministic: same input -> same output (resource label and Usage
+		// selector must agree).
+		if again := ResourceNameLabelValue(name); again != got {
+			t.Errorf("not deterministic: %q vs %q", got, again)
+		}
+		// Distinct over-limit names hash to distinct values.
+		other := "env-a1b2c3d4-sample-database-services-users-2026-03-19-08-x7k2q9-core"
+		if ResourceNameLabelValue(other) == got {
+			t.Errorf("distinct names collided on label value %q", got)
+		}
+	})
+
+	t.Run("usage selector uses the label-safe value", func(t *testing.T) {
+		long := strings.Repeat("x", 70)
+		res := buildUsageResource(long, "db", UsageAPIVersionV2, "ClusterUsage", "", "", nil)
+		got := usageSelector(res, "by").GetFields()["matchLabels"].GetStructValue().
+			GetFields()[ResourceNameLabel].GetStringValue()
+		if got != ResourceNameLabelValue(long) {
+			t.Errorf("by selector label = %q, want %q", got, ResourceNameLabelValue(long))
+		}
+	})
+}
+
 func TestBuildUsageResource(t *testing.T) {
 	typeInfos := map[string]resourceTypeInfo{
 		"app": {APIVersion: "nop.crossplane.io/v1alpha1", Kind: "NopResource"},
