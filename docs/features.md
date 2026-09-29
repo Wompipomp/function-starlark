@@ -91,11 +91,18 @@ controls which Usage API version is used. Default is `"v2"`
 (`protection.crossplane.io/v1beta1`, Crossplane 2.x). Set to `"v1"` for
 Crossplane 1.x (`apiextensions.crossplane.io/v1beta1`).
 
-On the v2 API the kind is scope-aware: namespaced composites get the
-namespaced `Usage` kind, while cluster-scoped composites (e.g. legacy
-`apiextensions.crossplane.io/v1` XRs) get the cluster-scoped `ClusterUsage`
-kind — a namespaced Usage without a namespace cannot be composed by a
-cluster-scoped XR. The v1 `Usage` is always cluster-scoped.
+On the v2 API each `depends_on` pair chooses its own kind from the effective
+namespaces of the two resources it links. A resource's effective namespace is
+its `metadata.namespace`, falling back to the composite's namespace (Crossplane
+places everything composed by a namespaced XR in the XR's namespace). If either
+side is namespaced, the pair becomes a namespaced `Usage` in the dependent's
+namespace (or the dependency's, when the dependent is cluster-scoped); a
+dependency in yet another namespace is addressed via
+`spec.of.resourceSelector.namespace`. If both sides are cluster-scoped, the pair
+becomes a `ClusterUsage`. So a namespaced XR always gets `Usage`, a legacy
+cluster-scoped XR composing only cluster-scoped resources gets `ClusterUsage`,
+and a `Cluster`-scoped XR mixing both gets a mix. The v1 `Usage` is always
+cluster-scoped.
 
 A single summary Warning event is emitted when Usage resources are generated,
 reminding that `compositeDeletePolicy: Foreground` is needed on the XRD for

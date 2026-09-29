@@ -308,8 +308,8 @@ func TestE2EExtraResourcesNamespacedScript(t *testing.T) {
 	if all == nil {
 		t.Fatalf("requirement ns_cms_all missing (got %v)", reqs)
 	}
-	if all.Namespace != nil {
-		t.Errorf("ns_cms_all namespace = %q, want unset", *all.Namespace)
+	if ns := all.GetNamespace(); ns != "" {
+		t.Errorf("ns_cms_all namespace = %q, want unset", ns)
 	}
 
 	// Iteration 2: Crossplane fulfilled the requirements (scoped selectors
@@ -398,8 +398,9 @@ func TestE2EUsageV2Script(t *testing.T) {
 		Observed: observed,
 	})
 
-	// The e2e XR is cluster-scoped (legacy), so the v2 API must produce the
-	// cluster-scoped ClusterUsage kind (the v2 Usage kind is namespaced).
+	// The e2e XR is cluster-scoped and neither composed resource sets
+	// metadata.namespace, so the v2 API must produce the cluster-scoped
+	// ClusterUsage kind (the v2 Usage kind is namespaced).
 	foundV2Usage := false
 	for _, r := range rsp.GetDesired().GetResources() {
 		m := r.GetResource().AsMap()
@@ -411,7 +412,9 @@ func TestE2EUsageV2Script(t *testing.T) {
 		t.Errorf("no protection.crossplane.io/v1beta1 ClusterUsage in desired state (usageAPIVersion v2, cluster-scoped composite)")
 	}
 
-	// A namespaced composite must produce the namespaced Usage kind instead.
+	// A namespaced composite places every composed resource in its own
+	// namespace and cannot compose cluster-scoped resources, so the same
+	// script must produce a namespaced Usage in the XR namespace instead.
 	observedNS := &fnv1.State{
 		Composite: &fnv1.Resource{
 			Resource: resource.MustStructJSON(`{"apiVersion":"e2e.fn-starlark.io/v1","kind":"XTest","metadata":{"name":"smoke","namespace":"default"},"spec":{}}`),
@@ -427,6 +430,9 @@ func TestE2EUsageV2Script(t *testing.T) {
 		m := r.GetResource().AsMap()
 		if m["kind"] == "Usage" && m["apiVersion"] == "protection.crossplane.io/v1beta1" {
 			foundNSUsage = true
+			if ns := m["metadata"].(map[string]any)["namespace"]; ns != "default" {
+				t.Errorf("namespaced Usage metadata.namespace = %v, want default", ns)
+			}
 		}
 	}
 	if !foundNSUsage {

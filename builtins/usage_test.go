@@ -45,35 +45,87 @@ func TestBuildUsageResource(t *testing.T) {
 		"db":  {APIVersion: "nop.crossplane.io/v1alpha1", Kind: "NopResource"},
 	}
 	t.Run("v1alpha1 API version", func(t *testing.T) {
-		res := buildUsageResource("app", "db", UsageAPIVersionV1, "Usage", typeInfos)
+		res := buildUsageResource("app", "db", UsageAPIVersionV1, "Usage", "", "", typeInfos)
 		assertUsageResource(t, res, "app", "db", UsageAPIVersionV1, "Usage")
+		if _, ok := res.GetFields()["metadata"]; ok {
+			t.Error("cluster-scoped Usage must not carry metadata.namespace")
+		}
 	})
 
 	t.Run("v1beta1 API version", func(t *testing.T) {
-		res := buildUsageResource("app", "db", UsageAPIVersionV2, "ClusterUsage", typeInfos)
+		res := buildUsageResource("app", "db", UsageAPIVersionV2, "ClusterUsage", "", "", typeInfos)
 		assertUsageResource(t, res, "app", "db", UsageAPIVersionV2, "ClusterUsage")
 	})
+
+	t.Run("namespaced usage carries namespace", func(t *testing.T) {
+		res := buildUsageResource("app", "db", UsageAPIVersionV2, "Usage", "team-a", "", typeInfos)
+		assertUsageResource(t, res, "app", "db", UsageAPIVersionV2, "Usage")
+		got := res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
+		if got != "team-a" {
+			t.Errorf("metadata.namespace = %q, want team-a", got)
+		}
+		ofSel := usageSelector(res, "of")
+		if _, ok := ofSel.GetFields()["namespace"]; ok {
+			t.Error("of.resourceSelector.namespace must be omitted when the dependency is in the Usage namespace")
+		}
+	})
+
+	t.Run("cross-namespace dependency sets of selector namespace", func(t *testing.T) {
+		res := buildUsageResource("app", "db", UsageAPIVersionV2, "Usage", "team-a", "team-b", typeInfos)
+		got := usageSelector(res, "of").GetFields()["namespace"].GetStringValue()
+		if got != "team-b" {
+			t.Errorf("of.resourceSelector.namespace = %q, want team-b", got)
+		}
+		if _, ok := usageSelector(res, "by").GetFields()["namespace"]; ok {
+			t.Error("by.resourceSelector must never carry a namespace")
+		}
+	})
+}
+
+// usageSelector returns spec.<side>.resourceSelector of a Usage struct.
+func usageSelector(res *structpb.Struct, side string) *structpb.Struct {
+	return res.GetFields()["spec"].GetStructValue().
+		GetFields()[side].GetStructValue().
+		GetFields()["resourceSelector"].GetStructValue()
 }
 
 func TestUsageKind(t *testing.T) {
 	tests := []struct {
-		name                string
-		apiVersion          string
-		compositeNamespaced bool
-		want                string
+		name       string
+		apiVersion string
+		namespaced bool
+		want       string
 	}{
-		// The v2 Usage kind is namespaced; cluster-scoped composites
-		// (legacy XRs) must compose the cluster-scoped ClusterUsage.
-		{"v2 cluster-scoped composite", UsageAPIVersionV2, false, "ClusterUsage"},
-		{"v2 namespaced composite", UsageAPIVersionV2, true, "Usage"},
+		// The v2 Usage kind is namespaced; a pair of cluster-scoped
+		// resources must use the cluster-scoped ClusterUsage.
+		{"v2 both cluster-scoped", UsageAPIVersionV2, false, "ClusterUsage"},
+		{"v2 a namespaced side", UsageAPIVersionV2, true, "Usage"},
 		// The v1 Usage is always cluster-scoped.
-		{"v1 cluster-scoped composite", UsageAPIVersionV1, false, "Usage"},
-		{"v1 namespaced composite", UsageAPIVersionV1, true, "Usage"},
+		{"v1 both cluster-scoped", UsageAPIVersionV1, false, "Usage"},
+		{"v1 a namespaced side", UsageAPIVersionV1, true, "Usage"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := usageKind(tt.apiVersion, tt.compositeNamespaced); got != tt.want {
-				t.Errorf("usageKind(%q, %v) = %q, want %q", tt.apiVersion, tt.compositeNamespaced, got, tt.want)
+			if got := usageKind(tt.apiVersion, tt.namespaced); got != tt.want {
+				t.Errorf("usageKind(%q, %v) = %q, want %q", tt.apiVersion, tt.namespaced, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUsageNamespace(t *testing.T) {
+	tests := []struct {
+		name, dependentNS, dependencyNS, want string
+	}{
+		{"dependent wins", "env-by", "env-of", "env-by"},
+		{"dependency when dependent is cluster-scoped", "", "env-of", "env-of"},
+		{"dependent when dependency is cluster-scoped", "env-by", "", "env-by"},
+		{"both cluster-scoped", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := usageNamespace(tt.dependentNS, tt.dependencyNS); got != tt.want {
+				t.Errorf("usageNamespace(%q, %q) = %q, want %q", tt.dependentNS, tt.dependencyNS, got, tt.want)
 			}
 		})
 	}
@@ -85,7 +137,7 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "cache", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, false)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, "")
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
@@ -105,14 +157,14 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "A", Dependency: "B", IsRef: true},
 			{Dependent: "B", Dependency: "C", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, false)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, "")
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
 	})
 
 	t.Run("empty dependency list", func(t *testing.T) {
-		result := BuildUsageResources(nil, UsageAPIVersionV1, nil, false)
+		result := BuildUsageResources(nil, UsageAPIVersionV1, nil, "")
 		if len(result) != 0 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 0", len(result))
 		}
@@ -123,10 +175,114 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "db", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, false)
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, "")
 		// Same dependent+dependency hashes to the same name, so map deduplicates.
 		if len(result) != 1 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 1 (deduplicated)", len(result))
+		}
+	})
+
+	// mkRes builds a minimal composed resource body; ns == "" leaves
+	// metadata.namespace unset (cluster-scoped, or inherited from the XR).
+	mkRes := func(kind, ns string) CollectedResource {
+		fields := map[string]*structpb.Value{
+			"apiVersion": structpb.NewStringValue("example.org/v1"),
+			"kind":       structpb.NewStringValue(kind),
+		}
+		if ns != "" {
+			fields["metadata"] = structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
+				"namespace": structpb.NewStringValue(ns),
+			}})
+		}
+		return CollectedResource{Body: &structpb.Struct{Fields: fields}}
+	}
+	kindOf := func(res *structpb.Struct) string { return res.GetFields()["kind"].GetStringValue() }
+	nsOf := func(res *structpb.Struct) string {
+		return res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
+	}
+
+	t.Run("v2 cluster composite: kind follows resource namespaces per pair", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "vpc", Dependency: "igw", IsRef: true},
+			{Dependent: "vpc", Dependency: "collector", IsRef: true},
+			{Dependent: "collector", Dependency: "vpc", IsRef: true},
+		}
+		resources := map[string]CollectedResource{
+			"vpc":       mkRes("VPC", ""),
+			"igw":       mkRes("InternetGateway", ""),
+			"collector": mkRes("CollectorRequest", "env-a"),
+		}
+		result := BuildUsageResources(deps, UsageAPIVersionV2, resources, "")
+
+		cluster := result[usageName("vpc", "igw")]
+		if kindOf(cluster) != "ClusterUsage" {
+			t.Errorf("cluster/cluster pair kind = %q, want ClusterUsage", kindOf(cluster))
+		}
+		if _, ok := cluster.GetFields()["metadata"]; ok {
+			t.Error("ClusterUsage must not carry metadata.namespace")
+		}
+
+		// Cluster-scoped dependent, namespaced dependency: Usage lives in
+		// the dependency's namespace, no selector namespace needed.
+		byCluster := result[usageName("vpc", "collector")]
+		if kindOf(byCluster) != "Usage" || nsOf(byCluster) != "env-a" {
+			t.Errorf("cluster-by/namespaced-of pair = %s in %q, want Usage in env-a", kindOf(byCluster), nsOf(byCluster))
+		}
+		if _, ok := usageSelector(byCluster, "of").GetFields()["namespace"]; ok {
+			t.Error("of selector namespace must be omitted when it equals the Usage namespace")
+		}
+
+		// Namespaced dependent, cluster-scoped dependency: Usage lives in
+		// the dependent's namespace.
+		byNS := result[usageName("collector", "vpc")]
+		if kindOf(byNS) != "Usage" || nsOf(byNS) != "env-a" {
+			t.Errorf("namespaced-by/cluster-of pair = %s in %q, want Usage in env-a", kindOf(byNS), nsOf(byNS))
+		}
+	})
+
+	t.Run("v2 cluster composite: cross-namespace pair sets of selector namespace", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		resources := map[string]CollectedResource{
+			"app": mkRes("App", "team-a"),
+			"db":  mkRes("Database", "team-b"),
+		}
+		res := BuildUsageResources(deps, UsageAPIVersionV2, resources, "")[usageName("app", "db")]
+		if kindOf(res) != "Usage" || nsOf(res) != "team-a" {
+			t.Fatalf("got %s in %q, want Usage in the dependent's namespace team-a", kindOf(res), nsOf(res))
+		}
+		if got := usageSelector(res, "of").GetFields()["namespace"].GetStringValue(); got != "team-b" {
+			t.Errorf("of.resourceSelector.namespace = %q, want team-b", got)
+		}
+	})
+
+	t.Run("v2 namespaced composite: resources inherit the XR namespace", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		resources := map[string]CollectedResource{
+			"app": mkRes("App", ""),
+			"db":  mkRes("Database", ""),
+		}
+		res := BuildUsageResources(deps, UsageAPIVersionV2, resources, "default")[usageName("app", "db")]
+		// A namespaced XR cannot compose a cluster-scoped ClusterUsage.
+		if kindOf(res) != "Usage" || nsOf(res) != "default" {
+			t.Errorf("got %s in %q, want Usage in default", kindOf(res), nsOf(res))
+		}
+	})
+
+	t.Run("v1 ignores namespaces", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		resources := map[string]CollectedResource{
+			"app": mkRes("App", "team-a"),
+			"db":  mkRes("Database", "team-b"),
+		}
+		res := BuildUsageResources(deps, UsageAPIVersionV1, resources, "default")[usageName("app", "db")]
+		if kindOf(res) != "Usage" {
+			t.Errorf("kind = %q, want Usage", kindOf(res))
+		}
+		if _, ok := res.GetFields()["metadata"]; ok {
+			t.Error("v1 Usage must not carry metadata.namespace")
+		}
+		if _, ok := usageSelector(res, "of").GetFields()["namespace"]; ok {
+			t.Error("v1 Usage selector must not carry a namespace")
 		}
 	})
 }
@@ -400,9 +556,16 @@ func assertUsageResource(t *testing.T, res *structpb.Struct, dependent, dependen
 		t.Errorf("kind = %q, want %q", got, kind)
 	}
 
-	// metadata should be absent (Crossplane auto-generates the name)
+	// metadata.name must never be set (Crossplane generates it). Only a
+	// namespaced v2 Usage carries metadata at all, and then only a namespace.
 	if meta, ok := fields["metadata"]; ok {
-		t.Errorf("expected no metadata on Usage body, got %v", meta)
+		mf := meta.GetStructValue().GetFields()
+		if _, hasName := mf["name"]; hasName {
+			t.Errorf("expected no metadata.name on Usage body, got %v", meta)
+		}
+		if kind != "Usage" || apiVersion != UsageAPIVersionV2 {
+			t.Errorf("expected no metadata on cluster-scoped %s body, got %v", kind, meta)
+		}
 	}
 
 	// spec

@@ -2929,9 +2929,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "protection.crossplane.io/v1beta1" {
 		t.Errorf("Usage apiVersion = %q, want protection.crossplane.io/v1beta1", got)
 	}
-	// Cluster-scoped composite + v2 API -> the cluster-scoped ClusterUsage
-	// kind (the v2 Usage kind is namespaced and cannot be composed by a
-	// cluster-scoped XR).
+	// Cluster-scoped composite, neither composed resource sets
+	// metadata.namespace, v2 API -> the cluster-scoped ClusterUsage kind.
 	if got := body.GetFields()["kind"].GetStringValue(); got != "ClusterUsage" {
 		t.Errorf("Usage kind = %q, want ClusterUsage", got)
 	}
