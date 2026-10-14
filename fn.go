@@ -322,14 +322,15 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 				usageAPIOverride = os.Getenv("STARLARK_USAGE_API_VERSION")
 			}
 			apiVersion := builtins.ResolveUsageAPIVersion(usageAPIOverride)
-			// Each depends_on pair picks Usage or ClusterUsage from the
-			// effective namespaces of the two resources it links. Resources
-			// without an explicit metadata.namespace inherit the composite's
-			// namespace, which is what Crossplane does for namespaced XRs.
-			compositeNamespace := req.GetObserved().GetComposite().GetResource().
-				GetFields()["metadata"].GetStructValue().
-				GetFields()["namespace"].GetStringValue()
-			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources(), compositeNamespace)
+			observedResources := make(map[string]*structpb.Struct)
+			for name, r := range req.GetObserved().GetResources() {
+				observedResources[name] = r.GetResource()
+			}
+			// A Usage is emitted only once both sides of a pair are observed
+			// and ready, so Usage vs ClusterUsage can be decided from the
+			// namespace of the live objects (Crossplane injects it after
+			// apply); desired bodies often omit it.
+			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources(), observedResources)
 
 			// Ensure Desired and Resources maps exist.
 			if rsp.Desired == nil {
@@ -347,12 +348,6 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			}
 
 			// --- Creation Sequencing ---
-			// Build observed resource map for field path evaluation.
-			observedResources := make(map[string]*structpb.Struct)
-			for name, r := range req.GetObserved().GetResources() {
-				observedResources[name] = r.GetResource()
-			}
-
 			// Determine sequencing TTL.
 			seqTTLDuration := 10 * time.Second // default 10s
 			if in.Spec.SequencingTTL != "" {

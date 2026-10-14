@@ -308,8 +308,8 @@ func TestE2EExtraResourcesNamespacedScript(t *testing.T) {
 	if all == nil {
 		t.Fatalf("requirement ns_cms_all missing (got %v)", reqs)
 	}
-	if ns := all.GetNamespace(); ns != "" {
-		t.Errorf("ns_cms_all namespace = %q, want unset", ns)
+	if all.Namespace != nil {
+		t.Errorf("ns_cms_all namespace = %q, want unset", *all.Namespace)
 	}
 
 	// Iteration 2: Crossplane fulfilled the requirements (scoped selectors
@@ -392,15 +392,20 @@ func TestE2EUsageV2Script(t *testing.T) {
 			"status":{"conditions":[
 				{"type":"Ready","status":"True"},
 				{"type":"Synced","status":"True"}]}}`)},
+		"usage-dependent": {Resource: resource.MustStructJSON(`{
+			"apiVersion":"nop.crossplane.io/v1alpha1","kind":"NopResource",
+			"metadata":{"name":"usage-dependent"},
+			"status":{"conditions":[
+				{"type":"Ready","status":"True"},
+				{"type":"Synced","status":"True"}]}}`)},
 	}
 	rsp := runE2EStep(t, f, &fnv1.RunFunctionRequest{
 		Input:    steps["test-usage-v2"],
 		Observed: observed,
 	})
 
-	// The e2e XR is cluster-scoped and neither composed resource sets
-	// metadata.namespace, so the v2 API must produce the cluster-scoped
-	// ClusterUsage kind (the v2 Usage kind is namespaced).
+	// Neither observed resource has metadata.namespace, so the v2 API
+	// produces ClusterUsage.
 	foundV2Usage := false
 	for _, r := range rsp.GetDesired().GetResources() {
 		m := r.GetResource().AsMap()
@@ -409,33 +414,47 @@ func TestE2EUsageV2Script(t *testing.T) {
 		}
 	}
 	if !foundV2Usage {
-		t.Errorf("no protection.crossplane.io/v1beta1 ClusterUsage in desired state (usageAPIVersion v2, cluster-scoped composite)")
+		t.Errorf("no protection.crossplane.io/v1beta1 ClusterUsage in desired state (usageAPIVersion v2, cluster-scoped observed resources)")
 	}
 
-	// A namespaced composite places every composed resource in its own
-	// namespace and cannot compose cluster-scoped resources, so the same
-	// script must produce a namespaced Usage in the XR namespace instead.
+	// The observed namespace, not the composite, selects the kind: a
+	// namespaced XR has its namespace injected into every composed resource
+	// by Crossplane, so both observed sides carry it and the pair must
+	// become a namespaced Usage in that namespace.
 	observedNS := &fnv1.State{
 		Composite: &fnv1.Resource{
 			Resource: resource.MustStructJSON(`{"apiVersion":"e2e.fn-starlark.io/v1","kind":"XTest","metadata":{"name":"smoke","namespace":"default"},"spec":{}}`),
 		},
-		Resources: observed.Resources,
+		Resources: map[string]*fnv1.Resource{
+			"usage-base": {Resource: resource.MustStructJSON(`{
+				"apiVersion":"nop.crossplane.io/v1alpha1","kind":"NopResource",
+				"metadata":{"name":"usage-base","namespace":"default"},
+				"status":{"conditions":[
+					{"type":"Ready","status":"True"},
+					{"type":"Synced","status":"True"}]}}`)},
+			"usage-dependent": {Resource: resource.MustStructJSON(`{
+				"apiVersion":"nop.crossplane.io/v1alpha1","kind":"NopResource",
+				"metadata":{"name":"usage-dependent","namespace":"default"},
+				"status":{"conditions":[
+					{"type":"Ready","status":"True"},
+					{"type":"Synced","status":"True"}]}}`)},
+		},
 	}
 	rspNS := runE2EStep(t, f, &fnv1.RunFunctionRequest{
 		Input:    steps["test-usage-v2"],
 		Observed: observedNS,
 	})
-	foundNSUsage := false
+	foundNamespacedUsage := false
 	for _, r := range rspNS.GetDesired().GetResources() {
 		m := r.GetResource().AsMap()
 		if m["kind"] == "Usage" && m["apiVersion"] == "protection.crossplane.io/v1beta1" {
-			foundNSUsage = true
+			foundNamespacedUsage = true
 			if ns := m["metadata"].(map[string]any)["namespace"]; ns != "default" {
 				t.Errorf("namespaced Usage metadata.namespace = %v, want default", ns)
 			}
 		}
 	}
-	if !foundNSUsage {
-		t.Errorf("no namespaced Usage in desired state (usageAPIVersion v2, namespaced composite)")
+	if !foundNamespacedUsage {
+		t.Errorf("no namespaced Usage in desired state (observed resources have metadata.namespace)")
 	}
 }

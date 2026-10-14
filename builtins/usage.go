@@ -52,8 +52,11 @@ func ResourceNameLabelValue(name string) string {
 	return prefix + "-" + fmt.Sprintf("%x", h[:8])
 }
 
-// resourceTypeInfo holds the apiVersion, kind, and effective namespace of a
-// composed resource. An empty Namespace means the resource is cluster-scoped.
+// resourceTypeInfo holds the apiVersion, kind, and namespace of a composed
+// resource. Namespace is taken from the observed body: Crossplane injects the
+// composite's namespace into namespaced composed resources at apply time, so
+// the observed object carries it even when the desired body omitted it. An
+// empty Namespace means the resource is cluster-scoped.
 type resourceTypeInfo struct {
 	APIVersion string
 	Kind       string
@@ -136,42 +139,80 @@ func buildUsageResource(dependent, dependency, apiVersion, kind, namespace, ofNa
 	return &structpb.Struct{Fields: fields}
 }
 
-// BuildUsageResources generates Usage resources for all dependency pairs.
-// resources is the map of collected resources (name -> CollectedResource) used
-// to extract apiVersion/kind and namespace for Usage selectors.
-// compositeNamespace is the observed composite's namespace ("" for
-// cluster-scoped composites). A composed resource's effective namespace is its
-// own metadata.namespace, falling back to compositeNamespace: Crossplane
-// places every resource composed by a namespaced XR in the XR's namespace and
-// refuses cluster-scoped ones, so a namespaced composite can never compose a
-// ClusterUsage. Cluster-scoped composites may compose resources in any
-// namespace, so each pair is decided on its own. On the v2 API a pair with a
+// typeInfoFromBody extracts apiVersion, kind, and namespace from a resource
+// body. A nil body yields a zero value.
+func typeInfoFromBody(body *structpb.Struct) resourceTypeInfo {
+	if body == nil {
+		return resourceTypeInfo{}
+	}
+	return resourceTypeInfo{
+		APIVersion: body.GetFields()["apiVersion"].GetStringValue(),
+		Kind:       body.GetFields()["kind"].GetStringValue(),
+		Namespace:  body.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue(),
+	}
+}
+
+// mergeTypeInfo fills an empty apiVersion/kind from fallback (the desired
+// body) without touching Namespace, which must come from observed state.
+func mergeTypeInfo(primary, fallback resourceTypeInfo) resourceTypeInfo {
+	if primary.APIVersion == "" {
+		primary.APIVersion = fallback.APIVersion
+	}
+	if primary.Kind == "" {
+		primary.Kind = fallback.Kind
+	}
+	return primary
+}
+
+// usagePairReady is true when both sides of a depends_on pair are observed
+// and ready, and any field-path gate on the dependency is truthy.
+func usagePairReady(d DependencyPair, observed map[string]*structpb.Struct) bool {
+	by := observed[d.Dependent]
+	of := observed[d.Dependency]
+	if !isObservedReady(by) || !isObservedReady(of) {
+		return false
+	}
+	if d.FieldPath != "" && !isFieldReady(of, d.FieldPath) {
+		return false
+	}
+	return true
+}
+
+// BuildUsageResources generates Usage resources for the depends_on pairs
+// whose dependent and dependency are both observed and ready. resources is
+// the map of collected resources (name -> CollectedResource) used as a
+// fallback for apiVersion/kind; observed holds the observed composed resource
+// bodies keyed by composition resource name.
+//
+// Namespace, and therefore Usage vs ClusterUsage on the v2 API, is read from
+// the observed bodies only: Crossplane injects a namespaced XR's namespace
+// into its composed resources at apply time, so a desired body that simply
+// omits metadata.namespace must not be mistaken for a cluster-scoped
+// resource. Pairs that are not yet observed and ready are left out and
+// picked up on a later reconciliation. On the v2 API a pair with a
 // namespaced side becomes a Usage in the dependent's namespace (or the
-// dependency's when the dependent is cluster-scoped); a pair with two
-// cluster-scoped sides becomes a ClusterUsage. Returns a map keyed by Usage
-// resource name.
-func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map[string]CollectedResource, compositeNamespace string) map[string]*structpb.Struct {
-	// Build type info map from collected resources.
-	typeInfos := make(map[string]resourceTypeInfo, len(resources))
+// dependency's when the dependent is cluster-scoped), with
+// spec.of.resourceSelector.namespace set when the dependency lives in yet
+// another namespace; a pair with two cluster-scoped sides becomes a
+// ClusterUsage. Returns a map keyed by Usage resource name.
+func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map[string]CollectedResource, observed map[string]*structpb.Struct) map[string]*structpb.Struct {
+	desiredInfo := make(map[string]resourceTypeInfo, len(resources))
 	for name, cr := range resources {
-		if cr.Body == nil {
-			continue
-		}
-		ns := cr.Body.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
-		if ns == "" {
-			ns = compositeNamespace
-		}
-		typeInfos[name] = resourceTypeInfo{
-			APIVersion: cr.Body.GetFields()["apiVersion"].GetStringValue(),
-			Kind:       cr.Body.GetFields()["kind"].GetStringValue(),
-			Namespace:  ns,
-		}
+		desiredInfo[name] = typeInfoFromBody(cr.Body)
 	}
 
-	result := make(map[string]*structpb.Struct, len(deps))
+	result := make(map[string]*structpb.Struct)
 	for _, d := range deps {
-		byNS := typeInfos[d.Dependent].Namespace
-		ofNS := typeInfos[d.Dependency].Namespace
+		if !usagePairReady(d, observed) {
+			continue
+		}
+		byInfo := mergeTypeInfo(typeInfoFromBody(observed[d.Dependent]), desiredInfo[d.Dependent])
+		ofInfo := mergeTypeInfo(typeInfoFromBody(observed[d.Dependency]), desiredInfo[d.Dependency])
+		typeInfos := map[string]resourceTypeInfo{
+			d.Dependent:  byInfo,
+			d.Dependency: ofInfo,
+		}
+		byNS, ofNS := byInfo.Namespace, ofInfo.Namespace
 		kind := usageKind(apiVersion, byNS != "" || ofNS != "")
 		namespace, ofSelectorNS := "", ""
 		if apiVersion == UsageAPIVersionV2 && kind == "Usage" {

@@ -183,24 +183,68 @@ func TestUsageNamespace(t *testing.T) {
 	}
 }
 
+// readyObserved builds an observed body with Ready=True and Synced=True.
+// ns == "" leaves metadata.namespace unset (cluster-scoped).
+func readyObserved(apiVersion, kind, ns string) *structpb.Struct {
+	meta := map[string]any{"name": strings.ToLower(kind)}
+	if ns != "" {
+		meta["namespace"] = ns
+	}
+	s, _ := structpb.NewStruct(map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata":   meta,
+		"status": map[string]any{
+			"conditions": []any{
+				map[string]any{"type": "Ready", "status": "True"},
+				map[string]any{"type": "Synced", "status": "True"},
+			},
+		},
+	})
+	return s
+}
+
+// notReadyObserved builds an observed body with Ready=False.
+func notReadyObserved(apiVersion, kind string) *structpb.Struct {
+	s, _ := structpb.NewStruct(map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"status": map[string]any{
+			"conditions": []any{
+				map[string]any{"type": "Ready", "status": "False"},
+				map[string]any{"type": "Synced", "status": "True"},
+			},
+		},
+	})
+	return s
+}
+
 func TestBuildUsageResources(t *testing.T) {
+	ready := map[string]*structpb.Struct{
+		"app":   readyObserved("v1", "App", ""),
+		"db":    readyObserved("v1", "Database", ""),
+		"cache": readyObserved("v1", "Cache", ""),
+		"A":     readyObserved("v1", "A", ""),
+		"B":     readyObserved("v1", "B", ""),
+		"C":     readyObserved("v1", "C", ""),
+	}
+
 	t.Run("two dependency pairs", func(t *testing.T) {
 		deps := []DependencyPair{
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "cache", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, "")
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, ready)
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
-		// Check both usage names exist as keys
-		name1 := usageName("app", "db")
-		name2 := usageName("app", "cache")
-		if _, ok := result[name1]; !ok {
-			t.Errorf("missing key %q", name1)
-		}
-		if _, ok := result[name2]; !ok {
-			t.Errorf("missing key %q", name2)
+		for name, res := range result {
+			if !strings.HasPrefix(name, "usage-") {
+				t.Errorf("resource name %q does not start with usage-", name)
+			}
+			if got := res.GetFields()["apiVersion"].GetStringValue(); got != UsageAPIVersionV1 {
+				t.Errorf("apiVersion = %q, want %q", got, UsageAPIVersionV1)
+			}
 		}
 	})
 
@@ -209,14 +253,14 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "A", Dependency: "B", IsRef: true},
 			{Dependent: "B", Dependency: "C", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, "")
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, ready)
 		if len(result) != 2 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 2", len(result))
 		}
 	})
 
 	t.Run("empty dependency list", func(t *testing.T) {
-		result := BuildUsageResources(nil, UsageAPIVersionV1, nil, "")
+		result := BuildUsageResources(nil, UsageAPIVersionV1, nil, nil)
 		if len(result) != 0 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 0", len(result))
 		}
@@ -227,46 +271,83 @@ func TestBuildUsageResources(t *testing.T) {
 			{Dependent: "app", Dependency: "db", IsRef: true},
 			{Dependent: "app", Dependency: "db", IsRef: true},
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, "")
+		result := BuildUsageResources(deps, UsageAPIVersionV1, nil, ready)
 		// Same dependent+dependency hashes to the same name, so map deduplicates.
 		if len(result) != 1 {
 			t.Fatalf("BuildUsageResources returned %d resources, want 1 (deduplicated)", len(result))
 		}
 	})
 
-	// mkRes builds a minimal composed resource body; ns == "" leaves
-	// metadata.namespace unset (cluster-scoped, or inherited from the XR).
-	mkRes := func(kind, ns string) CollectedResource {
-		fields := map[string]*structpb.Value{
+	t.Run("skips pair until both sides are observed and ready", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, nil); len(got) != 0 {
+			t.Fatalf("nothing observed: got %d usages, want 0", len(got))
+		}
+		onlyDep := map[string]*structpb.Struct{"db": readyObserved("v1", "Database", "team-a")}
+		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, onlyDep); len(got) != 0 {
+			t.Fatalf("dependent missing: got %d usages, want 0", len(got))
+		}
+		depNotReady := map[string]*structpb.Struct{
+			"app": readyObserved("v1", "App", "team-a"),
+			"db":  notReadyObserved("v1", "Database"),
+		}
+		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, depNotReady); len(got) != 0 {
+			t.Fatalf("dependency not ready: got %d usages, want 0", len(got))
+		}
+	})
+
+	t.Run("field path gate must be truthy before the usage is emitted", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.atProvider.id"}}
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("v1", "App", ""),
+			"db":  readyObserved("v1", "Database", ""),
+		}
+		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, observed); len(got) != 0 {
+			t.Fatalf("field not set: got %d usages, want 0", len(got))
+		}
+		observed["db"].GetFields()["status"].GetStructValue().Fields["atProvider"] = structpb.NewStructValue(&structpb.Struct{
+			Fields: map[string]*structpb.Value{"id": structpb.NewStringValue("db-123")},
+		})
+		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, observed); len(got) != 1 {
+			t.Fatalf("field set: got %d usages, want 1", len(got))
+		}
+	})
+
+	// mkDesired builds a minimal desired body without metadata.namespace,
+	// which is what scripts typically emit for namespaced resources.
+	mkDesired := func(kind string) CollectedResource {
+		return CollectedResource{Body: &structpb.Struct{Fields: map[string]*structpb.Value{
 			"apiVersion": structpb.NewStringValue("example.org/v1"),
 			"kind":       structpb.NewStringValue(kind),
-		}
-		if ns != "" {
-			fields["metadata"] = structpb.NewStructValue(&structpb.Struct{Fields: map[string]*structpb.Value{
-				"namespace": structpb.NewStringValue(ns),
-			}})
-		}
-		return CollectedResource{Body: &structpb.Struct{Fields: fields}}
+		}}}
 	}
 	kindOf := func(res *structpb.Struct) string { return res.GetFields()["kind"].GetStringValue() }
 	nsOf := func(res *structpb.Struct) string {
 		return res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
 	}
 
-	t.Run("v2 cluster composite: kind follows resource namespaces per pair", func(t *testing.T) {
+	t.Run("v2: kind follows observed namespaces per pair", func(t *testing.T) {
 		deps := []DependencyPair{
 			{Dependent: "vpc", Dependency: "igw", IsRef: true},
 			{Dependent: "vpc", Dependency: "collector", IsRef: true},
 			{Dependent: "collector", Dependency: "vpc", IsRef: true},
 		}
 		resources := map[string]CollectedResource{
-			"vpc":       mkRes("VPC", ""),
-			"igw":       mkRes("InternetGateway", ""),
-			"collector": mkRes("CollectorRequest", "env-a"),
+			"vpc":       mkDesired("VPC"),
+			"igw":       mkDesired("InternetGateway"),
+			"collector": mkDesired("CollectorRequest"),
 		}
-		result := BuildUsageResources(deps, UsageAPIVersionV2, resources, "")
+		observed := map[string]*structpb.Struct{
+			"vpc":       readyObserved("example.org/v1", "VPC", ""),
+			"igw":       readyObserved("example.org/v1", "InternetGateway", ""),
+			"collector": readyObserved("example.org/v1", "CollectorRequest", "env-a"),
+		}
+		result := BuildUsageResources(deps, UsageAPIVersionV2, resources, observed)
 
 		cluster := result[usageName("vpc", "igw")]
+		if cluster == nil {
+			t.Fatal("missing cluster/cluster pair usage")
+		}
 		if kindOf(cluster) != "ClusterUsage" {
 			t.Errorf("cluster/cluster pair kind = %q, want ClusterUsage", kindOf(cluster))
 		}
@@ -277,6 +358,9 @@ func TestBuildUsageResources(t *testing.T) {
 		// Cluster-scoped dependent, namespaced dependency: Usage lives in
 		// the dependency's namespace, no selector namespace needed.
 		byCluster := result[usageName("vpc", "collector")]
+		if byCluster == nil {
+			t.Fatal("missing cluster-by/namespaced-of pair usage")
+		}
 		if kindOf(byCluster) != "Usage" || nsOf(byCluster) != "env-a" {
 			t.Errorf("cluster-by/namespaced-of pair = %s in %q, want Usage in env-a", kindOf(byCluster), nsOf(byCluster))
 		}
@@ -287,18 +371,24 @@ func TestBuildUsageResources(t *testing.T) {
 		// Namespaced dependent, cluster-scoped dependency: Usage lives in
 		// the dependent's namespace.
 		byNS := result[usageName("collector", "vpc")]
+		if byNS == nil {
+			t.Fatal("missing namespaced-by/cluster-of pair usage")
+		}
 		if kindOf(byNS) != "Usage" || nsOf(byNS) != "env-a" {
 			t.Errorf("namespaced-by/cluster-of pair = %s in %q, want Usage in env-a", kindOf(byNS), nsOf(byNS))
 		}
 	})
 
-	t.Run("v2 cluster composite: cross-namespace pair sets of selector namespace", func(t *testing.T) {
+	t.Run("v2: cross-namespace pair sets of selector namespace", func(t *testing.T) {
 		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
-		resources := map[string]CollectedResource{
-			"app": mkRes("App", "team-a"),
-			"db":  mkRes("Database", "team-b"),
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("example.org/v1", "App", "team-a"),
+			"db":  readyObserved("example.org/v1", "Database", "team-b"),
 		}
-		res := BuildUsageResources(deps, UsageAPIVersionV2, resources, "")[usageName("app", "db")]
+		res := BuildUsageResources(deps, UsageAPIVersionV2, nil, observed)[usageName("app", "db")]
+		if res == nil {
+			t.Fatal("missing usage")
+		}
 		if kindOf(res) != "Usage" || nsOf(res) != "team-a" {
 			t.Fatalf("got %s in %q, want Usage in the dependent's namespace team-a", kindOf(res), nsOf(res))
 		}
@@ -307,26 +397,68 @@ func TestBuildUsageResources(t *testing.T) {
 		}
 	})
 
-	t.Run("v2 namespaced composite: resources inherit the XR namespace", func(t *testing.T) {
+	t.Run("v2: namespace comes from observed state, not the desired body", func(t *testing.T) {
 		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		// Desired bodies omit metadata.namespace; Crossplane injected the
+		// XR namespace into the observed objects.
 		resources := map[string]CollectedResource{
-			"app": mkRes("App", ""),
-			"db":  mkRes("Database", ""),
+			"app": mkDesired("App"),
+			"db":  mkDesired("Database"),
 		}
-		res := BuildUsageResources(deps, UsageAPIVersionV2, resources, "default")[usageName("app", "db")]
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("example.org/v1", "App", "default"),
+			"db":  readyObserved("example.org/v1", "Database", "default"),
+		}
+		res := BuildUsageResources(deps, UsageAPIVersionV2, resources, observed)[usageName("app", "db")]
+		if res == nil {
+			t.Fatal("missing usage")
+		}
 		// A namespaced XR cannot compose a cluster-scoped ClusterUsage.
 		if kindOf(res) != "Usage" || nsOf(res) != "default" {
 			t.Errorf("got %s in %q, want Usage in default", kindOf(res), nsOf(res))
 		}
 	})
 
-	t.Run("v1 ignores namespaces", func(t *testing.T) {
+	t.Run("apiVersion and kind fall back to the desired body", func(t *testing.T) {
 		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
 		resources := map[string]CollectedResource{
-			"app": mkRes("App", "team-a"),
-			"db":  mkRes("Database", "team-b"),
+			"app": mkDesired("App"),
+			"db":  mkDesired("Database"),
 		}
-		res := BuildUsageResources(deps, UsageAPIVersionV1, resources, "default")[usageName("app", "db")]
+		// Observed bodies that carry only status (no apiVersion/kind).
+		bare := func() *structpb.Struct {
+			s, _ := structpb.NewStruct(map[string]any{
+				"status": map[string]any{"conditions": []any{
+					map[string]any{"type": "Ready", "status": "True"},
+					map[string]any{"type": "Synced", "status": "True"},
+				}},
+			})
+			return s
+		}
+		observed := map[string]*structpb.Struct{"app": bare(), "db": bare()}
+		res := BuildUsageResources(deps, UsageAPIVersionV2, resources, observed)[usageName("app", "db")]
+		if res == nil {
+			t.Fatal("missing usage")
+		}
+		of := res.GetFields()["spec"].GetStructValue().GetFields()["of"].GetStructValue().GetFields()
+		if got := of["kind"].GetStringValue(); got != "Database" {
+			t.Errorf("of.kind = %q, want Database (from desired body)", got)
+		}
+		if got := of["apiVersion"].GetStringValue(); got != "example.org/v1" {
+			t.Errorf("of.apiVersion = %q, want example.org/v1 (from desired body)", got)
+		}
+	})
+
+	t.Run("v1 ignores namespaces", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("example.org/v1", "App", "team-a"),
+			"db":  readyObserved("example.org/v1", "Database", "team-b"),
+		}
+		res := BuildUsageResources(deps, UsageAPIVersionV1, nil, observed)[usageName("app", "db")]
+		if res == nil {
+			t.Fatal("missing usage")
+		}
 		if kindOf(res) != "Usage" {
 			t.Errorf("kind = %q, want Usage", kindOf(res))
 		}
