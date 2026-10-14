@@ -77,7 +77,7 @@ func TestBuildGlobals_Keys(t *testing.T) {
 		"mutable_struct",
 		"regex", "yaml",
 		"get_extra_resource", "get_extra_resources",
-		"is_observed", "observed_body", "get_condition",
+		"is_observed", "observed_body", "get_condition", "get_manifest",
 		"set_response_ttl",
 		"When",
 	}

@@ -16,17 +16,16 @@ func getExtraResourceImpl(
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	var name string
-	var path starlark.Value
+	var nameVal, path starlark.Value
 	var dflt starlark.Value = starlark.None
 
 	if err := starlark.UnpackArgs(fnName, args, kwargs,
-		"name", &name, "path?", &path, "default?", &dflt); err != nil {
+		"name", &nameVal, "path?", &path, "default?", &dflt); err != nil {
 		return nil, err
 	}
-
-	if name == "" {
-		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	name, err := refName(fnName, nameVal)
+	if err != nil {
+		return nil, err
 	}
 
 	// Look up extra resource by name.
@@ -91,17 +90,16 @@ func getExtraResourcesImpl(
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	var name string
-	var path starlark.Value
+	var nameVal, path starlark.Value
 	var dflt starlark.Value = starlark.NewList(nil)
 
 	if err := starlark.UnpackArgs(fnName, args, kwargs,
-		"name", &name, "path?", &path, "default?", &dflt); err != nil {
+		"name", &nameVal, "path?", &path, "default?", &dflt); err != nil {
 		return nil, err
 	}
-
-	if name == "" {
-		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	name, err := refName(fnName, nameVal)
+	if err != nil {
+		return nil, err
 	}
 
 	// Look up extra resource by name.

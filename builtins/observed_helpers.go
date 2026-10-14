@@ -1,14 +1,12 @@
 package builtins
 
 import (
-	"fmt"
-
 	"go.starlark.net/starlark"
 
 	"github.com/wompipomp/function-starlark/convert"
 )
 
-// isObservedImpl implements is_observed(name).
+// isObservedImpl implements is_observed(ref). ref is a name or a Resource() handle.
 // Returns True if the named resource exists in the observed dict, False otherwise.
 func isObservedImpl(
 	fnName string,
@@ -16,15 +14,15 @@ func isObservedImpl(
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	var name string
+	var nameVal starlark.Value
 
 	if err := starlark.UnpackArgs(fnName, args, kwargs,
-		"name", &name); err != nil {
+		"name", &nameVal); err != nil {
 		return nil, err
 	}
-
-	if name == "" {
-		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	name, err := refName(fnName, nameVal)
+	if err != nil {
+		return nil, err
 	}
 
 	_, found, err := observed.Get(starlark.String(name))
@@ -34,7 +32,7 @@ func isObservedImpl(
 	return starlark.Bool(found), nil
 }
 
-// observedBodyImpl implements observed_body(name, default=None).
+// observedBodyImpl implements observed_body(ref, default=None). Deprecated: use get_observed(ref).
 // Returns the full observed resource body dict, or default if not found.
 func observedBodyImpl(
 	fnName string,
@@ -42,16 +40,16 @@ func observedBodyImpl(
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	var name string
+	var nameVal starlark.Value
 	var dflt starlark.Value = starlark.None
 
 	if err := starlark.UnpackArgs(fnName, args, kwargs,
-		"name", &name, "default?", &dflt); err != nil {
+		"name", &nameVal, "default?", &dflt); err != nil {
 		return nil, err
 	}
-
-	if name == "" {
-		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	name, err := refName(fnName, nameVal)
+	if err != nil {
+		return nil, err
 	}
 
 	val, found, err := observed.Get(starlark.String(name))

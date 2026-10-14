@@ -63,6 +63,9 @@ func (rc *RequirementsCollector) Warnings() []string {
 }
 
 // requireResourceFn implements require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None, namespace=None).
+// name may be omitted (two positional args, or apiVersion/kind as kwargs); it is
+// then derived from kind, namespace and selector. Returns an ExtraRef handle
+// that get_extra_resource accepts in place of the name.
 func (rc *RequirementsCollector) requireResourceFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -74,9 +77,13 @@ func (rc *RequirementsCollector) requireResourceFn(
 	var matchLabelsDict *starlark.Dict
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"name", &name, "apiVersion", &apiVersion, "kind", &kind,
+		"name?", &name, "apiVersion?", &apiVersion, "kind?", &kind,
 		"match_name?", &matchName, "match_labels?", &matchLabelsDict,
 		"namespace?", &namespace); err != nil {
+		return nil, err
+	}
+	name, apiVersion, kind, err := requirementIdentity(b.Name(), name, apiVersion, kind)
+	if err != nil {
 		return nil, err
 	}
 
@@ -96,11 +103,13 @@ func (rc *RequirementsCollector) requireResourceFn(
 		}
 		matchLabels = nil
 	} else if matchLabelsDict != nil {
-		var err error
 		matchLabels, err = dictToStringMap(matchLabelsDict)
 		if err != nil {
 			return nil, fmt.Errorf("require_extra_resource: match_labels: %w", err)
 		}
+	}
+	if name == "" {
+		name = derivedRequirementName(kind, namespace, matchName, matchLabels)
 	}
 
 	rc.mu.Lock()
@@ -114,10 +123,24 @@ func (rc *RequirementsCollector) requireResourceFn(
 	})
 	rc.mu.Unlock()
 
-	return starlark.None, nil
+	return &ExtraRef{name: name}, nil
+}
+
+// requirementIdentity resolves the optional leading name argument. With only
+// two positional values the script passed (apiVersion, kind) and the name is
+// derived later by the caller.
+func requirementIdentity(fnName, name, apiVersion, kind string) (string, string, string, error) {
+	if kind == "" && name != "" && apiVersion != "" {
+		return "", name, apiVersion, nil
+	}
+	if apiVersion == "" || kind == "" {
+		return "", "", "", fmt.Errorf("%s: apiVersion and kind are required", fnName)
+	}
+	return name, apiVersion, kind, nil
 }
 
 // requireResourcesFn implements require_extra_resources(name, apiVersion, kind, match_labels, namespace=None).
+// name may be omitted like in require_extra_resource. Returns an ExtraRef.
 func (rc *RequirementsCollector) requireResourcesFn(
 	_ *starlark.Thread,
 	b *starlark.Builtin,
@@ -128,15 +151,25 @@ func (rc *RequirementsCollector) requireResourcesFn(
 	var matchLabelsDict *starlark.Dict
 
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs,
-		"name", &name, "apiVersion", &apiVersion, "kind", &kind,
-		"match_labels", &matchLabelsDict,
+		"name?", &name, "apiVersion?", &apiVersion, "kind?", &kind,
+		"match_labels?", &matchLabelsDict,
 		"namespace?", &namespace); err != nil {
 		return nil, err
+	}
+	name, apiVersion, kind, err := requirementIdentity(b.Name(), name, apiVersion, kind)
+	if err != nil {
+		return nil, err
+	}
+	if matchLabelsDict == nil {
+		return nil, fmt.Errorf("require_extra_resources: missing argument for match_labels")
 	}
 
 	matchLabels, err := dictToStringMap(matchLabelsDict)
 	if err != nil {
 		return nil, fmt.Errorf("require_extra_resources: match_labels: %w", err)
+	}
+	if name == "" {
+		name = derivedRequirementName(kind, namespace, "", matchLabels)
 	}
 
 	rc.mu.Lock()
@@ -149,7 +182,7 @@ func (rc *RequirementsCollector) requireResourcesFn(
 	})
 	rc.mu.Unlock()
 
-	return starlark.None, nil
+	return &ExtraRef{name: name}, nil
 }
 
 // dictToStringMap converts a *starlark.Dict with string keys/values to a Go map.
