@@ -34,14 +34,24 @@ render: build
 	$(CROSSPLANE) composition render example/xr.yaml example/composition.yaml example/functions.yaml --crossplane-version=$(XP_ENGINE_VERSION)
 
 # Render and compare against expected output (non-zero exit on mismatch).
-# Both sides pass through normalize-render.py to normalize timestamps/uids and
-# canonicalize document order (see that script for details).
+# Two passes: a fresh XR with no observed state (notification-topic deferred,
+# no Usage yet) and the steady state with example/observed-resources.yaml
+# (both depends_on sides observed and ready, ClusterUsage emitted). Both sides
+# of each diff pass through normalize-render.py to normalize timestamps/uids
+# and canonicalize document order (see that script for details).
 render-check: build
-	@actual=$$(mktemp) expected=$$(mktemp); \
-	$(CROSSPLANE) composition render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results --crossplane-version=$(XP_ENGINE_VERSION) 2>/dev/null | python3 example/normalize-render.py > "$$actual"; \
-	python3 example/normalize-render.py < example/expected-output.yaml > "$$expected"; \
-	diff "$$actual" "$$expected"; \
-	rc=$$?; rm -f "$$actual" "$$expected"; exit $$rc
+	@$(call render-diff,example/expected-output.yaml,)
+	@$(call render-diff,example/expected-output-observed.yaml,--observed-resources=example/observed-resources.yaml)
+
+# render-diff <expected-file> <extra render flags>
+define render-diff
+actual=$$(mktemp) expected=$$(mktemp); \
+echo "render-check: $(1)"; \
+$(CROSSPLANE) composition render example/xr.yaml example/composition.yaml example/functions.yaml --include-function-results --crossplane-version=$(XP_ENGINE_VERSION) $(2) 2>/dev/null | python3 example/normalize-render.py > "$$actual"; \
+python3 example/normalize-render.py < $(1) > "$$expected"; \
+diff "$$actual" "$$expected"; \
+rc=$$?; rm -f "$$actual" "$$expected"; exit $$rc
+endef
 
 # Build Crossplane package
 xpkg: build

@@ -303,7 +303,10 @@ make build
 - `example/xr.yaml` -- sample XR input
 - `example/composition.yaml` -- composition to test
 - `example/functions.yaml` -- function reference with Docker runtime
-- `example/expected-output.yaml` -- expected render output
+- `example/expected-output.yaml` -- expected render output of a fresh XR
+- `example/observed-resources.yaml` -- mock observed state for a second pass
+- `example/expected-output-observed.yaml` -- expected render output with that
+  observed state (dependencies ready, Usage emitted)
 
 ### Run
 
@@ -330,12 +333,18 @@ make render-check
 
 This builds the Docker image, runs `crossplane composition render`, and diffs
 the output (normalized for timestamps/UIDs and document order) against
-`example/expected-output.yaml`. Any unexpected change causes a failure.
+`example/expected-output.yaml`. A second pass passes
+`--observed-resources=example/observed-resources.yaml` so the steady state is
+covered too: `depends_on` dependencies are observed and ready, nothing is
+deferred, and the Usage for the pair is emitted. Its snapshot is
+`example/expected-output-observed.yaml`. Any unexpected change in either pass
+causes a failure.
 
 ### Tips
 
-- When updating compositions, update `expected-output.yaml` to match. The diff
-  shows you exactly what changed.
+- When updating compositions, update `expected-output.yaml` (and
+  `expected-output-observed.yaml`) to match. The diff shows you exactly what
+  changed.
 - Keep fixture XRs minimal -- test one pattern per XR, not every feature at
   once.
 - Use the existing [example/](../example/) directory as a starting template
