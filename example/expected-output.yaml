@@ -9,9 +9,6 @@ spec:
     - apiVersion: monitoring.example.io/v1
       kind: Dashboard
       name: example-xr-dashboard
-    - apiVersion: protection.crossplane.io/v1beta1
-      kind: ClusterUsage
-      name: example-xr-8ae6aeda8ff7
     - apiVersion: s3.aws.upbound.io/v1beta1
       kind: Bucket
       name: example-xr-bucket-0
@@ -83,38 +80,6 @@ spec:
     enabled: true
     refreshInterval: 30s
     region: us-east-1
----
-apiVersion: protection.crossplane.io/v1beta1
-kind: ClusterUsage
-metadata:
-  annotations:
-    crossplane.io/composition-resource-name: usage-e8072ae8
-  labels:
-    crossplane.io/composite: example-xr
-  name: example-xr-8ae6aeda8ff7
-  ownerReferences:
-  - apiVersion: example.crossplane.io/v1
-    blockOwnerDeletion: true
-    controller: true
-    kind: XBucket
-    name: example-xr
-    uid: ""
-spec:
-  by:
-    apiVersion: sns.aws.upbound.io/v1beta1
-    kind: Topic
-    resourceSelector:
-      matchControllerRef: true
-      matchLabels:
-        function-starlark.crossplane.io/resource-name: notification-topic
-  of:
-    apiVersion: s3.aws.upbound.io/v1beta1
-    kind: Bucket
-    resourceSelector:
-      matchControllerRef: true
-      matchLabels:
-        function-starlark.crossplane.io/resource-name: bucket-0
-  replayDeletion: true
 ---
 apiVersion: render.crossplane.io/v1beta1
 kind: Result
