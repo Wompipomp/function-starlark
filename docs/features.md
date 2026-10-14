@@ -84,25 +84,29 @@ spec:
 
 ### Usage resources
 
-For each `depends_on` relationship, a Usage resource is automatically created
-with `replayDeletion: true`, ensuring deletion happens in reverse dependency
-order. The `spec.usageAPIVersion` field (or `STARLARK_USAGE_API_VERSION` env var)
+For each `depends_on` relationship, a Usage resource is created with
+`replayDeletion: true` **only after both the dependent and the dependency
+are observed and ready** (`Ready=True` and `Synced=True`, or nested Object
+conditions). That is also when namespace is trustworthy: Crossplane injects
+the XR namespace onto namespaced composed resources at apply time, so it
+appears on the observed object even if the Starlark body omitted
+`metadata.namespace`. Until both sides are ready, no Usage is emitted.
+
+The `spec.usageAPIVersion` field (or `STARLARK_USAGE_API_VERSION` env var)
 controls which Usage API version is used. Default is `"v2"`
 (`protection.crossplane.io/v1beta1`, Crossplane 2.x). Set to `"v1"` for
 Crossplane 1.x (`apiextensions.crossplane.io/v1beta1`).
 
-On the v2 API each `depends_on` pair chooses its own kind from the effective
-namespaces of the two resources it links. A resource's effective namespace is
-its `metadata.namespace`, falling back to the composite's namespace (Crossplane
-places everything composed by a namespaced XR in the XR's namespace). If either
-side is namespaced, the pair becomes a namespaced `Usage` in the dependent's
+On the v2 API each ready pair chooses its own kind from the **observed**
+namespaces of the two resources it links. If either side has
+`metadata.namespace`, the pair becomes a namespaced `Usage` in the dependent's
 namespace (or the dependency's, when the dependent is cluster-scoped); a
 dependency in yet another namespace is addressed via
-`spec.of.resourceSelector.namespace`. If both sides are cluster-scoped, the pair
-becomes a `ClusterUsage`. So a namespaced XR always gets `Usage`, a legacy
-cluster-scoped XR composing only cluster-scoped resources gets `ClusterUsage`,
-and a `Cluster`-scoped XR mixing both gets a mix. The v1 `Usage` is always
-cluster-scoped.
+`spec.of.resourceSelector.namespace`. If both sides are observed without a
+namespace, the pair becomes a `ClusterUsage`. So a namespaced XR always gets
+`Usage`, a legacy cluster-scoped XR composing only cluster-scoped resources
+gets `ClusterUsage`, and a cluster-scoped XR mixing both gets a mix. The v1
+`Usage` is always cluster-scoped.
 
 A single summary Warning event is emitted when Usage resources are generated,
 reminding that `compositeDeletePolicy: Foreground` is needed on the XRD for
@@ -766,25 +770,35 @@ produces no trailing newline.
 
 ### Observed and extra-resource helpers
 
-v1.8 adds `is_observed()`, `observed_body()`, `get_extra_resource()`,
-`get_extra_resources()`, and `get_condition()` as flat builtins that replace
-common multi-step patterns for accessing observed state and extra resources.
+`get_observed()`, `get_manifest()`, `is_observed()`, `get_condition()`,
+`get_extra_resource()` and `get_extra_resources()` are flat builtins that
+replace multi-step patterns for accessing desired state, observed state and
+extra resources. Every one of them accepts the handle returned by `Resource()`
+or `require_extra_resource()` in place of a name string, so the handle is the
+only thing a script needs to carry around. `observed_body()` is deprecated in
+favour of `get_observed()` without a path.
 
 ```python
+db = Resource("database", {...})
+
 # First-reconcile safety: branch on resource existence
-if is_observed("database"):
-    db_host = get_observed("database", "status.atProvider.address", "")
+if is_observed(db):
+    db_host = get_observed(db, "status.atProvider.address", "")
 else:
     db_host = "pending"
 
-# Get the full observed body as a dict
-db = observed_body("database", default={})
+# Full observed body (None until the resource exists), then dot access
+body = get_observed(db)
 
-# Read extra resource fields in one call
-cluster_region = get_extra_resource("cluster", "spec.region", "us-west-2")
+# Desired body as emitted -- the mirror of get_observed for the desired state
+db_name = get_manifest(db, "metadata.name")
+
+# Extra resources: the requirement returns a handle; the name is derived
+cluster = require_extra_resource("v1", "ConfigMap", match_name="cluster-info")
+cluster_region = get_extra_resource(cluster, "spec.region", "us-west-2")
 
 # Check a condition on an observed resource
-cond = get_condition("database", "Ready")
+cond = get_condition(db, "Ready")
 if cond and cond["status"] == "True":
     # database is ready
     pass

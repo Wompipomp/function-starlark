@@ -65,7 +65,7 @@ Register a desired composed resource. This is the primary function.
 - ready: None (auto-detect), True, or False.
 - labels: Dict to merge custom labels into body metadata.labels (kwarg wins). None/omitted: no-op. crossplane.io/* traceability labels are set by Crossplane itself after the pipeline, not by the function.
 - connection_details: Dict of string key-value pairs for per-resource connection details.
-- depends_on: List of dependency items. Accepted types: ResourceRef, SkippedRef, string, tuple (ref, field_path), or None (silently dropped). Non-optional SkippedRef triggers transitive skip of the dependent. Optional SkippedRef is dropped from the list. Plain refs/strings check existence. Tuples check that the field path has a non-empty value. Generates Crossplane Usage resources.
+- depends_on: List of dependency items. Accepted types: ResourceRef, SkippedRef, string, tuple (ref, field_path), or None (silently dropped). Non-optional SkippedRef triggers transitive skip of the dependent. Optional SkippedRef is dropped from the list. Plain refs/strings check existence. Tuples check that the field path has a non-empty value. Generates a Crossplane Usage (or ClusterUsage) only after both sides are observed and ready; namespace is read from those observed objects.
 - external_name: Sugar for crossplane.io/external-name annotation.
 - when: Optional When() struct for conditional emission. Omit for unconditional emission. When(condition, reason, keep_if_exists, optional=False) controls gating: condition=False skips with reason; keep_if_exists=True emits observed body if found (cliff guard); optional=True makes the skip non-gating. Bare bools rejected -- must use When(). The `optional` flag lives on When(), not on Resource(). Prefer `when=` over wrapping Resource() in an `if` -- see "Idiomatic Starlark".
 - Returns: ResourceRef when emitted (with .name attribute), or SkippedRef when any skip path was taken (with .name and .optional attrs; falsy in Starlark so `if ref:` works). SkippedRef can be passed to depends_on of downstream Resources for transitive skip.
@@ -190,27 +190,39 @@ Remove a resource from desired state (e.g., conditionally skip a resource from a
 skip_resource("monitoring", "monitoring only in prod")
 ```
 
-### get_observed(name, path, default=None)
+### get_observed(name, path=None, default=None)
 
-One-call observed resource field lookup. Equivalent to get(observed.get(name, {}), path, default) but in a single call. Returns default when the named resource is missing, the path is missing, or the value is None. Safe on first reconciliation when observed is empty.
+The one accessor for observed composed resources. name is a resource name or the handle returned by Resource(). With a path, returns the value at that path; without a path, returns the full observed body (dot access works on it). Returns default when the resource is missing, the path is missing, or the value is None. Safe on first reconciliation when observed is empty.
 
 ```python
-bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
+bucket = Resource("bucket", {...})
+bucket_arn = get_observed(bucket, "status.atProvider.arn", "")
+body = get_observed(bucket)         # None until the resource exists
 db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
 
-### require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None, namespace=None)
+### get_manifest(name, path=None, default=None)
 
-Request a single extra resource. Access via extra_resources[name] on next reconciliation. Namespaced resources need namespace= when matched by name (Crossplane v2+ only; v1.x servers ignore the field).
+Desired-state mirror of get_observed: reads the body of a resource registered earlier via Resource(), as it will be emitted (after None compaction and label merging). Accepts the Resource() handle or the name. Lazy and cached, so unread manifests cost nothing. Returns default for unknown names and SkippedRef.
+
 ```python
-require_extra_resource("config", "v1", "ConfigMap", match_name="my-config", namespace="my-ns")
+res = Resource("res", {...})
+Resource("res2", {"metadata": {"name": get_manifest(res, "metadata.name")}}, depends_on=[res])
 ```
 
-### require_extra_resources(name, apiVersion, kind, match_labels, namespace=None)
+### require_extra_resource([name,] apiVersion, kind, match_name=None, match_labels=None, namespace=None)
 
-Request multiple extra resources by label selector. namespace= scopes the match to one namespace (Crossplane v2+); omitted, labels match across all namespaces.
+Request a single extra resource. Returns an ExtraRef handle; pass it to get_extra_resource() on the next reconciliation. name may be omitted (then derived from kind, namespace and selector). Namespaced resources need namespace= when matched by name (Crossplane v2+ only; v1.x servers ignore the field).
 ```python
-require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
+config = require_extra_resource("v1", "ConfigMap", match_name="my-config", namespace="my-ns")
+host = get_extra_resource(config, "data.host", "")
+```
+
+### require_extra_resources([name,] apiVersion, kind, match_labels, namespace=None)
+
+Request multiple extra resources by label selector. Returns an ExtraRef handle for get_extra_resources(). namespace= scopes the match to one namespace (Crossplane v2+); omitted, labels match across all namespaces.
+```python
+certs = require_extra_resources("v1", "Secret", match_labels={"type": "tls"})
 ```
 
 ### schema(name, doc=None, **fields)
@@ -283,36 +295,32 @@ Resource("cm", merged)
 
 ### get_extra_resource(name, path=None, default=None)
 
-One-call extra-resource field lookup. Returns the value at path within the first matching extra resource, or default when the name is missing or path not found. When path is None, returns the full resource body.
+One-call extra-resource field lookup. name is the request name or the ExtraRef handle from require_extra_resource(). Returns the value at path within the first matching extra resource, or default when the name is missing or path not found. When path is None, returns the full resource body.
 
 ```python
-region = get_extra_resource("cluster", "spec.region", "us-west-2")
+region = get_extra_resource(cluster, "spec.region", "us-west-2")
 ```
 
 ### get_extra_resources(name, path=None, default=[])
 
-Get all extra resources for a name as a list. Returns empty list when name not found.
+Get all extra resources for a name or ExtraRef handle as a list. Returns empty list when name not found.
 
 ```python
-certs = get_extra_resources("tls-secrets")
+certs = get_extra_resources(tls_secrets)
 ```
 
 ### is_observed(name)
 
-Returns True iff the named composed resource exists in observed state. Use for branching without field access.
+Returns True iff the composed resource (name or Resource() handle) exists in observed state. Use for branching without field access.
 
 ```python
-if is_observed("database"):
-    db_host = get_observed("database", "status.atProvider.address", "")
+if is_observed(db):
+    db_host = get_observed(db, "status.atProvider.address", "")
 ```
 
 ### observed_body(name, default=None)
 
-Returns the full observed resource body dict, or default if not found.
-
-```python
-db = observed_body("database", default={})
-```
+Deprecated: use get_observed(name, default=...) without a path. Still works, emits one Warning event per reconciliation.
 
 ### get_condition(name, type)
 
@@ -542,6 +550,22 @@ params = dict.compact({
 })
 ```
 
+### Set each field explicitly; don't merge whole structs
+
+Map the fields you expose one by one and inline the conditionals; do NOT `dict.deep_merge` an external struct (a caller's `spec.parameters`, an observed body) into a resource body. A rename or renest on either side breaks the merge silently -- no error, wrong resource -- and merging a caller-supplied struct is an implicit allow-list of every field, letting callers set or override anything, including fields that break the provider or bypass policy. Explicit mapping is a curated, schema-validated, reviewable contract; the extra line per exposed field is the point. Reserve `dict.deep_merge` for opaque data you deliberately pass through un-curated.
+
+```python
+# Avoid -- merge an open-ended user struct into the spec
+spec = dict.deep_merge(defaults, get(oxr, "spec.parameters", {}))
+
+# Prefer -- map each exposed field explicitly, inline the conditionals
+spec = {
+    "region": get(oxr, "spec.region", "us-east-1"),
+    "tier": get(oxr, "spec.tier", "standard"),
+    "versioning": {"enabled": env == "prod"},
+}
+```
+
 ### Transform collections with comprehensions, not loop-and-append
 
 ```python
@@ -588,9 +612,9 @@ Every request global has a one-call accessor that handles missing keys, None, an
 | Instead of raw navigation | Use |
 |---|---|
 | `oxr["spec"]["region"]` | `get(oxr, "spec.region", default)` |
-| `observed.get(name)` / `observed[name][...]` | `get_observed(name, "path", default)` |
-| `extra_resources.get(name)[0][...]` | `get_extra_resource(name, "path", default)` |
-| `extra_resources.get(name)` (all matches) | `get_extra_resources(name)` |
+| `observed.get(name)` / `observed[name][...]` | `get_observed(ref, "path", default)` or `get_observed(ref)` for the body |
+| `extra_resources.get(name)[0][...]` | `get_extra_resource(ref, "path", default)` |
+| `extra_resources.get(name)` (all matches) | `get_extra_resources(ref)` |
 | `get(oxr, "metadata.labels.app.kubernetes.io/name")` | `get_label(oxr, "app.kubernetes.io/name", default)` |
 | hand-navigating `status.conditions[]` | `get_condition(name, "Ready")` |
 
@@ -648,12 +672,12 @@ Inlining removes accidental statements; it is not about maximizing density. Keep
 
 ## Best practices
 
-- Build resource bodies as single dict literals with inlined conditionals (`or`, ternary, `dict.compact()`) -- see "Idiomatic Starlark". Do not assemble dicts imperatively with intermediate variables and conditional key mutation.
+- Inline by default: build resource bodies as single dict literals with each field set explicitly and values inlined (`or`, ternary `x if cond else y`, `dict.compact()`) -- see "Idiomatic Starlark". Do not assemble dicts imperatively with intermediate variables and conditional key mutation, and do NOT `dict.deep_merge` a whole struct into a body -- map fields explicitly (a shape change silently breaks a merge, and merging a caller-supplied struct is an uncurated allow-list). Reserve `dict.deep_merge` for opaque blobs you deliberately pass through un-curated.
 - Use `Resource(..., when=When(cond, reason, keep_if_exists, optional=False))` for conditional resources and `depends_on=` for ordering -- do NOT wrap `Resource()` in `if cond:` or gate creation with `if is_observed(...)`. Bare-`if` forms drop readiness gating, the recorded skip reason, and deletion ordering. See "Idiomatic Starlark".
 - Prefer explicit named imports `load("m.star", "fn")` over `load("m.star", "*")` on hot paths: star imports are re-parsed and re-expanded on every reconciliation, while explicit imports are scanned once and memoized. Star imports still work and are fine when you genuinely want all exports or need namespace aliasing.
 - Use get() for all nested access -- never raw bracket chains on XR/observed data.
 - Use get_label()/get_annotation() instead of get() for dotted label/annotation keys -- get() splits on dots, so "app.kubernetes.io/name" won't work as a dot-path.
-- Use get_observed() for one-call observed resource field access instead of manual "if name in observed" existence checks.
+- Use get_observed(ref, "path", default) for observed field access and get_observed(ref) for the whole body; pass the Resource() handle, not ref.name. Use get_manifest(ref, "path") to read back a desired body.
 - Use resource_name(suffix) from stdlib for metadata.name to handle 63-char K8s limit.
 - Use external_name= kwarg instead of manual crossplane.io/external-name annotation.
 - Use labels= kwarg for custom labels. Do not set crossplane.io/* labels -- Crossplane injects them itself after the pipeline.
@@ -665,8 +689,8 @@ Inlining removes accidental statements; it is not about maximizing density. Keep
 - Put helper functions at the top of the script.
 - End scripts with emit_event("Normal", "Reconciled ...") for observability.
 - Use namespace alias imports (alias="*") when loading provider schema packages to avoid name conflicts across API groups.
-- Use get_extra_resource() for one-call extra-resource field access instead of manual extra_resources dict navigation.
-- Use is_observed()/observed_body() for existence checks and body retrieval instead of manual "if name in observed" patterns.
+- Use get_extra_resource(handle, "path", default) with the handle returned by require_extra_resource(); the request name may be omitted.
+- Use is_observed(ref) for existence checks. observed_body() is deprecated; get_observed(ref) returns the body.
 - Use get_condition() for reading observed resource conditions instead of navigating status.conditions arrays.
 - Use set_response_ttl() for custom requeue intervals instead of relying on sequencingTTL.
 - Use namespace modules (json, crypto, encoding, dict, regex, yaml) directly -- no import needed.

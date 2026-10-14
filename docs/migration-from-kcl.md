@@ -38,7 +38,8 @@ function-starlark offers several advantages for composition authoring:
 | `oxr.metadata?.labels?["app.kubernetes.io/name"] or ""` | `get_label(oxr, "app.kubernetes.io/name", "")` | Safe dotted-key label access |
 | `oxr.metadata?.annotations?["key"] or ""` | `get_annotation(oxr, "key", "")` | Safe annotation access |
 | `dxr = {**oxr, status.field = val}` | `set_xr_status("field", val)` | Dot-path status writes with auto-created intermediates |
-| `ocds["name"]?.spec?.field or ""` | `get_observed("name", "spec.field", "")` | One-call observed access |
+| `ocds["name"]?.spec?.field or ""` | `get_observed(ref, "spec.field", "")` | One-call observed access (handle or name) |
+| `ocds["name"]` | `get_observed(ref)` | Whole observed body, `None` until it exists |
 
 ## Global variables
 
@@ -66,12 +67,13 @@ function-starlark provides these predeclared globals:
 | `fatal` | `fatal(message)` | Halt execution with a fatal error |
 | `set_composite_ready` | `set_composite_ready(ready, reason="", message="")` | Explicitly set the XR's Ready state (takes precedence over auto-gating). KCL has no direct equivalent -- gate the composite via observed state. |
 | `set_connection_details` | `set_connection_details(dict)` | Set XR-level connection details |
-| `require_extra_resource` | `require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None, namespace=None)` | Request a single extra resource (`namespace=` for namespaced resources, Crossplane v2+) |
-| `require_extra_resources` | `require_extra_resources(name, apiVersion, kind, match_labels, namespace=None)` | Request multiple extra resources by label selector (`namespace=` scopes to one namespace, Crossplane v2+) |
+| `require_extra_resource` | `require_extra_resource([name,] apiVersion, kind, match_name=None, match_labels=None, namespace=None)` | Request a single extra resource; returns a handle for `get_extra_resource()`. `name` may be omitted (`namespace=` for namespaced resources, Crossplane v2+) |
+| `require_extra_resources` | `require_extra_resources([name,] apiVersion, kind, match_labels, namespace=None)` | Request multiple extra resources by label selector; returns a handle (`namespace=` scopes to one namespace, Crossplane v2+) |
 | `get_label` | `get_label(res, key, default=None)` | Safe label lookup handling dotted keys |
 | `get_annotation` | `get_annotation(res, key, default=None)` | Safe annotation lookup handling dotted keys |
 | `set_xr_status` | `set_xr_status(path, value)` | Dot-path XR status writes with auto-created intermediates |
-| `get_observed` | `get_observed(name, path, default=None)` | One-call observed resource field lookup |
+| `get_observed` | `get_observed(name, path=None, default=None)` | Observed field lookup, or the whole body without a path; accepts the `Resource()` handle |
+| `get_manifest` | `get_manifest(name, path=None, default=None)` | Desired body of a registered resource, as emitted; accepts the handle |
 
 ## Common patterns
 

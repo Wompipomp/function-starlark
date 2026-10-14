@@ -204,8 +204,8 @@ for i in range(count):
 
 Use `depends_on=` for creation ordering and readiness gating between resources --
 do not hand-roll sequencing with `if is_observed(...)` / `if get_observed(...)`
-guards. `depends_on=` handles creation order, deletion order (via generated Usage
-resources), and field-path readiness gating, none of which a manual `if` provides.
+guards. `depends_on=` handles creation order, deletion order (via a Usage
+emitted once both sides are observed and ready), and field-path readiness gating, none of which a manual `if` provides.
 Reserve `if is_observed(...)` / `get_observed(...)` for *reading* observed values,
 not for controlling whether a dependent resource is created.
 
@@ -412,11 +412,21 @@ region = get(oxr, "spec.region", "us-east-1")
 region = oxr["spec"]["region"]
 ```
 
-For observed resources, use `get_observed()` to avoid manual existence checks:
+For observed resources, use `get_observed()` to avoid manual existence checks.
+Pass the handle returned by `Resource()`; there is no need to spell out
+`ref.name`:
 
 ```python
+bucket = Resource("bucket", {...})
+
 # One call instead of checking "bucket" in observed first
-arn = get_observed("bucket", "status.atProvider.arn", "pending")
+arn = get_observed(bucket, "status.atProvider.arn", "pending")
+
+# Whole body (None until observed), then dot access
+body = get_observed(bucket)
+
+# Desired body as emitted -- the mirror of get_observed
+bucket_name = get_manifest(bucket, "metadata.name")
 ```
 
 ### Use the safe accessors, not raw dict navigation
@@ -429,9 +439,9 @@ over `.get()` / bracket chains on `oxr`, `observed`, `extra_resources`, or
 | Instead of raw navigation | Use |
 |---|---|
 | `oxr["spec"]["region"]` | `get(oxr, "spec.region", default)` |
-| `observed.get(name)` / `observed[name][...]` | `get_observed(name, "path", default)` |
-| `extra_resources.get(name)[0][...]` | `get_extra_resource(name, "path", default)` |
-| `extra_resources.get(name)` (all matches) | `get_extra_resources(name)` |
+| `observed.get(name)` / `observed[name][...]` | `get_observed(ref, "path", default)` or `get_observed(ref)` for the body |
+| `extra_resources.get(name)[0][...]` | `get_extra_resource(ref, "path", default)` |
+| `extra_resources.get(name)` (all matches) | `get_extra_resources(ref)` |
 | `get(oxr, "metadata.labels.app.kubernetes.io/name")` | `get_label(oxr, "app.kubernetes.io/name", default)` |
 | hand-navigating `status.conditions[]` | `get_condition(name, "Ready")` |
 
@@ -447,8 +457,10 @@ default. Use the accessor instead:
 host = extra_resources.get("db")[0]["status"]["atProvider"]["address"]
 host = get(extra_resources["db"], "status.atProvider.address", "")  # always returns ""
 
-# Prefer -- first match, path-traversed, safe default
-host = get_extra_resource("db", "status.atProvider.address", "")
+# Prefer -- first match, path-traversed, safe default; the requirement
+# returns the handle, so no request-name string needs to be carried around
+db = require_extra_resource("rds.aws.upbound.io/v1beta1", "Instance", match_name="main-db")
+host = get_extra_resource(db, "status.atProvider.address", "")
 ```
 
 ### Check before access
@@ -640,25 +652,29 @@ resources, `all_ready` returns `False` (first-reconcile safety).
 ### Pattern: First-reconcile safety with observed helpers
 
 Accessing observed resources that do not exist yet (first reconciliation)
-crashes the script. Use the v1.8 observed helpers for safe access.
+crashes the script. Use the observed helpers for safe access; all of them take
+the `Resource()` handle.
 
 ```python
+database = Resource("database", {...})
+
 # Branch safely on existence
-if is_observed("database"):
-    db_host = get_observed("database", "status.atProvider.address", "")
-    db_ready = get_condition("database", "Ready")
+if is_observed(database):
+    db_host = get_observed(database, "status.atProvider.address", "")
+    db_ready = get_condition(database, "Ready")
 else:
     db_host = "pending"
     db_ready = None
 
 # Or get the full body with a safe default
-db = observed_body("database", default={})
+db = get_observed(database, default={})
 ```
 
-`is_observed()` checks existence without field access. `observed_body()`
-returns the full body dict or a default. `get_condition()` returns `None`
-when the resource or condition is missing. All three are safe on first
-reconciliation when observed is empty.
+`is_observed()` checks existence without field access. `get_observed()`
+without a path returns the full body dict or a default (`observed_body()` does
+the same and is deprecated). `get_condition()` returns `None` when the
+resource or condition is missing. All are safe on first reconciliation when
+observed is empty.
 
 ### Pattern: Custom requeue intervals with set_response_ttl
 
