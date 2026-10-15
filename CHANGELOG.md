@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0](https://github.com/Wompipomp/function-starlark/compare/v0.11.0...v0.12.0) (2026-10-15)
+
+
+### Features
+
+* accept resource handles in accessors, add get_manifest, derive extra-resource names ([31c399a](https://github.com/Wompipomp/function-starlark/commit/31c399a7e8dd4d25b4838bb04f023d6fb1973ac6))
+* add namespace selector to extra resource requirements ([7ef16ad](https://github.com/Wompipomp/function-starlark/commit/7ef16adacbad0c521375990514483506d4ea620c))
+* Crossplane v2 namespaced resource support ([c97cec2](https://github.com/Wompipomp/function-starlark/commit/c97cec24b4ac48c0622f9dbd9f6a7d898992bc9c))
+
+
+### Bug Fixes
+
+* choose Usage or ClusterUsage per depends_on pair from resource namespaces ([9441697](https://github.com/Wompipomp/function-starlark/commit/94416976251b62ee924f27a885049a24a5ffcae5))
+* detect namespaced provider-kubernetes Objects in depends_on readiness ([2e4036d](https://github.com/Wompipomp/function-starlark/commit/2e4036deac2ef32ee9f19a94898585d80fd0793a))
+* **e2e:** pull the function package from a *.localhost registry name ([7b5aa16](https://github.com/Wompipomp/function-starlark/commit/7b5aa1663dbf10bcc4fdcd5561519e4ed5f9b57d))
+* emit Usage only after both sides are observed and ready ([33bb2dc](https://github.com/Wompipomp/function-starlark/commit/33bb2dcf295debb9b4f07bca0b8c545e04de7233))
+* enhance deletion order logging in depends_on tests for accurate resourceVersion tracking ([1f9e21c](https://github.com/Wompipomp/function-starlark/commit/1f9e21c0d34b6bfcd2ed2a9b319a5f4561258240))
+* keep the resource-name label within the Kubernetes label limit ([9d2ca18](https://github.com/Wompipomp/function-starlark/commit/9d2ca18138e1e07e82c04d1c7abefbb117a4b96e))
+* propagate conversion errors in lazy StarlarkDict methods and improve documentation ([573eb20](https://github.com/Wompipomp/function-starlark/commit/573eb20d9199d00fbed372bb2f8d9dd7ded6b815))
+* surface deferred conversion errors in StarlarkDict and improve documentation on resource access patterns ([6f54e52](https://github.com/Wompipomp/function-starlark/commit/6f54e5269d0db413c9cbb50680a1a1340e0077d5))
+
 ## [0.11.0](https://github.com/Wompipomp/function-starlark/compare/v0.10.0...v0.11.0) (2026-06-12)
 
 
