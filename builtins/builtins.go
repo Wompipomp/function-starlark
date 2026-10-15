@@ -112,7 +112,9 @@ func BuildGlobals(
 	g["is_observed"] = starlark.NewBuiltin("is_observed", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		return isObservedImpl(b.Name(), observed, args, kwargs)
 	})
+	g["get_manifest"] = collector.GetManifestBuiltin()
 	g["observed_body"] = starlark.NewBuiltin("observed_body", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		condCollector.warnDeprecatedOnce("observed_body", "observed_body() is deprecated; use get_observed(ref) without a path")
 		return observedBodyImpl(b.Name(), observed, args, kwargs)
 	})
 	g["get_condition"] = starlark.NewBuiltin("get_condition", func(_ *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -377,48 +379,35 @@ func setXRStatus(fnName string, dxr *convert.StarlarkDict, args starlark.Tuple, 
 	return starlark.True, nil
 }
 
-// getObservedImpl implements get_observed(name, path, default=None).
-// It looks up an observed resource by name, then traverses the path
-// using the same pathToKeys + Mapping walk as get().
+// getObservedImpl implements get_observed(ref, path=None, default=None).
+// ref is a resource name or a handle returned by Resource(). Without a path
+// the full observed body is returned; with a path the dot-separated keys are
+// walked using the same pathToKeys + Mapping walk as get().
 func getObservedImpl(
 	fnName string,
 	observed *convert.StarlarkDict,
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	var name string
-	var path starlark.Value
+	var nameVal, path starlark.Value
 	var dflt starlark.Value = starlark.None
 
 	if err := starlark.UnpackArgs(fnName, args, kwargs,
-		"name", &name, "path", &path, "default?", &dflt); err != nil {
+		"name", &nameVal, "path?", &path, "default?", &dflt); err != nil {
 		return nil, err
 	}
-
-	// Validate name.
-	if name == "" {
-		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	name, err := refName(fnName, nameVal)
+	if err != nil {
+		return nil, err
 	}
-
-	// Validate path not empty (both "" and [] are rejected).
-	switch p := path.(type) {
-	case starlark.String:
-		if string(p) == "" {
-			return nil, fmt.Errorf("%s: path must not be empty", fnName)
-		}
-	case *starlark.List:
-		if p.Len() == 0 {
-			return nil, fmt.Errorf("%s: path must not be empty", fnName)
-		}
-	}
-
-	// Convert path to keys.
-	keys, err := pathToKeys(path)
+	keys, has, err := pathKeys(fnName, path)
 	if err != nil {
 		return nil, err
 	}
 
-	// Step 1: Look up resource by name in observed dict.
+	if observed == nil {
+		return dflt, nil
+	}
 	res, found, err := observed.Get(starlark.String(name))
 	if err != nil {
 		return nil, err
@@ -426,25 +415,7 @@ func getObservedImpl(
 	if !found || res == starlark.None {
 		return dflt, nil
 	}
-
-	// Step 2: Walk the path (same as getFnImpl loop). A conversion error from
-	// lazy materialization propagates; only a genuine miss yields the default.
-	current := res
-	for _, key := range keys {
-		mapping, ok := current.(starlark.Mapping)
-		if !ok {
-			return dflt, nil
-		}
-		v, found, err := mapping.Get(starlark.String(key))
-		if err != nil {
-			return nil, err
-		}
-		if !found || v == starlark.None {
-			return dflt, nil
-		}
-		current = v
-	}
-	return current, nil
+	return lookupKeys(res, keys, has, dflt)
 }
 
 // pathToKeys converts a path value to a slice of string keys.

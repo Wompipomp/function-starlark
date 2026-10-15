@@ -268,6 +268,77 @@ func TestE2EExtraResourcesScript(t *testing.T) {
 	}
 }
 
+func TestE2EExtraResourcesNamespacedScript(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+	steps := e2eStarlarkSteps(t, "composition-extra-resources-ns.yaml")
+
+	cmA := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"e2e-extra-cm","namespace":"e2e-extra-ns-a","labels":{"e2e-extra-cm":"true"}},"data":{"hello":"from-ns-a"}}`
+	cmB := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"e2e-extra-cm-b","namespace":"e2e-extra-ns-b","labels":{"e2e-extra-cm":"true"}},"data":{"hello":"from-ns-b"}}`
+
+	// Iteration 1: the selectors must carry the namespace field for the
+	// scoped requirements and leave it unset for the all-namespaces one.
+	// The unset field is what keeps requests wire-identical for v1.x.
+	rsp1 := runE2EStep(t, f, &fnv1.RunFunctionRequest{
+		Input:    steps["test-extra-resources-ns"],
+		Observed: mustOXR(t, `{}`),
+	})
+	reqs := rsp1.GetRequirements().GetResources()
+
+	byName := reqs["ns_cm_by_name"]
+	if byName == nil {
+		t.Fatalf("requirement ns_cm_by_name missing (got %v)", reqs)
+	}
+	if byName.GetNamespace() != "e2e-extra-ns-a" {
+		t.Errorf("ns_cm_by_name namespace = %q, want e2e-extra-ns-a", byName.GetNamespace())
+	}
+	if byName.GetMatchName() != "e2e-extra-cm" {
+		t.Errorf("ns_cm_by_name matchName = %q, want e2e-extra-cm", byName.GetMatchName())
+	}
+
+	scoped := reqs["ns_cms_scoped"]
+	if scoped == nil {
+		t.Fatalf("requirement ns_cms_scoped missing (got %v)", reqs)
+	}
+	if scoped.GetNamespace() != "e2e-extra-ns-a" {
+		t.Errorf("ns_cms_scoped namespace = %q, want e2e-extra-ns-a", scoped.GetNamespace())
+	}
+
+	all := reqs["ns_cms_all"]
+	if all == nil {
+		t.Fatalf("requirement ns_cms_all missing (got %v)", reqs)
+	}
+	if all.Namespace != nil {
+		t.Errorf("ns_cms_all namespace = %q, want unset", *all.Namespace)
+	}
+
+	// Iteration 2: Crossplane fulfilled the requirements (scoped selectors
+	// see only the ns-a ConfigMap; the global one sees both).
+	rsp2 := runE2EStep(t, f, &fnv1.RunFunctionRequest{
+		Input:    steps["test-extra-resources-ns"],
+		Observed: mustOXR(t, `{}`),
+		RequiredResources: map[string]*fnv1.Resources{
+			"ns_cm_by_name": {Items: []*fnv1.Resource{{Resource: resource.MustStructJSON(cmA)}}},
+			"ns_cms_scoped": {Items: []*fnv1.Resource{{Resource: resource.MustStructJSON(cmA)}}},
+			"ns_cms_all": {Items: []*fnv1.Resource{
+				{Resource: resource.MustStructJSON(cmB)},
+				{Resource: resource.MustStructJSON(cmA)},
+			}},
+		},
+	})
+
+	for key, want := range map[string]any{
+		"extraNsByNameValue":       "from-ns-a",
+		"extraNsScopedNamesSorted": "e2e-extra-cm",
+		"extraNsAllNamesSorted":    "e2e-extra-cm,e2e-extra-cm-b",
+		"extraNsReady":             true,
+	} {
+		if got := statusTestField(t, rsp2, key); got != want {
+			t.Errorf("status test.%s = %v (%T), want %v", key, got, got, want)
+		}
+	}
+}
+
 func TestE2EFieldpathDepScript(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
@@ -321,14 +392,20 @@ func TestE2EUsageV2Script(t *testing.T) {
 			"status":{"conditions":[
 				{"type":"Ready","status":"True"},
 				{"type":"Synced","status":"True"}]}}`)},
+		"usage-dependent": {Resource: resource.MustStructJSON(`{
+			"apiVersion":"nop.crossplane.io/v1alpha1","kind":"NopResource",
+			"metadata":{"name":"usage-dependent"},
+			"status":{"conditions":[
+				{"type":"Ready","status":"True"},
+				{"type":"Synced","status":"True"}]}}`)},
 	}
 	rsp := runE2EStep(t, f, &fnv1.RunFunctionRequest{
 		Input:    steps["test-usage-v2"],
 		Observed: observed,
 	})
 
-	// The e2e XR is cluster-scoped (legacy), so the v2 API must produce the
-	// cluster-scoped ClusterUsage kind (the v2 Usage kind is namespaced).
+	// Neither observed resource has metadata.namespace, so the v2 API
+	// produces ClusterUsage.
 	foundV2Usage := false
 	for _, r := range rsp.GetDesired().GetResources() {
 		m := r.GetResource().AsMap()
@@ -337,28 +414,47 @@ func TestE2EUsageV2Script(t *testing.T) {
 		}
 	}
 	if !foundV2Usage {
-		t.Errorf("no protection.crossplane.io/v1beta1 ClusterUsage in desired state (usageAPIVersion v2, cluster-scoped composite)")
+		t.Errorf("no protection.crossplane.io/v1beta1 ClusterUsage in desired state (usageAPIVersion v2, cluster-scoped observed resources)")
 	}
 
-	// A namespaced composite must produce the namespaced Usage kind instead.
+	// The observed namespace, not the composite, selects the kind: a
+	// namespaced XR has its namespace injected into every composed resource
+	// by Crossplane, so both observed sides carry it and the pair must
+	// become a namespaced Usage in that namespace.
 	observedNS := &fnv1.State{
 		Composite: &fnv1.Resource{
 			Resource: resource.MustStructJSON(`{"apiVersion":"e2e.fn-starlark.io/v1","kind":"XTest","metadata":{"name":"smoke","namespace":"default"},"spec":{}}`),
 		},
-		Resources: observed.Resources,
+		Resources: map[string]*fnv1.Resource{
+			"usage-base": {Resource: resource.MustStructJSON(`{
+				"apiVersion":"nop.crossplane.io/v1alpha1","kind":"NopResource",
+				"metadata":{"name":"usage-base","namespace":"default"},
+				"status":{"conditions":[
+					{"type":"Ready","status":"True"},
+					{"type":"Synced","status":"True"}]}}`)},
+			"usage-dependent": {Resource: resource.MustStructJSON(`{
+				"apiVersion":"nop.crossplane.io/v1alpha1","kind":"NopResource",
+				"metadata":{"name":"usage-dependent","namespace":"default"},
+				"status":{"conditions":[
+					{"type":"Ready","status":"True"},
+					{"type":"Synced","status":"True"}]}}`)},
+		},
 	}
 	rspNS := runE2EStep(t, f, &fnv1.RunFunctionRequest{
 		Input:    steps["test-usage-v2"],
 		Observed: observedNS,
 	})
-	foundNSUsage := false
+	foundNamespacedUsage := false
 	for _, r := range rspNS.GetDesired().GetResources() {
 		m := r.GetResource().AsMap()
 		if m["kind"] == "Usage" && m["apiVersion"] == "protection.crossplane.io/v1beta1" {
-			foundNSUsage = true
+			foundNamespacedUsage = true
+			if ns := m["metadata"].(map[string]any)["namespace"]; ns != "default" {
+				t.Errorf("namespaced Usage metadata.namespace = %v, want default", ns)
+			}
 		}
 	}
-	if !foundNSUsage {
-		t.Errorf("no namespaced Usage in desired state (usageAPIVersion v2, namespaced composite)")
+	if !foundNamespacedUsage {
+		t.Errorf("no namespaced Usage in desired state (observed resources have metadata.namespace)")
 	}
 }

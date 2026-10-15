@@ -65,38 +65,8 @@ func (s *Sequencer) Evaluate() SequencerResult {
 				unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
 					fmt.Sprintf("%q field %q to be ready", d.Dependency, d.FieldPath))
 			}
-		} else {
-			// Plain ref: check readiness conditions.
-			if isKubernetesObject(res) {
-				// Kubernetes Object: check nested resource conditions first.
-				met, hasNested := nestedAllConditionsTrue(res)
-				if hasNested {
-					if !met {
-						unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-							fmt.Sprintf("%q nested resource conditions not all True", d.Dependency))
-					}
-				} else {
-					// No nested conditions: fall back to wrapper's own conditions.
-					if !hasCondition(res, "Ready", "True") {
-						unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-							fmt.Sprintf("%q to have Ready=True", d.Dependency))
-					}
-					if !hasCondition(res, "Synced", "True") {
-						unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-							fmt.Sprintf("%q to have Synced=True", d.Dependency))
-					}
-				}
-			} else {
-				// Non-Object resource: check Ready=True and Synced=True conditions.
-				if !hasCondition(res, "Ready", "True") {
-					unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-						fmt.Sprintf("%q to have Ready=True", d.Dependency))
-				}
-				if !hasCondition(res, "Synced", "True") {
-					unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent],
-						fmt.Sprintf("%q to have Synced=True", d.Dependency))
-				}
-			}
+		} else if reason := unmetReadyReason(res, d.Dependency); reason != "" {
+			unmetDeps[d.Dependent] = append(unmetDeps[d.Dependent], reason)
 		}
 	}
 
@@ -142,14 +112,64 @@ func (s *Sequencer) Evaluate() SequencerResult {
 	}
 }
 
-// isKubernetesObject returns true if the resource is a Kubernetes Object
-// (apiVersion contains "kubernetes.crossplane.io/" and kind == "Object").
+// isObservedReady reports whether an observed composed resource is ready
+// enough to participate in a Usage pair. Kubernetes Objects with nested
+// conditions require those nested conditions to all be True; otherwise
+// Ready=True and Synced=True on the resource itself. A missing resource
+// is not ready.
+func isObservedReady(res *structpb.Struct) bool {
+	return unmetReadyReason(res, "") == ""
+}
+
+// unmetReadyReason returns a human-readable unmet-readiness description, or
+// empty when the resource is ready. name is quoted into the message.
+func unmetReadyReason(res *structpb.Struct, name string) string {
+	if res == nil {
+		if name == "" {
+			return "resource not observed"
+		}
+		return fmt.Sprintf("%q to be observed", name)
+	}
+	label := name
+	if label == "" {
+		label = "resource"
+	} else {
+		label = fmt.Sprintf("%q", name)
+	}
+	if isKubernetesObject(res) {
+		met, hasNested := nestedAllConditionsTrue(res)
+		if hasNested {
+			if !met {
+				return fmt.Sprintf("%s nested resource conditions not all True", label)
+			}
+			return ""
+		}
+	}
+	if !hasCondition(res, "Ready", "True") {
+		return fmt.Sprintf("%s to have Ready=True", label)
+	}
+	if !hasCondition(res, "Synced", "True") {
+		return fmt.Sprintf("%s to have Synced=True", label)
+	}
+	return ""
+}
+
+// isKubernetesObject returns true if the resource is a provider-kubernetes
+// Object. Two API groups carry the kind: "kubernetes.crossplane.io/"
+// (cluster-scoped) and "kubernetes.m.crossplane.io/" (namespace-scoped, added
+// by provider-kubernetes for Crossplane v2). The kind stays "Object" in both,
+// so only the group check needs to accept the namespaced variant.
 func isKubernetesObject(s *structpb.Struct) bool {
 	if s == nil {
 		return false
 	}
 	av := s.GetFields()["apiVersion"]
-	if av == nil || !strings.Contains(av.GetStringValue(), "kubernetes.crossplane.io/") {
+	if av == nil {
+		return false
+	}
+	apiVersion := av.GetStringValue()
+	if !strings.Contains(apiVersion, "kubernetes.crossplane.io/") &&
+		!strings.Contains(apiVersion, "kubernetes.m.crossplane.io/") {
 		return false
 	}
 	k := s.GetFields()["kind"]

@@ -215,9 +215,10 @@ type Collector struct {
 	dependencies   []DependencyPair
 	cc             *ConditionCollector
 	scriptName     string
-	compositeKind  string                // observed XR kind, used to label metrics (e.g. "XCluster")
-	oxr            *structpb.Struct      // frozen observed XR; currently unused, kept for API stability
-	observed       *convert.StarlarkDict // frozen observed composed resources; may be nil
+	compositeKind  string                           // observed XR kind, used to label metrics (e.g. "XCluster")
+	oxr            *structpb.Struct                 // frozen observed XR; currently unused, kept for API stability
+	observed       *convert.StarlarkDict            // frozen observed composed resources; may be nil
+	manifests      map[string]*convert.StarlarkDict // lazy get_manifest views, keyed by resource name
 }
 
 // NewCollector creates an empty Collector. The ConditionCollector is used to
@@ -307,6 +308,7 @@ func stripObservedReadOnlyFields(s *structpb.Struct) {
 // The caller must NOT hold c.mu (lock ordering: c.mu before cc.mu).
 func (c *Collector) recordPreserve(name string, body *structpb.Struct, message string) {
 	c.mu.Lock()
+	delete(c.manifests, name)
 	c.resources[name] = CollectedResource{
 		Name:  name,
 		Body:  body,
@@ -508,6 +510,7 @@ func (c *Collector) RemoveResources(names []string) {
 	defer c.mu.Unlock()
 	for _, name := range names {
 		delete(c.resources, name)
+		delete(c.manifests, name)
 	}
 }
 
@@ -659,10 +662,13 @@ func (c *Collector) resourceFn(
 		return nil, err
 	}
 
-	// Inject resource-name label for Usage selector matching.
+	// Inject resource-name label for Usage selector matching. The value is made
+	// label-safe (<=63 bytes) because the composition-resource-name can exceed
+	// the Kubernetes label limit; the same transform is applied to the Usage
+	// selector so both sides still match.
 	metadata := getOrCreateNestedStruct(s, "metadata")
 	labels := getOrCreateNestedStruct(metadata, "labels")
-	labels.Fields[ResourceNameLabel] = structpb.NewStringValue(name)
+	labels.Fields[ResourceNameLabel] = structpb.NewStringValue(ResourceNameLabelValue(name))
 
 	// Convert connection_details dict to map[string][]byte if provided.
 	var cd map[string][]byte
@@ -749,6 +755,7 @@ func (c *Collector) resourceFn(
 	}
 
 	c.mu.Lock()
+	delete(c.manifests, name)
 	c.resources[name] = CollectedResource{
 		Name:              name,
 		Body:              s,

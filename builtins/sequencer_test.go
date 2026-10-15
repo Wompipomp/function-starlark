@@ -709,6 +709,50 @@ func TestSequencer(t *testing.T) {
 			wantEventCount:  0,
 		},
 		{
+			name: "NamespacedKubernetesObjectNestedAllTrue",
+			// Crossplane v2 namespaced Object (kubernetes.m.crossplane.io) with
+			// nested conditions all True -> dependency met.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.m.crossplane.io/v1alpha1", true, []map[string]any{
+					{"type": "Available", "status": "True"},
+					{"type": "Progressing", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "NamespacedKubernetesObjectNestedOneFalse",
+			// Discriminating case: the wrapper reports Ready=True+Synced=True while
+			// the nested manifest is Available=False. Only the Object branch looks at
+			// nested conditions, so deferring here proves the namespaced group is
+			// recognized -- an unrecognized group falls through to the wrapper-only
+			// check and would wrongly treat the dependency as met.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-deploy", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-deploy": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-deploy": k8sObjectStruct("kubernetes.m.crossplane.io/v1alpha1", true, []map[string]any{
+					{"type": "Available", "status": "False"},
+					{"type": "Progressing", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  1,
+			wantEventMsgs: []string{
+				`1 resource(s) deferred: app`,
+			},
+		},
+		{
 			name: "KubernetesObjectFieldPathPrecedence",
 			// K8s Object with FieldPath dependency -> FieldPath takes precedence (no change in behavior).
 			deps: []DependencyPair{

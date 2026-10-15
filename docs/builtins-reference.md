@@ -33,9 +33,10 @@ composite resource model.
 | `set_composite_ready()` | function | Explicitly set the XR's Ready state (overrides auto-gating) |
 | `set_connection_details()` | function | Set XR-level connection details |
 | `set_xr_status()` | function | Set XR status field at dot-path with auto-created intermediates |
-| `get_observed()` | function | One-call observed resource field lookup with default |
-| `require_extra_resource()` | function | Request a single extra resource |
-| `require_extra_resources()` | function | Request multiple extra resources |
+| `get_observed()` | function | Observed resource body or field lookup with default (accepts a handle) |
+| `get_manifest()` | function | Emitted manifest body or field lookup for a `Resource()` handle |
+| `require_extra_resource()` | function | Request a single extra resource; returns a handle |
+| `require_extra_resources()` | function | Request multiple extra resources; returns a handle |
 | `schema()` | function | Define a typed constructor with field validation |
 | `field()` | function | Define a field descriptor for schema constructors |
 | `struct()` | function | Create an immutable struct with named fields (dot-access) |
@@ -43,7 +44,7 @@ composite resource model.
 | `get_extra_resource()` | function | One-call extra-resource field lookup with default |
 | `get_extra_resources()` | function | Get all extra resources for a name as list |
 | `is_observed()` | function | Check if a composed resource exists in observed state |
-| `observed_body()` | function | Get observed resource body with default |
+| `observed_body()` | function | Deprecated: use `get_observed(ref)` without a path |
 | `get_condition()` | function | Get condition dict from observed resource |
 | `set_response_ttl()` | function | Set response TTL for requeue interval |
 
@@ -170,7 +171,7 @@ a mapping, so `get()` always returns its default.
 
 ```python
 require_extra_resource("config", "v1", "ConfigMap",
-    match_name="my-config")
+    match_name="my-config", namespace="my-namespace")
 
 # After the function re-runs with the extra resource available:
 value = get_extra_resource("config", "data.my-key", "default")   # first match, safe default
@@ -265,9 +266,17 @@ Kubernetes resources in a composition.
 
 **Returns:** `ResourceRef` (when emitted) or `SkippedRef` (when any skip path
 was taken). Both expose a `.name` attribute holding the composition resource
-name. `SkippedRef` is **falsy** in boolean context, so existing `if ref:`
-patterns continue to work. `SkippedRef` is also accepted in `depends_on` (see
-below).
+name. The handle is accepted wherever a resource name is expected:
+`depends_on`, `get_observed()`, `get_manifest()`, `is_observed()` and
+`get_condition()`, so scripts never need to spell out `ref.name`. `SkippedRef`
+is **falsy** in boolean context, so existing `if ref:` patterns continue to
+work. `SkippedRef` is also accepted in `depends_on` (see below).
+
+```python
+bucket = Resource("bucket", {...})
+bucket_arn  = get_observed(bucket, "status.atProvider.arn", "")   # observed state
+bucket_name = get_manifest(bucket, "metadata.name")               # desired state
+```
 
 **ready -- three-state readiness:**
 
@@ -730,38 +739,67 @@ set_connection_details({
 ### require_extra_resource
 
 ```python
-require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None)
+require_extra_resource(name, apiVersion, kind, match_name=None, match_labels=None, namespace=None)
+require_extra_resource(apiVersion, kind, match_name=None, match_labels=None, namespace=None)
 ```
 
 Request a single extra resource from the Crossplane API server. At least one of
-`match_name` or `match_labels` must be provided. Read the result via
-`get_extra_resource(name, "path", default)` on the next reconciliation (the raw
-`extra_resources[name]` value is a list of matched bodies, so prefer the accessor).
+`match_name` or `match_labels` must be provided. Returns a handle that
+`get_extra_resource(handle, "path", default)` accepts on the next
+reconciliation (the raw `extra_resources[name]` value is a list of matched
+bodies, so prefer the accessor).
+
+`name` may be omitted. It is then derived from the selector as
+`<Kind>/<namespace>/<match_name>` (or `<Kind>/<namespace>/k=v,k=v` for label
+selectors), so two calls with the same selector share one requirement.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Request name (used as key in `extra_resources`). |
+| `name` | string | derived | Request name (used as key in `extra_resources`). Omit to derive it from the selector. |
 | `apiVersion` | string | required | API version to match (e.g., `"v1"`). |
 | `kind` | string | required | Kind to match (e.g., `"ConfigMap"`). |
 | `match_name` | string \| None | None | Match by resource name. |
 | `match_labels` | dict \| None | None | Match by labels. |
+| `namespace` | string \| None | None | Namespace to fetch from (Crossplane v2+; see below). |
 
-**Returns:** None.
+**Returns:** An `ExtraRef` handle with a `.name` attribute. Pass it to
+`get_extra_resource()` / `get_extra_resources()` in place of the name string.
 
 **Note:** If both `match_name` and `match_labels` are provided, `match_name`
 takes precedence and `match_labels` is ignored (a warning is emitted).
 
+**Namespaced resources (Crossplane v2+):** Fetching a *namespaced* resource by
+name requires `namespace=` — without it, Crossplane cannot resolve the name and
+the lookup fails. Omit `namespace` for cluster-scoped resources. With
+`match_labels`, omitting `namespace` matches across **all** namespaces, while
+setting it scopes the match to that namespace. The `namespace` selector field
+exists only in the Crossplane v2 function protocol: v1.x servers (up to and
+including v1.20) silently ignore it, so on v1.x clusters namespaced resources
+can only be matched by labels (across all namespaces). Scripts that don't pass
+`namespace` send requests identical to previous versions on any server.
+
 **Example:**
 
 ```python
-# Request a ConfigMap by name
-require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
+# Request a ConfigMap by name from a namespace (Crossplane v2+); the handle
+# is all you need to read it back
+config = require_extra_resource("v1", "ConfigMap",
+    match_name="my-config", namespace="my-namespace")
+
+# Cluster-scoped resources need no namespace (works on v1.x and v2)
+env = require_extra_resource("apiextensions.crossplane.io/v1beta1",
+    "EnvironmentConfig", match_name="prod-env")
 
 # On next reconciliation, read the result with the accessor (NOT
-# get(extra_resources["config"], ...) -- that value is a list, so get() would
-# always return the default).
+# get(extra_resources[...], ...) -- that value is a list, so get() would
+# always return the default). On the first reconciliation the default is
+# returned because Crossplane has not fetched the resource yet.
+db_host = get_extra_resource(config, "data.DB_HOST", "localhost")
+
+# Explicit names keep working
+require_extra_resource("config", "v1", "ConfigMap", match_name="my-config")
 db_host = get_extra_resource("config", "data.DB_HOST", "localhost")
 ```
 
@@ -770,35 +808,42 @@ db_host = get_extra_resource("config", "data.DB_HOST", "localhost")
 ### require_extra_resources
 
 ```python
-require_extra_resources(name, apiVersion, kind, match_labels)
+require_extra_resources(name, apiVersion, kind, match_labels, namespace=None)
+require_extra_resources(apiVersion, kind, match_labels, namespace=None)
 ```
 
 Request multiple extra resources matching a label selector. Unlike
-`require_extra_resource`, `match_labels` is required (not optional). Read the
-results via `get_extra_resources(name)` on the next reconciliation (returns the
-list of matched bodies, or `[]`).
+`require_extra_resource`, `match_labels` is required (not optional). Returns a
+handle for `get_extra_resources(handle)` on the next reconciliation (returns
+the list of matched bodies, or `[]`). `name` may be omitted and is then derived
+from the selector like in `require_extra_resource`.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Request name (used as key in `extra_resources`). |
+| `name` | string | derived | Request name (used as key in `extra_resources`). Omit to derive it from the selector. |
 | `apiVersion` | string | required | API version to match. |
 | `kind` | string | required | Kind to match. |
 | `match_labels` | dict | required | Label selector (required). |
+| `namespace` | string \| None | None | Scope the label match to one namespace (Crossplane v2+). Omitted: matches across all namespaces. Ignored by v1.x servers. |
 
-**Returns:** None.
+**Returns:** An `ExtraRef` handle with a `.name` attribute.
 
 **Example:**
 
 ```python
-# Request all Secrets with a specific label
-require_extra_resources("certs", "v1", "Secret",
+# Request all Secrets with a specific label (all namespaces)
+certs = require_extra_resources("v1", "Secret",
     match_labels={"app": "my-app", "type": "tls"})
+
+# Scope the match to one namespace (Crossplane v2+)
+team_certs = require_extra_resources("v1", "Secret",
+    match_labels={"type": "tls"}, namespace="team-a")
 
 # On next reconciliation, iterate the results. get_extra_resources returns the
 # list of matched bodies (or [] when none matched), so no existence guard needed.
-for cert in get_extra_resources("certs"):
+for cert in get_extra_resources(certs):
     name = get(cert, "metadata.name", "unknown")
 ```
 
@@ -936,39 +981,45 @@ set_xr_status("region", region)
 ### get_observed
 
 ```python
-get_observed(name, path, default=None)
+get_observed(name, path=None, default=None)
 ```
 
-One-call observed resource field lookup. Equivalent to
-`get(observed.get(name, {}), path, default)` but in a single call. Returns the
-default when the named resource is missing, the path is missing, or the value at
-the path is None.
+The one accessor for observed composed resources. With a `path` it returns the
+value at that path; without a path it returns the full observed body (a
+read-only `StarlarkDict` with dot access). Returns `default` when the resource
+is missing, the path is missing, or the value at the path is None. `name` is a
+composition resource name or the handle returned by `Resource()`.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Composition resource name. Must not be empty. |
-| `path` | string or list | required | Dot-separated path or list of string keys (same format as `get()`). Must not be empty. |
+| `name` | string or handle | required | Composition resource name, or a `ResourceRef`/`SkippedRef` from `Resource()`. |
+| `path` | string, list or None | None | Dot-separated path or list of string keys (same format as `get()`). `""` and `[]` are rejected. None returns the full body. |
 | `default` | any | None | Value to return if the resource or path is not found. |
 
-**Returns:** Value at the path in the named observed resource, or `default` if
-the resource is missing, the path is missing, or the value is None.
+**Returns:** Value at the path, the full body when no path is given, or
+`default` if the resource is missing, the path is missing, or the value is None.
 
 **Example:**
 
 ```python
-# Before: two-step lookup with manual existence check
-bucket_arn = ""
-if "my-bucket" in observed:
-    bucket_arn = get(observed["my-bucket"], "status.atProvider.arn", "")
+bucket = Resource("bucket", {...})
 
-# After: one-call with default
-bucket_arn = get_observed("my-bucket", "status.atProvider.arn", "")
+# Field with default -- safe on the first reconciliation
+bucket_arn = get_observed(bucket, "status.atProvider.arn", "")
 
-# Safe on first reconciliation when no observed resources exist
+# Full body, then dot access
+body = get_observed(bucket)
+if body != None:
+    region = body.status.atProvider.region
+
+# A name string works the same way
 db_host = get_observed("my-db", "status.atProvider.address", "pending")
 ```
+
+The raw `observed` dict remains available for iteration (`for name in observed`)
+and membership tests (`name in observed`); use `get_observed()` for field access.
 
 **Tip — copy a whole status subtree in one call:**
 
@@ -996,6 +1047,55 @@ Notes:
   prunes any status field the XRD doesn't define, so copying a subtree wholesale
   silently drops undeclared fields. Keep the XRD `status` schema and what you
   copy in sync — or write only the specific fields you have declared.
+
+---
+
+### get_manifest
+
+```python
+get_manifest(name, path=None, default=None)
+```
+
+Read the desired body of a resource registered earlier in the same script via
+`Resource()`, exactly as it will be emitted: after `None` compaction and after
+`labels=` / `external_name=` merging. The mirror of `get_observed()` for the
+desired state, with the same signature and path semantics.
+
+The body is converted lazily on first access and cached per resource, so
+`Resource()` calls that nobody reads back cost nothing extra. Registering the
+same name again refreshes the view.
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | string or handle | required | Composition resource name, or the `ResourceRef` from `Resource()`. |
+| `path` | string, list or None | None | Dot-separated path or list of string keys. None returns the full body. |
+| `default` | any | None | Value to return when the resource was not emitted (unknown name or `SkippedRef`) or the path is missing. |
+
+**Returns:** Value at the path, the full body when no path is given, or
+`default`.
+
+**Example:**
+
+```python
+res = Resource("res", {
+    "apiVersion": "api.group/v1",
+    "kind": "Kind",
+    "metadata": {"name": "my-resource", "namespace": "my-namespace"},
+    "spec": {"foo": "bar"},
+})
+
+Resource("res2", {
+    "apiVersion": "api.group/v1",
+    "kind": "Kind2",
+    "metadata": {
+        "name":      get_manifest(res, "metadata.name"),
+        "namespace": get_manifest(res, "metadata.namespace", "default"),
+    },
+    "spec": {"foo": get_observed(res, "status.atProvider.foo", "")},
+}, depends_on=[res])
+```
 
 ---
 
@@ -1323,7 +1423,8 @@ get_extra_resource(name, path=None, default=None)
 One-call extra-resource field lookup. Returns the value at `path` within the
 first matching extra resource for `name`, or `default` when the name is missing,
 the match list is empty, or the path is not found within the resource. When
-`path` is None, returns the full resource body dict.
+`path` is None, returns the full resource body dict. `name` is the request name
+or the handle returned by `require_extra_resource()`.
 
 This function takes the first item (`[0]`) from the match list for the given
 name. Use `get_extra_resources()` (plural) to retrieve all matching resources.
@@ -1336,25 +1437,26 @@ reconciliations).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Request name (key in `extra_resources`). Must not be empty. |
+| `name` | string or handle | required | Request name (key in `extra_resources`) or the `ExtraRef` from `require_extra_resource()`. Must not be empty. |
 | `path` | string \| None | None | Dot-separated path within the resource body. None returns the full body. |
 | `default` | any | None | Value to return when the resource, match list, or path is missing. |
 
 **Returns:** Value at the path in the first matching extra resource, or `default`.
 
-**Errors:** Fails if `name` is empty.
+**Errors:** Fails if `name` is empty or not a string/handle.
 
 **Example:**
 
 ```python
 # Request an extra resource (first reconciliation)
-require_extra_resource("cluster", "v1", "ConfigMap", match_name="cluster-info")
+cluster = require_extra_resource("v1", "ConfigMap",
+    match_name="cluster-info", namespace="kube-public")
 
 # Read a field from the extra resource (subsequent reconciliation)
-region = get_extra_resource("cluster", "spec.region", "us-west-2")
+region = get_extra_resource(cluster, "spec.region", "us-west-2")
 
 # Get the full resource body (path=None)
-cluster_body = get_extra_resource("cluster")
+cluster_body = get_extra_resource(cluster)
 ```
 
 ---
@@ -1375,7 +1477,7 @@ on each resource and returns only values where the path exists. Returns `default
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Request name (key in `extra_resources`). Must not be empty. |
+| `name` | string or handle | required | Request name (key in `extra_resources`) or the `ExtraRef` from `require_extra_resources()`. Must not be empty. |
 | `path` | string \| None | None | Dot-separated path within each resource body. None returns the full body dicts. |
 | `default` | any | `[]` | Value to return when the resource or match list is missing. |
 
@@ -1388,15 +1490,14 @@ is not found.
 
 ```python
 # Request multiple extra resources by label
-require_extra_resources("certs", "v1", "Secret", match_labels={"type": "tls"})
+certs = require_extra_resources("v1", "Secret", match_labels={"type": "tls"})
 
 # Get all matching resources as a list
-certs = get_extra_resources("certs")
-for cert in certs:
+for cert in get_extra_resources(certs):
     name = get(cert, "metadata.name", "unknown")
 
 # Extract a specific field from each resource
-cert_names = get_extra_resources("certs", "metadata.name")
+cert_names = get_extra_resources(certs, "metadata.name")
 ```
 
 ---
@@ -1409,13 +1510,14 @@ is_observed(name)
 
 Returns True if the named composed resource exists in the observed state, False
 otherwise. Use this for branching without field access. Equivalent to
-`name in observed` but more readable and explicit about intent.
+`name in observed` but more readable and explicit about intent. Accepts the
+handle returned by `Resource()`.
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Composition resource name. Must not be empty. |
+| `name` | string or handle | required | Composition resource name or `ResourceRef`. Must not be empty. |
 
 **Returns:** `True` if the resource exists in observed state, `False` otherwise.
 
@@ -1438,9 +1540,13 @@ else:
 observed_body(name, default=None)
 ```
 
+**Deprecated.** Use `get_observed(name, default=...)` without a path, which
+returns the same body. `observed_body()` keeps working and emits one Warning
+event per reconciliation so remaining call sites can be found; it will be
+removed in a future major version.
+
 Returns the full observed resource body dict, or `default` if the named resource
-is not found. Combines existence check and body retrieval in one call. Equivalent
-to `observed.get(name, {}).get("resource", default)` but as a single call.
+is not found.
 
 **Parameters:**
 
@@ -1456,7 +1562,11 @@ to `observed.get(name, {}).get("resource", default)` but as a single call.
 **Example:**
 
 ```python
+# Deprecated
 db = observed_body("database", default={})
+
+# Replacement
+db = get_observed("database", default={})
 if db:
     db_host = get(db, "status.atProvider.address", "pending")
 ```
@@ -1475,14 +1585,14 @@ a **new unfrozen dict** (not a reference to frozen observed data), so you can
 safely modify it. The dict always has exactly 4 keys; missing fields default to
 empty string.
 
-The first argument is the **observed resource name** (not the resource dict
-itself).
+The first argument is the **observed resource name** or the handle returned by
+`Resource()` (not the resource dict itself).
 
 **Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | string | required | Composition resource name. Must not be empty. |
+| `name` | string or handle | required | Composition resource name or `ResourceRef`. Must not be empty. |
 | `type` | string | required | Condition type to look up (e.g., `"Ready"`, `"Synced"`). Must not be empty. |
 
 **Returns:** Dict with keys `status`, `reason`, `message`, `lastTransitionTime`,

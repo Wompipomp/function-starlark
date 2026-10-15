@@ -35,6 +35,7 @@ type ConditionCollector struct {
 	mu         sync.Mutex
 	conditions []CollectedCondition
 	events     []CollectedEvent
+	deprecated map[string]bool
 }
 
 // NewConditionCollector creates an empty ConditionCollector.
@@ -81,6 +82,21 @@ func (cc *ConditionCollector) AddEvent(e CollectedEvent) {
 	cc.mu.Lock()
 	cc.events = append(cc.events, e)
 	cc.mu.Unlock()
+}
+
+// warnDeprecatedOnce records a Warning event for a deprecated builtin, at
+// most once per reconciliation so hot loops do not flood the event stream.
+func (cc *ConditionCollector) warnDeprecatedOnce(key, message string) {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+	if cc.deprecated == nil {
+		cc.deprecated = make(map[string]bool)
+	}
+	if cc.deprecated[key] {
+		return
+	}
+	cc.deprecated[key] = true
+	cc.events = append(cc.events, CollectedEvent{Severity: "Warning", Message: message, Target: "Composite"})
 }
 
 // AddCondition appends a condition to the collector. Used by fn.go

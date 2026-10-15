@@ -1,0 +1,66 @@
+# Composition that tests NAMESPACED extra resources (Crossplane 2.x only).
+#
+# The namespace= kwarg maps to the ResourceSelector.namespace proto field,
+# which exists only in the v2 function protocol. Crossplane 1.x servers
+# ignore the field and cannot fetch namespaced resources by name (the
+# name-Get without a namespace errors the pipeline), so the runner applies
+# this composition only on 2.x clusters. Cluster-scoped selectors are
+# covered by composition-extra-resources.yaml, which runs everywhere.
+#
+# Three scenarios, all against ConfigMaps the runner pre-creates:
+#   1. by name, scoped:   e2e-extra-cm in namespace e2e-extra-ns-a
+#   2. by labels, scoped: only the ConfigMap in e2e-extra-ns-a matches
+#   3. by labels, global: matches across all namespaces (ns-a AND ns-b)
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: extra-resources-ns-test
+  labels:
+    e2e-test: extra-resources-ns
+spec:
+  compositeTypeRef:
+    apiVersion: e2e.fn-starlark.io/v1
+    kind: XTest
+  mode: Pipeline
+  pipeline:
+    - step: test-extra-resources-ns
+      functionRef:
+        name: function-starlark
+      input:
+        apiVersion: starlark.fn.crossplane.io/v1alpha1
+        kind: StarlarkInput
+        spec:
+          source: |
+            # --- Requirements (must be called every run for convergence) ---
+            require_extra_resource("ns_cm_by_name", "v1", "ConfigMap",
+                match_name="e2e-extra-cm", namespace="e2e-extra-ns-a")
+            require_extra_resources("ns_cms_scoped", "v1", "ConfigMap",
+                match_labels={"e2e-extra-cm": "true"}, namespace="e2e-extra-ns-a")
+            require_extra_resources("ns_cms_all", "v1", "ConfigMap",
+                match_labels={"e2e-extra-cm": "true"})
+
+            # --- Readers (empty on iteration 1, populated on iteration 2) ---
+            by_name_value = get_extra_resource("ns_cm_by_name", "data.hello", "")
+            scoped_names = get_extra_resources("ns_cms_scoped", "metadata.name")
+            all_names = get_extra_resources("ns_cms_all", "metadata.name")
+
+            set_xr_status("test.extraNsByNameValue", by_name_value)
+            set_xr_status("test.extraNsScopedNamesSorted", ",".join(sorted(scoped_names)))
+            set_xr_status("test.extraNsAllNamesSorted", ",".join(sorted(all_names)))
+            set_xr_status("test.extraNsReady",
+                by_name_value == "from-ns-a" and
+                len(scoped_names) == 1 and
+                len(all_names) == 2)
+
+            # Emit one resource so the XR has something to become Ready on.
+            Resource("extra-ns-dummy", {
+                "apiVersion": "nop.crossplane.io/v1alpha1",
+                "kind": "NopResource",
+                "spec": {"forProvider": {"conditionAfter": [
+                    {"conditionType": "Ready", "conditionStatus": "True", "time": "0s"},
+                    {"conditionType": "Synced", "conditionStatus": "True", "time": "0s"},
+                ]}},
+            })
+    - step: auto-ready
+      functionRef:
+        name: function-auto-ready

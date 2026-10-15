@@ -24,10 +24,12 @@ with zero external toolchain.
   that catch typos, wrong types, and missing fields at construction time. Mix
   schema-validated and plain dict resources freely.
   [Builtins reference](docs/builtins-reference.md)
-- **35 predeclared names** -- 6 globals, 23 functions, and 6 namespace modules
+- **36 predeclared names** -- 6 globals, 24 functions, and 6 namespace modules
   (json, crypto, encoding, dict, regex, yaml) available without imports.
-  Use `get_extra_resource()` for one-call extra-resource field access and
-  `set_response_ttl()` for custom requeue intervals.
+  Every accessor takes the handle returned by `Resource()` or
+  `require_extra_resource()`: `get_observed(ref, "path")`, `get_manifest(ref,
+  "path")`, `get_extra_resource(ref, "path")`. Use `set_response_ttl()` for
+  custom requeue intervals.
   Recursive `dict.compact()` prunes None from nested dicts. Resource()
   `when`/`preserve_observed` kwargs enable declarative gating and cliff-guard
   patterns. [Builtins reference](docs/builtins-reference.md)
@@ -65,7 +67,7 @@ with zero external toolchain.
 | Readiness control | ready= kwarg (None/True/False) | Annotation-based | Annotation-based |
 | Type system | Opt-in schema validation + namespace alias imports | Schema-based with types | Untyped strings |
 | Observability | 9 Prometheus metrics | None built-in | None built-in |
-| Metadata builtins | get_label(), get_annotation(), get_observed(), set_xr_status() | Manual via get()/set | Manual via template |
+| Metadata builtins | get_label(), get_annotation(), get_observed(), get_manifest(), set_xr_status() | Manual via get()/set | Manual via template |
 | Sandbox | Hermetic (no I/O, no network) | KCL sandbox | Go template sandbox |
 | Standard library | networking, naming, labels, conditions (all_ready, any_degraded) | KCL module ecosystem | Sprig functions |
 | JSON | `json.*` predeclared (encode, decode, encode_indent, indent) | `json` module (import) | `toJson`/`fromJson` (Sprig) |
@@ -75,7 +77,7 @@ with zero external toolchain.
 | Resource gating | `when=`/`preserve_observed=` kwargs on `Resource()` | Not built-in | Not built-in |
 | Regex | `regex.*` (match, find, groups, replace, split) | `regex` module (import) | `regexMatch`, `regexFind` (Sprig) |
 | YAML | `yaml.*` (encode, decode, decode_stream) | `yaml` module (import) | `toYaml`/`fromYaml` (Sprig) |
-| Observed helpers | `is_observed()`, `observed_body()`, `get_extra_resource()`, `get_condition()` | -- | -- |
+| Observed helpers | `is_observed()`, `get_observed()`, `get_extra_resource()`, `get_condition()` (all accept handles) | -- | -- |
 | Response TTL | `set_response_ttl()` | -- | -- |
 | Condition aggregation | `all_ready()`, `any_degraded()` (stdlib) | -- | -- |
 

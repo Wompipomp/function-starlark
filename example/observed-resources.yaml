@@ -1,0 +1,39 @@
+# Mock observed state for the second render-check pass (see Makefile).
+#
+# The first pass renders a fresh XR with no observed resources, which defers
+# "notification-topic" and emits no Usage. This file marks bucket-0 and the
+# topic as observed and ready, so the second pass exercises the steady state:
+# the topic is no longer deferred and the depends_on pair produces a
+# ClusterUsage (both resources are cluster-scoped). The render engine matches
+# observed resources to the composition by the composition-resource-name
+# annotation.
+---
+apiVersion: s3.aws.upbound.io/v1beta1
+kind: Bucket
+metadata:
+  name: example-xr-bucket-0
+  annotations:
+    crossplane.io/composition-resource-name: bucket-0
+status:
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: Available
+    - type: Synced
+      status: "True"
+      reason: ReconcileSuccess
+---
+apiVersion: sns.aws.upbound.io/v1beta1
+kind: Topic
+metadata:
+  name: example-xr-notifications
+  annotations:
+    crossplane.io/composition-resource-name: notification-topic
+status:
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: Available
+    - type: Synced
+      status: "True"
+      reason: ReconcileSuccess

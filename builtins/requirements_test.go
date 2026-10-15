@@ -211,6 +211,50 @@ func TestRequireExtraResource_NeitherMatchNameNorLabels_Error(t *testing.T) {
 	}
 }
 
+func TestRequireExtraResource_Namespace(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
+		starlark.String("my-cm"),
+		starlark.String("v1"),
+		starlark.String("ConfigMap"),
+	}, []starlark.Tuple{
+		{starlark.String("match_name"), starlark.String("app-config")},
+		{starlark.String("namespace"), starlark.String("team-a")},
+	})
+	if err != nil {
+		t.Fatalf("require_extra_resource error: %v", err)
+	}
+
+	r := rc.Requirements()[0]
+	if r.Namespace != "team-a" {
+		t.Errorf("Namespace = %q, want 'team-a'", r.Namespace)
+	}
+	if r.MatchName != "app-config" {
+		t.Errorf("MatchName = %q, want 'app-config'", r.MatchName)
+	}
+}
+
+func TestRequireExtraResource_NoNamespace_Empty(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	_, err := starlark.Call(thread, rc.RequireExtraResourceBuiltin(), starlark.Tuple{
+		starlark.String("my-db"),
+		starlark.String("v1"),
+		starlark.String("Instance"),
+	}, []starlark.Tuple{
+		{starlark.String("match_name"), starlark.String("db")},
+	})
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if r := rc.Requirements()[0]; r.Namespace != "" {
+		t.Errorf("Namespace = %q, want empty when not provided", r.Namespace)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // require_extra_resources tests
 // ---------------------------------------------------------------------------
@@ -239,6 +283,34 @@ func TestRequireExtraResources_MatchLabels(t *testing.T) {
 	r := reqs[0]
 	if r.Name != "all-dbs" {
 		t.Errorf("Name = %q, want 'all-dbs'", r.Name)
+	}
+	if r.MatchLabels["team"] != "platform" {
+		t.Errorf("MatchLabels[team] = %q, want 'platform'", r.MatchLabels["team"])
+	}
+}
+
+func TestRequireExtraResources_Namespace(t *testing.T) {
+	rc := NewRequirementsCollector()
+	thread := new(starlark.Thread)
+
+	labels := new(starlark.Dict)
+	_ = labels.SetKey(starlark.String("team"), starlark.String("platform"))
+
+	_, err := starlark.Call(thread, rc.RequireExtraResourcesBuiltin(), starlark.Tuple{
+		starlark.String("team-cms"),
+		starlark.String("v1"),
+		starlark.String("ConfigMap"),
+		labels,
+	}, []starlark.Tuple{
+		{starlark.String("namespace"), starlark.String("team-a")},
+	})
+	if err != nil {
+		t.Fatalf("require_resources error: %v", err)
+	}
+
+	r := rc.Requirements()[0]
+	if r.Namespace != "team-a" {
+		t.Errorf("Namespace = %q, want 'team-a'", r.Namespace)
 	}
 	if r.MatchLabels["team"] != "platform" {
 		t.Errorf("MatchLabels[team] = %q, want 'platform'", r.MatchLabels["team"])
@@ -388,6 +460,42 @@ func TestApplyRequirements_MatchLabels(t *testing.T) {
 	}
 	if ml.Labels["team"] != "platform" {
 		t.Errorf("Labels[team] = %q, want 'platform'", ml.Labels["team"])
+	}
+}
+
+func TestApplyRequirements_Namespace(t *testing.T) {
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyRequirements(rsp, []CollectedRequirement{
+		{
+			Name:       "my-cm",
+			APIVersion: "v1",
+			Kind:       "ConfigMap",
+			MatchName:  "app-config",
+			Namespace:  "team-a",
+		},
+	})
+
+	sel := rsp.Requirements.Resources["my-cm"]
+	if sel.Namespace == nil {
+		t.Fatal("Namespace should be set on the selector")
+	}
+	if sel.GetNamespace() != "team-a" {
+		t.Errorf("Namespace = %q, want 'team-a'", sel.GetNamespace())
+	}
+}
+
+func TestApplyRequirements_NoNamespace_NilOnWire(t *testing.T) {
+	// An omitted namespace must leave the proto field unset (nil), so the
+	// wire format stays byte-identical to pre-namespace requests and
+	// Crossplane v1.x servers see exactly what they saw before.
+	rsp := &fnv1.RunFunctionResponse{}
+	ApplyRequirements(rsp, []CollectedRequirement{
+		{Name: "my-db", APIVersion: "v1", Kind: "Instance", MatchName: "db"},
+	})
+
+	sel := rsp.Requirements.Resources["my-db"]
+	if sel.Namespace != nil {
+		t.Errorf("Namespace = %q, want nil when not provided", *sel.Namespace)
 	}
 }
 

@@ -32,9 +32,11 @@ type StarlarkInputSpec struct {
 	// UsageAPIVersion selects the Crossplane Usage API version.
 	// "v1" = apiextensions.crossplane.io/v1beta1 (Crossplane 1.x).
 	// "v2" = protection.crossplane.io/v1beta1 (Crossplane 2.x, default).
-	// On "v2" the kind is scope-aware: namespaced composites get the
-	// namespaced Usage kind, cluster-scoped (legacy) composites get
-	// ClusterUsage.
+	// On "v2" each depends_on pair is scope-aware once both sides are
+	// observed and ready: a pair with a namespaced observed resource becomes
+	// a namespaced Usage; two cluster-scoped observed resources become a
+	// ClusterUsage. No Usage is emitted before that, so desired bodies that
+	// omit metadata.namespace cannot be mistaken for cluster-scoped.
 	// Set to "v1" if running Crossplane 1.x.
 	// +optional
 	UsageAPIVersion string `json:"usageAPIVersion,omitempty"`

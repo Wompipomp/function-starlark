@@ -26,12 +26,12 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/wompipomp/function-starlark/input/v1alpha1"
 	"github.com/wompipomp/function-starlark/metrics"
 	"github.com/wompipomp/function-starlark/runtime"
@@ -2885,11 +2885,12 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
-		// "db" must be observed so that creation sequencing does not defer "app".
+		// Both sides must be observed and ready before a Usage is emitted.
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
+				"db":  observedReady("v1", "Database", ""),
+				"app": observedReady("v1", "App", ""),
 			},
 		},
 	}
@@ -2929,9 +2930,6 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	if got := body.GetFields()["apiVersion"].GetStringValue(); got != "protection.crossplane.io/v1beta1" {
 		t.Errorf("Usage apiVersion = %q, want protection.crossplane.io/v1beta1", got)
 	}
-	// Cluster-scoped composite + v2 API -> the cluster-scoped ClusterUsage
-	// kind (the v2 Usage kind is namespaced and cannot be composed by a
-	// cluster-scoped XR).
 	if got := body.GetFields()["kind"].GetStringValue(); got != "ClusterUsage" {
 		t.Errorf("Usage kind = %q, want ClusterUsage", got)
 	}
@@ -2967,6 +2965,51 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	}
 }
 
+// TestRunFunctionDependsOnObservedNamespace emits a namespaced Usage once both
+// sides are observed with metadata.namespace, even if desired bodies omit it.
+func TestRunFunctionDependsOnObservedNamespace(t *testing.T) {
+	rt := runtime.NewRuntime(logging.NewNopLogger())
+	f := &Function{log: logging.NewNopLogger(), runtime: rt}
+
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+
+	req := &fnv1.RunFunctionRequest{
+		Input: resource.MustStructJSON(fmt.Sprintf(`{
+			"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+			"kind": "StarlarkInput",
+			"spec": {"source": %q}
+		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{"metadata":{"namespace":"team-a"}}`)},
+			Resources: map[string]*fnv1.Resource{
+				"db":  observedReady("v1", "Database", "team-a"),
+				"app": observedReady("v1", "App", "team-a"),
+			},
+		},
+	}
+
+	rsp, err := f.RunFunction(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	assertNormalResult(t, rsp)
+
+	usageName := "usage-c2727553"
+	usage, ok := rsp.GetDesired().GetResources()[usageName]
+	if !ok {
+		t.Fatalf("expected Usage resource %q; got keys: %v", usageName, resourceNames(rsp.GetDesired().GetResources()))
+	}
+	body := usage.GetResource()
+	if got := body.GetFields()["kind"].GetStringValue(); got != "Usage" {
+		t.Errorf("kind = %q, want Usage", got)
+	}
+	gotNS := body.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
+	if gotNS != "team-a" {
+		t.Errorf("namespace = %q, want team-a", gotNS)
+	}
+}
+
 // TestRunFunctionDependsOnStringRef verifies that string refs in depends_on
 // produce Usage resources and emit a warning when the ref does not match any
 // resource created by the script.
@@ -2986,7 +3029,8 @@ func TestRunFunctionDependsOnStringRef(t *testing.T) {
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"external-vpc": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "VPC", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
+				"external-vpc": observedReady("v1", "VPC", ""),
+				"app":          observedReady("v1", "App", ""),
 			},
 		},
 	}
@@ -3034,7 +3078,8 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=["db"])`
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "DB", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
+				"db":  observedReady("v1", "DB", ""),
+				"app": observedReady("v1", "App", ""),
 			},
 		},
 	}
@@ -3083,11 +3128,11 @@ Resource("db", {"apiVersion": "v1", "kind": "Database"})`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q}
 		}`, script)),
-		// "db" must be observed so that creation sequencing does not defer "app".
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"db": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
+				"db":  observedReady("v1", "Database", ""),
+				"app": observedReady("v1", "App", ""),
 			},
 		},
 	}
@@ -3172,8 +3217,9 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		Observed: &fnv1.State{
 			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
 			Resources: map[string]*fnv1.Resource{
-				"cache": {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Cache", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
-				"db":    {Resource: resource.MustStructJSON(`{"apiVersion": "v1", "kind": "Database", "status": {"conditions": [{"type": "Ready", "status": "True"}, {"type": "Synced", "status": "True"}]}}`)},
+				"cache": observedReady("v1", "Cache", ""),
+				"db":    observedReady("v1", "Database", ""),
+				"app":   observedReady("v1", "App", ""),
 			},
 		},
 	}
@@ -3219,6 +3265,13 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 			"kind": "StarlarkInput",
 			"spec": {"source": %q, "usageAPIVersion": "v1"}
 		}`, script)),
+		Observed: &fnv1.State{
+			Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+			Resources: map[string]*fnv1.Resource{
+				"db":  observedReady("v1", "Database", ""),
+				"app": observedReady("v1", "App", ""),
+			},
+		},
 	}
 
 	rsp, err := f.RunFunction(context.Background(), req)
@@ -4325,6 +4378,19 @@ func resourceNames(resources map[string]*fnv1.Resource) []string {
 	return names
 }
 
+func readyObservedJSON(apiVersion, kind, namespace string) string {
+	meta := fmt.Sprintf(`{"name":%q`, strings.ToLower(kind))
+	if namespace != "" {
+		meta += fmt.Sprintf(`,"namespace":%q`, namespace)
+	}
+	meta += "}"
+	return fmt.Sprintf(`{"apiVersion":%q,"kind":%q,"metadata":%s,"status":{"conditions":[{"type":"Ready","status":"True"},{"type":"Synced","status":"True"}]}}`, apiVersion, kind, meta)
+}
+
+func observedReady(apiVersion, kind, namespace string) *fnv1.Resource {
+	return &fnv1.Resource{Resource: resource.MustStructJSON(readyObservedJSON(apiVersion, kind, namespace))}
+}
+
 // ---------------------------------------------------------------------------
 // HOUSE-04: Path traversal tests for loadScript
 // ---------------------------------------------------------------------------
@@ -4609,16 +4675,11 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Error("'app' should be deferred (withheld from desired state) because 'db' is not in observed")
 	}
 
-	// Usage resource should still be present (always emitted).
-	foundUsage := false
+	// Usage is not emitted until both sides are observed and ready.
 	for name := range resources {
 		if strings.HasPrefix(name, "usage-") {
-			foundUsage = true
-			break
+			t.Errorf("Usage %q must not be emitted while the dependent is unobserved", name)
 		}
-	}
-	if !foundUsage {
-		t.Error("expected Usage resource to be present even when dependent is deferred")
 	}
 
 	// Warning event with deferred resource names should be present.
@@ -4971,10 +5032,9 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	}
 }
 
-// TestRunFunctionCreationSequencing_UsageAlwaysEmitted verifies that Usage
-// resources are always emitted for all depends_on pairs regardless of
-// whether the dependent was deferred.
-func TestRunFunctionCreationSequencing_UsageAlwaysEmitted(t *testing.T) {
+// TestRunFunctionCreationSequencing_UsageDeferredUntilObservedReady verifies
+// that Usage is not emitted while the dependent is still unobserved.
+func TestRunFunctionCreationSequencing_UsageDeferredUntilObservedReady(t *testing.T) {
 	rt := runtime.NewRuntime(logging.NewNopLogger())
 	f := &Function{log: logging.NewNopLogger(), runtime: rt}
 
@@ -5003,16 +5063,10 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Error("'app' should be deferred (dep not observed)")
 	}
 
-	// Usage resource should still be present.
-	foundUsage := false
 	for name := range resources {
 		if strings.HasPrefix(name, "usage-") {
-			foundUsage = true
-			break
+			t.Errorf("Usage %q must not be emitted before both sides are observed and ready", name)
 		}
-	}
-	if !foundUsage {
-		t.Error("expected Usage resource for app->db dependency even when app is deferred")
 	}
 }
 

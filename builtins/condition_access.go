@@ -22,15 +22,16 @@ func getConditionImpl(
 	args starlark.Tuple,
 	kwargs []starlark.Tuple,
 ) (starlark.Value, error) {
-	var name, condType string
+	var nameVal starlark.Value
+	var condType string
 
 	if err := starlark.UnpackArgs(fnName, args, kwargs,
-		"name", &name, "type", &condType); err != nil {
+		"name", &nameVal, "type", &condType); err != nil {
 		return nil, err
 	}
-
-	if name == "" {
-		return nil, fmt.Errorf("%s: name must not be empty", fnName)
+	name, err := refName(fnName, nameVal)
+	if err != nil {
+		return nil, err
 	}
 	if condType == "" {
 		return nil, fmt.Errorf("%s: type must not be empty", fnName)
