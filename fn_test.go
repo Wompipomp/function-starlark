@@ -6072,3 +6072,69 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 		t.Errorf("expected ComposedResourcesReady=False/WaitingForDependencies, got %+v", rsp.GetConditions())
 	}
 }
+
+// Recovery must replace the stale condition on both XR and claim without
+// claiming that the composed resources (or the composite itself) are ready.
+func TestRunFunctionCompositeReady_RecoversAfterReferenceResolves(t *testing.T) {
+	f := &Function{log: logging.NewNopLogger(), runtime: runtime.NewRuntime(logging.NewNopLogger())}
+	script := `
+if not get(oxr, "spec.resolved", False):
+    set_composite_ready(False, reason="WaitingForPolicyReference", message="initiative missing")
+else:
+    Resource("assignment", {"apiVersion": "example.org/v1", "kind": "Assignment"}, ready=False)
+`
+	input := resource.MustStructJSON(fmt.Sprintf(`{
+		"apiVersion":"starlark.fn.crossplane.io/v1alpha1", "kind":"StarlarkInput",
+		"spec":{"source":%q}
+	}`, script))
+	first, err := f.RunFunction(context.Background(), &fnv1.RunFunctionRequest{
+		Input:    input,
+		Observed: &fnv1.State{Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{"spec":{"resolved":false}}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNormalResult(t, first)
+	if first.GetDesired().GetComposite().GetReady() != fnv1.Ready_READY_FALSE {
+		t.Fatal("missing reference must gate composite readiness")
+	}
+	var waiting *fnv1.Condition
+	for _, c := range first.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" {
+			waiting = c
+		}
+	}
+	if waiting == nil || waiting.GetStatus() != fnv1.Status_STATUS_CONDITION_FALSE {
+		t.Fatalf("missing waiting condition: %+v", first.GetConditions())
+	}
+	// Simulate Crossplane persisting the first response's condition on the XR.
+	oxr := resource.MustStructJSON(fmt.Sprintf(`{"spec":{"resolved":true},"status":{"conditions":[{
+		"type":%q,"status":"False","reason":%q,"message":%q
+	}]}}`, waiting.GetType(), waiting.GetReason(), waiting.GetMessage()))
+	second, err := f.RunFunction(context.Background(), &fnv1.RunFunctionRequest{
+		Input: input, Observed: &fnv1.State{Composite: &fnv1.Resource{Resource: oxr}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNormalResult(t, second)
+	if got := second.GetDesired().GetComposite().GetReady(); got != fnv1.Ready_READY_UNSPECIFIED {
+		t.Errorf("recovery forced composite readiness: %v", got)
+	}
+	if got := second.GetDesired().GetResources()["assignment"].GetReady(); got != fnv1.Ready_READY_FALSE {
+		t.Errorf("assignment readiness = %v, want READY_FALSE", got)
+	}
+	var recovered *fnv1.Condition
+	for _, c := range second.GetConditions() {
+		if c.GetType() == "ComposedResourcesReady" {
+			recovered = c
+		}
+	}
+	if recovered == nil || recovered.GetStatus() != fnv1.Status_STATUS_CONDITION_TRUE ||
+		recovered.GetReason() != "AllReady" || recovered.GetTarget() != fnv1.Target_TARGET_COMPOSITE_AND_CLAIM {
+		t.Fatalf("expected recovery for XR and claim, got %+v", recovered)
+	}
+	if recovered.GetMessage() == waiting.GetMessage() {
+		t.Error("stale waiting message survived recovery")
+	}
+}

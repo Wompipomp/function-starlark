@@ -511,17 +511,22 @@ const (
 // set_composite_ready() call wins. Otherwise any When(optional=False)
 // skip OR sequencer-deferred resource flips Ready to False and emits a
 // ComposedResourcesReady=False condition. With none of these, Ready is
-// left UNSPECIFIED.
+// left unchanged; an existing ComposedResourcesReady condition is recovered
+// without overriding readiness determined by other pipeline steps.
 func ApplyCompositeReady(rsp *fnv1.RunFunctionResponse, collector *Collector, cc *ConditionCollector) {
 	override, skips, defers, converged := collector.compositeReadyState()
 
 	if !override.Set && len(skips) == 0 && len(defers) == 0 {
-		if converged {
+		if converged || collector.hasCompositeReadyCondition() {
+			message := "No composition readiness blockers remain"
+			if converged {
+				message = "All sequenced dependencies are ready"
+			}
 			cc.AddCondition(CollectedCondition{
 				Type:    CompositeReadyConditionType,
 				Status:  "True",
 				Reason:  compositeReadyReasonAllReady,
-				Message: "All sequenced dependencies are ready",
+				Message: message,
 				Target:  "CompositeAndClaim",
 			})
 		}

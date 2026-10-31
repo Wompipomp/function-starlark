@@ -678,6 +678,15 @@ An explicit call **always overrides** auto-gating from
   updated on the response). A `message` without a `reason` is silently
   dropped -- Kubernetes conditions require a reason.
 
+When a previous readiness blocker resolves, omit the `set_composite_ready(False)`
+call. If the observed XR already has a `ComposedResourcesReady` condition and
+no explicit override, gating skips, or dependency deferrals remain, the function
+emits `ComposedResourcesReady=True` with reason `AllReady` for the XR and claim.
+This clears stale waiting messages without forcing the XR to `Ready=True`:
+managed resources must still pass the normal readiness checks. Existing desired
+readiness from earlier pipeline steps is preserved. XRs without this condition
+remain unchanged unless dependency sequencing converges.
+
 The `ComposedResourcesReady` condition type is reserved. Calling
 `set_condition("ComposedResourcesReady", ...)` directly raises an error; use
 this builtin or `Resource(..., when=False)` instead.
