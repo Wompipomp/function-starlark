@@ -114,7 +114,7 @@ func (s *Sequencer) Evaluate() SequencerResult {
 
 // isObservedReady reports whether an observed composed resource is ready
 // enough to participate in a Usage pair. Kubernetes Objects with nested
-// conditions require those nested conditions to all be True; otherwise
+// conditions are judged by those (see nestedUnmetReason); otherwise
 // Ready=True and Synced=True on the resource itself. A missing resource
 // is not ready.
 func isObservedReady(res *structpb.Struct) bool {
@@ -137,12 +137,8 @@ func unmetReadyReason(res *structpb.Struct, name string) string {
 		label = fmt.Sprintf("%q", name)
 	}
 	if isKubernetesObject(res) {
-		met, hasNested := nestedAllConditionsTrue(res)
-		if hasNested {
-			if !met {
-				return fmt.Sprintf("%s nested resource conditions not all True", label)
-			}
-			return ""
+		if conds := getNestedConditions(res); len(conds) > 0 {
+			return nestedUnmetReason(conds, label)
 		}
 	}
 	if !hasCondition(res, "Ready", "True") {
@@ -227,26 +223,39 @@ func getNestedConditions(s *structpb.Struct) []*structpb.Value {
 	return condList.GetValues()
 }
 
-// nestedAllConditionsTrue checks whether all nested resource conditions have
-// status "True". Returns (met, hasConditions). If the nested condition list
-// is nil or empty, returns (false, false) so the caller can fall back to
-// wrapper conditions.
-func nestedAllConditionsTrue(s *structpb.Struct) (met bool, hasConditions bool) {
-	conds := getNestedConditions(s)
-	if len(conds) == 0 {
-		return false, false
+// nestedUnmetReason checks the nested resource conditions of a Kubernetes
+// Object. A nested resource that reports Ready is judged like any composed
+// resource: Ready=True, plus Synced=True when Synced is reported; all other
+// condition types are ignored. Without Ready (e.g. a Deployment), every nested
+// condition must be True.
+func nestedUnmetReason(conds []*structpb.Value, label string) string {
+	if ready, ok := nestedConditionStatus(conds, "Ready"); ok {
+		if ready != "True" {
+			return fmt.Sprintf("%s nested resource to have Ready=True", label)
+		}
+		if synced, ok := nestedConditionStatus(conds, "Synced"); ok && synced != "True" {
+			return fmt.Sprintf("%s nested resource to have Synced=True", label)
+		}
+		return ""
 	}
 	for _, item := range conds {
-		cond := item.GetStructValue()
-		if cond == nil {
-			return false, true
-		}
-		st := cond.GetFields()["status"]
-		if st == nil || st.GetStringValue() != "True" {
-			return false, true
+		if item.GetStructValue().GetFields()["status"].GetStringValue() != "True" {
+			return fmt.Sprintf("%s nested resource conditions not all True", label)
 		}
 	}
-	return true, true
+	return ""
+}
+
+// nestedConditionStatus returns the status of the nested condition with the
+// given type and whether that condition is present.
+func nestedConditionStatus(conds []*structpb.Value, condType string) (string, bool) {
+	for _, item := range conds {
+		fields := item.GetStructValue().GetFields()
+		if fields["type"].GetStringValue() == condType {
+			return fields["status"].GetStringValue(), true
+		}
+	}
+	return "", false
 }
 
 // hasCondition checks whether a resource has a condition with the given type

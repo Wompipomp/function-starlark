@@ -47,6 +47,23 @@ This means resources are created in dependency order across reconciliation
 cycles. A Warning event is emitted for each deferred resource (e.g., "waiting
 for database").
 
+A plain dependency (`ResourceRef` or string) must also be ready:
+`Ready=True` and `Synced=True` on the observed resource. For a
+`kubernetes.crossplane.io` / `kubernetes.m.crossplane.io` `Object`, the
+conditions of the wrapped manifest (`status.atProvider.manifest.status.conditions`)
+decide instead:
+
+- The manifest reports `Ready` (e.g. an XR or managed resource): `Ready=True`,
+  plus `Synced=True` when `Synced` is reported. Other condition types are
+  ignored.
+- The manifest has conditions but no `Ready` (e.g. a Deployment): every
+  condition must be `True`.
+- The manifest has no conditions (e.g. a ConfigMap): the Object's own
+  `Ready=True` and `Synced=True`.
+
+Resources without these conditions (e.g. ProviderConfigs) never satisfy a
+plain dependency; use a field path instead.
+
 ### Field path readiness
 
 By default, `depends_on` checks whether the dependency exists in observed state.

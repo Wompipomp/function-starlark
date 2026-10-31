@@ -303,7 +303,9 @@ pipeline runs, overwriting whatever a function returns.
 Each element can be:
 
 - **ResourceRef** (returned by a previous `Resource()` call) or **string** --
-  defers the dependent until the dependency exists in observed state.
+  defers the dependent until the dependency exists in observed state and is
+  ready (`Ready=True` and `Synced=True`; for Kubernetes Objects see
+  [features.md](features.md#creation-sequencing)).
 - **Tuple `(ref, "field.path")`** -- defers the dependent until the dependency
   exists in observed state AND the dot-separated field path has a truthy value
   (non-empty string, non-zero number, true, struct, or list). This is useful for
