@@ -146,6 +146,80 @@ optional display name where `""` is meaningless), opt in explicitly with
 set_xr_status("atProvider.applicationDisplayName", app_display_name or None)
 ```
 
+## Naming
+
+### Composition resource names: short and semantic
+
+The `name` in `Resource(name, body)` becomes the
+`crossplane.io/composition-resource-name` annotation. It is scoped to the
+composite: the desired-state map is keyed per XR, and the
+`function-starlark.crossplane.io/resource-name` label used for Usage matching
+is always paired with `matchControllerRef: true`. Two XRs can use identical
+resource names without colliding, so the name only needs to be unique within
+one composition.
+
+Do not embed the XR name -- it adds no uniqueness and is redundant in the
+output: when `metadata.name` is omitted, Crossplane derives the real name from
+the XR name anyway (`generateName: {xr-name}-`).
+
+```python
+xr_name = get(oxr, "metadata.name", "unknown")
+
+# Avoid -- XR name adds no uniqueness and bloats events, traces, and labels
+Resource(xr_name + "-storage-account", {...})
+
+# Prefer -- short semantic role name
+Resource("storage-account", {...})
+
+# Loops: the loop key is the discriminator, not the XR name
+for region in regions:
+    Resource("bucket-" + region, {...})
+```
+
+Short names also stay under the 63-byte label value limit, keeping the
+`function-starlark.crossplane.io/resource-name` label human-readable. Longer
+names still work -- the label value is hash-truncated identically on the
+resource and the Usage selector -- but lose readability.
+
+### metadata.name: omit it by default
+
+Leave `metadata.name` out of composed resource bodies. Crossplane sets
+`metadata.generateName: {xr-name}-` and the API server appends a unique
+suffix -- collision-free by construction, with the XR name visible in the
+result. The names that actually matter are controlled elsewhere:
+
+- The external cloud resource name: the `external_name=` kwarg (or the
+  `crossplane.io/external-name` annotation).
+- The remote object of a provider-kubernetes `Object` wrapper: the **inner**
+  manifest's `metadata.name`. Leave the outer Object's name out for the same
+  reason.
+
+```python
+# Prefer -- no metadata.name; Crossplane generates "{xr-name}-<suffix>"
+Resource("bucket", {
+    "apiVersion": "s3.aws.upbound.io/v1beta1",
+    "kind": "Bucket",
+    "spec": {"forProvider": {"region": region}},
+}, external_name=bucket_name)
+```
+
+Set `metadata.name` explicitly only when something outside the composition
+must reference the composed resource by a known Kubernetes name, or when an
+orphaned resource should be re-adopted instead of recreated. Use
+`resource_name()` (naming.star) then -- it enforces the 63-character limit
+with a deterministic hash suffix. See also
+[deterministic resource naming with crypto](#pattern-deterministic-resource-naming-with-crypto).
+
+### Migrations: preserve existing names
+
+The rules above apply to **new** compositions only. For XRs migrated from
+function-kcl, changing either `metadata.name` or the
+composition-resource-name makes Crossplane delete and recreate the live
+resource. Keep the exact `metadata.name` and composition-resource-name values
+the KCL composition produced -- see
+[resource naming in the KCL migration guide](migration-from-kcl.md#7-resource-naming)
+and the [migration cheatsheet](migration-cheatsheet.md).
+
 ## Label strategy
 
 ### Default: Let Crossplane handle its own labels
@@ -205,7 +279,8 @@ for i in range(count):
 Use `depends_on=` for creation ordering and readiness gating between resources --
 do not hand-roll sequencing with `if is_observed(...)` / `if get_observed(...)`
 guards. `depends_on=` handles creation order, deletion order (via a Usage
-emitted once both sides are observed and ready), and field-path readiness gating, none of which a manual `if` provides.
+created once both sides are observed and ready, then kept if a dependency
+later becomes unready), and field-path readiness gating, none of which a manual `if` provides.
 Reserve `if is_observed(...)` / `get_observed(...)` for *reading* observed values,
 not for controlling whether a dependent resource is created.
 

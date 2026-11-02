@@ -119,6 +119,8 @@ spec:
                   a namespaced Usage; two cluster-scoped observed resources become a
                   ClusterUsage. No Usage is emitted before that, so desired bodies that
                   omit metadata.namespace cannot be mistaken for cluster-scoped.
+                  Readiness is a creation gate: an existing Usage or ClusterUsage is
+                  kept if a dependency later becomes unready.
                   Set to "v1" if running Crossplane 1.x.
                 type: string
             required:

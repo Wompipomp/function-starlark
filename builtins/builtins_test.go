@@ -2188,3 +2188,54 @@ func TestApplyCompositeReady_OverrideStillWinsOverDefers(t *testing.T) {
 		t.Errorf("expected no conditions (override True with no reason), got %+v", got)
 	}
 }
+
+func TestApplyCompositeReady_ExistingConditionRecovery(t *testing.T) {
+	for _, priorStatus := range []string{"False", "Unknown", "True"} {
+		for _, mode := range []string{"resolved", "optional", "skip", "defer", "override"} {
+			t.Run(priorStatus+"/"+mode, func(t *testing.T) {
+				oxr, err := structpb.NewStruct(map[string]any{
+					"status": map[string]any{"conditions": []any{map[string]any{
+						"type": CompositeReadyConditionType, "status": priorStatus,
+						"reason": "WaitingForPolicyReference", "message": "initiative missing",
+					}}},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cc := NewConditionCollector()
+				c := NewCollector(cc, "test.star", oxr, nil)
+				wantStatus := "True"
+				switch mode {
+				case "optional":
+					c.recordSkip("optional", "disabled", false)
+				case "skip":
+					c.recordSkip("assignment", "still missing", true)
+					wantStatus = "False"
+				case "defer":
+					c.AddGatingDefers([]GatingDefer{{Name: "assignment", Reason: "dependency pending"}})
+					wantStatus = "False"
+				case "override":
+					_, err := starlark.Call(new(starlark.Thread), c.SetCompositeReadyBuiltin(),
+						starlark.Tuple{starlark.False}, []starlark.Tuple{{starlark.String("reason"), starlark.String("StillWaiting")}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantStatus = "False"
+				}
+				// An earlier pipeline step's readiness decision must survive recovery.
+				rsp := &fnv1.RunFunctionResponse{Desired: &fnv1.State{Composite: &fnv1.Resource{Ready: fnv1.Ready_READY_FALSE}}}
+				ApplyCompositeReady(rsp, c, cc)
+				if rsp.GetDesired().GetComposite().GetReady() != fnv1.Ready_READY_FALSE {
+					t.Error("overwrote upstream readiness")
+				}
+				conds := cc.Conditions()
+				if len(conds) != 1 || conds[0].Status != wantStatus || conds[0].Target != "CompositeAndClaim" {
+					t.Fatalf("expected condition status %s for XR and claim, got %+v", wantStatus, conds)
+				}
+				if wantStatus == "True" && (conds[0].Reason != "AllReady" || strings.Contains(conds[0].Message, "missing")) {
+					t.Errorf("stale error survived recovery: %+v", conds[0])
+				}
+			})
+		}
+	}
+}

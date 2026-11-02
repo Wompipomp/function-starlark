@@ -205,16 +205,47 @@ func readyObserved(apiVersion, kind, ns string) *structpb.Struct {
 }
 
 // notReadyObserved builds an observed body with Ready=False.
-func notReadyObserved(apiVersion, kind string) *structpb.Struct {
+// ns == "" leaves metadata.namespace unset (cluster-scoped).
+func notReadyObserved(apiVersion, kind, ns string) *structpb.Struct {
+	meta := map[string]any{"name": strings.ToLower(kind)}
+	if ns != "" {
+		meta["namespace"] = ns
+	}
 	s, _ := structpb.NewStruct(map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       kind,
+		"metadata":   meta,
 		"status": map[string]any{
 			"conditions": []any{
 				map[string]any{"type": "Ready", "status": "False"},
 				map[string]any{"type": "Synced", "status": "True"},
 			},
 		},
+	})
+	return s
+}
+
+// observedUsage is an already-created Usage or ClusterUsage as it comes back
+// from the cluster, including server metadata that must not be re-emitted.
+func observedUsage(apiVersion, kind, namespace string) *structpb.Struct {
+	meta := map[string]any{
+		"name":            "usage-observed",
+		"uid":             "must-not-copy",
+		"resourceVersion": "7",
+	}
+	if namespace != "" {
+		meta["namespace"] = namespace
+	}
+	s, _ := structpb.NewStruct(map[string]any{
+		"apiVersion": apiVersion,
+		"kind":       kind,
+		"metadata":   meta,
+		"spec": map[string]any{
+			"replayDeletion": true,
+			"of":             map[string]any{"apiVersion": "v1", "kind": "Database"},
+			"by":             map[string]any{"apiVersion": "v1", "kind": "App"},
+		},
+		"status": map[string]any{"conditions": []any{}},
 	})
 	return s
 }
@@ -289,7 +320,7 @@ func TestBuildUsageResources(t *testing.T) {
 		}
 		depNotReady := map[string]*structpb.Struct{
 			"app": readyObserved("v1", "App", "team-a"),
-			"db":  notReadyObserved("v1", "Database"),
+			"db":  notReadyObserved("v1", "Database", "ns"),
 		}
 		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, depNotReady); len(got) != 0 {
 			t.Fatalf("dependency not ready: got %d usages, want 0", len(got))
@@ -325,6 +356,247 @@ func TestBuildUsageResources(t *testing.T) {
 	nsOf := func(res *structpb.Struct) string {
 		return res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
 	}
+
+	t.Run("retains existing usage after a side becomes unready", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+		}
+		cases := []struct {
+			name       string
+			apiVersion string
+			namespace  string
+			kind       string
+			unready    string
+		}{
+			{"cluster dependency unready", UsageAPIVersionV2, "", "ClusterUsage", "db"},
+			{"cluster dependent unready", UsageAPIVersionV2, "", "ClusterUsage", "app"},
+			{"namespaced dependency unready", UsageAPIVersionV2, "team-a", "Usage", "db"},
+			{"namespaced dependent unready", UsageAPIVersionV2, "team-a", "Usage", "app"},
+			{"v1 usage retained", UsageAPIVersionV1, "team-a", "Usage", "db"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				app := readyObserved("v1", "App", tc.namespace)
+				db := readyObserved("v1", "Database", tc.namespace)
+				switch tc.unready {
+				case "app":
+					app = notReadyObserved("v1", "App", tc.namespace)
+				case "db":
+					db = notReadyObserved("v1", "Database", tc.namespace)
+				}
+				observed := map[string]*structpb.Struct{
+					"app":                  app,
+					"db":                   db,
+					usageName("app", "db"): observedUsage(tc.apiVersion, tc.kind, tc.namespace),
+				}
+				got := BuildUsageResources(deps, tc.apiVersion, nil, observed)
+				res := got[usageName("app", "db")]
+				if res == nil {
+					t.Fatal("existing usage was dropped after a side became unready")
+				}
+				if kind := res.GetFields()["kind"].GetStringValue(); kind != tc.kind {
+					t.Errorf("kind = %q, want %q", kind, tc.kind)
+				}
+				gotNS := res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
+				wantNS := ""
+				if tc.kind == "Usage" && tc.apiVersion == UsageAPIVersionV2 {
+					wantNS = tc.namespace
+				}
+				if gotNS != wantNS {
+					t.Errorf("namespace = %q, want %q", gotNS, wantNS)
+				}
+				if uid := res.GetFields()["metadata"].GetStructValue().GetFields()["uid"].GetStringValue(); uid != "" {
+					t.Errorf("retained usage copied metadata.uid %q", uid)
+				}
+				if _, ok := res.GetFields()["status"]; ok {
+					t.Error("retained usage copied status")
+				}
+			})
+		}
+	})
+
+	t.Run("retains usage when a field-path gate goes falsy", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true, FieldPath: "status.atProvider.id"},
+		}
+		db, _ := structpb.NewStruct(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Database",
+			"status": map[string]any{
+				"conditions": []any{
+					map[string]any{"type": "Ready", "status": "True"},
+					map[string]any{"type": "Synced", "status": "True"},
+				},
+				"atProvider": map[string]any{"id": ""},
+			},
+		})
+		observed := map[string]*structpb.Struct{
+			"app":                  readyObserved("v1", "App", ""),
+			"db":                   db,
+			usageName("app", "db"): observedUsage(UsageAPIVersionV2, "ClusterUsage", ""),
+		}
+		got := BuildUsageResources(deps, UsageAPIVersionV2, nil, observed)
+		if got[usageName("app", "db")] == nil {
+			t.Fatal("existing usage was dropped after the field-path gate went falsy")
+		}
+	})
+
+	t.Run("does not treat a non-usage at the usage key as already created", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+		}
+		observed := map[string]*structpb.Struct{
+			"app":                  readyObserved("v1", "App", ""),
+			"db":                   notReadyObserved("v1", "Database", ""),
+			usageName("app", "db"): readyObserved("v1", "ConfigMap", ""),
+		}
+		if got := BuildUsageResources(deps, UsageAPIVersionV2, nil, observed); len(got) != 0 {
+			t.Fatalf("non-usage object counted as an existing usage: got %d", len(got))
+		}
+	})
+
+	t.Run("does not copy controller-resolved resourceRef into a retained usage", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+		}
+		resources := map[string]CollectedResource{
+			"app": {Body: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"apiVersion": structpb.NewStringValue("v1"),
+				"kind":       structpb.NewStringValue("App"),
+			}}},
+			"db": {Body: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"apiVersion": structpb.NewStringValue("v1"),
+				"kind":       structpb.NewStringValue("Database"),
+			}}},
+		}
+		name := usageName("app", "db")
+		// The Usage controller fills resourceRef.name after resolving the
+		// selector; the observed usage therefore carries both.
+		existing, _ := structpb.NewStruct(map[string]any{
+			"apiVersion": "protection.crossplane.io/v1beta1",
+			"kind":       "Usage",
+			"metadata":   map[string]any{"name": "usage-observed", "namespace": "team-a"},
+			"spec": map[string]any{
+				"replayDeletion": true,
+				"of": map[string]any{
+					"apiVersion":       "v1",
+					"kind":             "Database",
+					"resourceRef":      map[string]any{"name": "db-resolved-abc12"},
+					"resourceSelector": map[string]any{"matchControllerRef": true},
+				},
+				"by": map[string]any{
+					"apiVersion":       "v1",
+					"kind":             "App",
+					"resourceRef":      map[string]any{"name": "app-resolved-def34"},
+					"resourceSelector": map[string]any{"matchControllerRef": true},
+				},
+			},
+		})
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("v1", "App", "team-a"),
+			name:  existing,
+		}
+		got := BuildUsageResources(deps, UsageAPIVersionV2, resources, observed)
+		res := got[name]
+		if res == nil {
+			t.Fatal("existing usage was dropped after the dependency left observed state")
+		}
+		spec := res.GetFields()["spec"].GetStructValue().GetFields()
+		for _, side := range []string{"of", "by"} {
+			sideFields := spec[side].GetStructValue().GetFields()
+			if _, ok := sideFields["resourceRef"]; ok {
+				t.Errorf("spec.%s.resourceRef was copied from the observed usage", side)
+			}
+			sel := sideFields["resourceSelector"].GetStructValue().GetFields()
+			if sel["matchLabels"] == nil {
+				t.Errorf("spec.%s.resourceSelector.matchLabels missing: body was not rebuilt from selectors", side)
+			}
+		}
+		if kind := res.GetFields()["kind"].GetStringValue(); kind != "Usage" {
+			t.Errorf("kind = %q, want Usage", kind)
+		}
+		if ns := res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue(); ns != "team-a" {
+			t.Errorf("namespace = %q, want team-a", ns)
+		}
+		if k := spec["of"].GetStructValue().GetFields()["kind"].GetStringValue(); k != "Database" {
+			t.Errorf("spec.of.kind = %q, want Database from desired body", k)
+		}
+	})
+
+	t.Run("keeps namespaced usage when a side leaves observed state", func(t *testing.T) {
+		deps := []DependencyPair{
+			{Dependent: "app", Dependency: "db", IsRef: true},
+		}
+		// Desired bodies omit namespace, which would otherwise compose a
+		// ClusterUsage. The already-created namespaced Usage must win.
+		resources := map[string]CollectedResource{
+			"app": {Body: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"apiVersion": structpb.NewStringValue("v1"),
+				"kind":       structpb.NewStringValue("App"),
+			}}},
+			"db": {Body: &structpb.Struct{Fields: map[string]*structpb.Value{
+				"apiVersion": structpb.NewStringValue("v1"),
+				"kind":       structpb.NewStringValue("Database"),
+			}}},
+		}
+		name := usageName("app", "db")
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("v1", "App", "team-a"),
+			name:  observedUsage(UsageAPIVersionV2, "Usage", "team-a"),
+		}
+		got := BuildUsageResources(deps, UsageAPIVersionV2, resources, observed)
+		res := got[name]
+		if res == nil {
+			t.Fatal("existing usage was dropped after the dependency left observed state")
+		}
+		if kind := res.GetFields()["kind"].GetStringValue(); kind != "Usage" {
+			t.Errorf("kind = %q, want Usage", kind)
+		}
+		gotNS := res.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
+		if gotNS != "team-a" {
+			t.Errorf("namespace = %q, want team-a", gotNS)
+		}
+		if uid := res.GetFields()["metadata"].GetStructValue().GetFields()["uid"].GetStringValue(); uid != "" {
+			t.Errorf("retained usage copied metadata.uid %q", uid)
+		}
+	})
+
+	t.Run("keeps of selector namespace when the dependency leaves observed state", func(t *testing.T) {
+		deps := []DependencyPair{{Dependent: "app", Dependency: "db", IsRef: true}}
+		name := usageName("app", "db")
+		existing, _ := structpb.NewStruct(map[string]any{
+			"apiVersion": UsageAPIVersionV2,
+			"kind":       "Usage",
+			"metadata":   map[string]any{"name": "usage-observed", "namespace": "team-a"},
+			"spec": map[string]any{
+				"replayDeletion": true,
+				"of": map[string]any{
+					"apiVersion":       "example.org/v1",
+					"kind":             "Database",
+					"resourceRef":      map[string]any{"name": "db-resolved"},
+					"resourceSelector": map[string]any{"namespace": "team-b", "matchControllerRef": true},
+				},
+				"by": map[string]any{"apiVersion": "example.org/v1", "kind": "App"},
+			},
+		})
+		observed := map[string]*structpb.Struct{
+			"app": readyObserved("example.org/v1", "App", "team-a"),
+			name:  existing,
+		}
+		res := BuildUsageResources(deps, UsageAPIVersionV2, nil, observed)[name]
+		if res == nil {
+			t.Fatal("existing usage was dropped after the dependency left observed state")
+		}
+		if kindOf(res) != "Usage" || nsOf(res) != "team-a" {
+			t.Fatalf("got %s in %q, want Usage in team-a", kindOf(res), nsOf(res))
+		}
+		if got := usageSelector(res, "of").GetFields()["namespace"].GetStringValue(); got != "team-b" {
+			t.Errorf("of.resourceSelector.namespace = %q, want team-b retained from the existing usage", got)
+		}
+		if _, ok := res.GetFields()["spec"].GetStructValue().GetFields()["of"].GetStructValue().GetFields()["resourceRef"]; ok {
+			t.Error("spec.of.resourceRef was copied from the observed usage")
+		}
+	})
 
 	t.Run("v2: kind follows observed namespaces per pair", func(t *testing.T) {
 		deps := []DependencyPair{

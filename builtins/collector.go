@@ -216,7 +216,7 @@ type Collector struct {
 	cc             *ConditionCollector
 	scriptName     string
 	compositeKind  string                           // observed XR kind, used to label metrics (e.g. "XCluster")
-	oxr            *structpb.Struct                 // frozen observed XR; currently unused, kept for API stability
+	oxr            *structpb.Struct                 // frozen observed XR; used to recover readiness conditions
 	observed       *convert.StarlarkDict            // frozen observed composed resources; may be nil
 	manifests      map[string]*convert.StarlarkDict // lazy get_manifest views, keyed by resource name
 }
@@ -419,6 +419,19 @@ func (c *Collector) SetDepsConverged() {
 	c.mu.Lock()
 	c.depsConverged = true
 	c.mu.Unlock()
+}
+
+// hasCompositeReadyCondition reports whether this XR already carries our gating
+// condition. Re-emit its successful state after recovery, including on later
+// reconciles, without adding a condition to XRs that never used readiness gating.
+func (c *Collector) hasCompositeReadyCondition() bool {
+	conditions := c.oxr.GetFields()["status"].GetStructValue().GetFields()["conditions"].GetListValue().GetValues()
+	for _, condition := range conditions {
+		if condition.GetStructValue().GetFields()["type"].GetStringValue() == CompositeReadyConditionType {
+			return true
+		}
+	}
+	return false
 }
 
 // CompositeReadyOverride returns the explicit composite-ready override, if any.

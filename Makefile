@@ -5,6 +5,10 @@
 #   make render-check CROSSPLANE=$HOME/.local/bin/crank-v2
 CROSSPLANE ?= crossplane
 
+# Container CLI used to build the runtime image. Override with DOCKER=podman on
+# hosts without a Docker daemon.
+DOCKER ?= docker
+
 # Pinned crossplane render-engine version. `composition render` runs this engine
 # in Docker; pinning it keeps render output reproducible across hosts (CI/local).
 XP_ENGINE_VERSION ?= v2.3.1
@@ -27,7 +31,7 @@ bench:
 
 # Build container image
 build: generate
-	docker build . --tag=runtime
+	$(DOCKER) build . --tag=runtime
 
 # Run crossplane render with example fixtures (v2 render engine)
 render: build

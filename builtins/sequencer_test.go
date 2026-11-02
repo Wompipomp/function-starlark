@@ -769,6 +769,79 @@ func TestSequencer(t *testing.T) {
 			wantAnyDeferred: false,
 			wantEventCount:  0,
 		},
+		{
+			name: "KubernetesObjectNestedReadySyncedIgnoresOtherConditions",
+			// Nested XR with Ready=True+Synced=True but a False custom condition
+			// (e.g. ComposedResourcesReady) -> dependency met.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-xr", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-xr": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-xr": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
+					{"type": "Synced", "status": "True"},
+					{"type": "Ready", "status": "True"},
+					{"type": "ComposedResourcesReady", "status": "False"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
+		{
+			name: "KubernetesObjectNestedReadyFalseDeferred",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-xr", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-xr": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-xr": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
+					{"type": "Synced", "status": "True"},
+					{"type": "Ready", "status": "False"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  1,
+		},
+		{
+			name: "KubernetesObjectNestedSyncedFalseDeferred",
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-xr", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-xr": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-xr": k8sObjectStruct("kubernetes.m.crossplane.io/v1alpha1", true, []map[string]any{
+					{"type": "Synced", "status": "False"},
+					{"type": "Ready", "status": "True"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    []string{"app"},
+			wantAnyDeferred: true,
+			wantEventCount:  1,
+		},
+		{
+			name: "KubernetesObjectNestedReadyWithoutSynced",
+			// Nested resource reporting Ready but no Synced (e.g. a cert-manager
+			// Certificate) -> only Ready counts.
+			deps: []DependencyPair{
+				{Dependent: "app", Dependency: "k8s-cert", IsRef: true},
+			},
+			resourceNames: map[string]bool{"app": true, "k8s-cert": true},
+			observedResources: map[string]*structpb.Struct{
+				"k8s-cert": k8sObjectStruct("kubernetes.crossplane.io/v1alpha2", true, []map[string]any{
+					{"type": "Ready", "status": "True"},
+					{"type": "Issuing", "status": "False"},
+				}),
+			},
+			ttlSeconds:      10,
+			wantDeferred:    nil,
+			wantAnyDeferred: false,
+			wantEventCount:  0,
+		},
 	}
 
 	for _, tt := range tests {
