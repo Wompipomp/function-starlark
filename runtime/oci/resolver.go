@@ -85,15 +85,52 @@ func NewResolver(cache *Cache, keychain authn.Keychain, fetcher Fetcher, log log
 // It deduplicates targets by RefStr, checks the cache first, and resolves
 // transitive OCI dependencies found in fetched modules.
 //
+// An artifact reachable through several paths (a diamond dependency, e.g. a
+// composition loading the stdlib directly and also through a shared library)
+// is fetched and scanned once. Only a ref that depends on itself, directly or
+// transitively, is reported as a cycle.
+//
 // Returns a map of filename -> source for all resolved modules.
 func (r *Resolver) Resolve(ctx context.Context, targets []*OCILoadTarget) (map[string]string, error) {
-	visited := make(map[string]bool)
-	return r.resolveRecursive(ctx, targets, visited, 0)
+	st := &resolveState{
+		loaded: make(map[string]map[string]string),
+		edges:  make(map[string]map[string]bool),
+	}
+	return r.resolveRecursive(ctx, targets, st, 0)
+}
+
+// resolveState tracks what has been resolved across the whole traversal.
+type resolveState struct {
+	// loaded holds the extracted files of every artifact already fetched.
+	loaded map[string]map[string]string
+	// edges is the artifact dependency graph: ref -> refs it loads.
+	edges map[string]map[string]bool
+}
+
+// reaches reports whether "to" is reachable from "from" in the dependency graph.
+func (st *resolveState) reaches(from, to string) bool {
+	seen := map[string]bool{}
+	stack := []string{from}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if cur == to {
+			return true
+		}
+		if seen[cur] {
+			continue
+		}
+		seen[cur] = true
+		for next := range st.edges[cur] {
+			stack = append(stack, next)
+		}
+	}
+	return false
 }
 
 // resolveRecursive handles the recursive resolution of OCI targets with
 // cycle detection and depth limiting.
-func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarget, visited map[string]bool, depth int) (map[string]string, error) {
+func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarget, st *resolveState, depth int) (map[string]string, error) {
 	if depth > maxTransitiveDepth {
 		return nil, fmt.Errorf("OCI dependency resolution exceeded maximum depth (%d)", maxTransitiveDepth)
 	}
@@ -114,16 +151,16 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 	for _, refStr := range refOrder {
 		refTargets := uniqueRefs[refStr]
 
-		// Check for cycle.
-		if visited[refStr] {
-			return nil, fmt.Errorf("OCI dependency cycle detected: %s", refStr)
-		}
-		visited[refStr] = true
-
-		// Try to resolve from cache or fetch.
-		files, err := r.resolveRef(ctx, refStr, refTargets[0])
-		if err != nil {
-			return nil, err
+		// Artifacts already fetched via another path are reused, not rescanned:
+		// their transitive loads were queued when they were first scanned.
+		files, alreadyLoaded := st.loaded[refStr]
+		if !alreadyLoaded {
+			var err error
+			files, err = r.resolveRef(ctx, refStr, refTargets[0])
+			if err != nil {
+				return nil, err
+			}
+			st.loaded[refStr] = files
 		}
 
 		// Map requested files into result.
@@ -140,6 +177,10 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 				)
 			}
 			result[t.RawURL] = src
+		}
+
+		if alreadyLoaded {
+			continue
 		}
 
 		// Scan extracted files for transitive OCI loads.
@@ -174,9 +215,14 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 					result[t.RawURL] = src
 					continue
 				}
-				if visited[t.RefStr] {
+				// A real cycle: the dependency already (transitively) loads us.
+				if st.reaches(t.RefStr, refStr) {
 					return nil, fmt.Errorf("OCI dependency cycle detected: %s -> %s", refStr, t.RefStr)
 				}
+				if st.edges[refStr] == nil {
+					st.edges[refStr] = make(map[string]bool)
+				}
+				st.edges[refStr][t.RefStr] = true
 				transitiveTargets = append(transitiveTargets, t)
 			}
 		}
@@ -184,7 +230,7 @@ func (r *Resolver) resolveRecursive(ctx context.Context, targets []*OCILoadTarge
 
 	// Resolve transitive dependencies.
 	if len(transitiveTargets) > 0 {
-		transResult, err := r.resolveRecursive(ctx, transitiveTargets, visited, depth+1)
+		transResult, err := r.resolveRecursive(ctx, transitiveTargets, st, depth+1)
 		if err != nil {
 			return nil, err
 		}

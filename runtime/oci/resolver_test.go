@@ -429,6 +429,98 @@ func TestResolveCycleDetection(t *testing.T) {
 	}
 }
 
+func TestResolveDiamondDependency(t *testing.T) {
+	c := NewCache(PullAlways, 5*time.Minute)
+
+	// The entry point loads both lib and std; lib also loads std. std is
+	// reachable through two paths, which is a diamond, not a cycle.
+	imgLib := buildTestImage(t, map[string]string{
+		"lib.star": `load("oci://ghcr.io/org/std:v1/std.star", "std_fn")`,
+	}, ArtifactMediaType, LayerMediaType)
+	imgStd := buildTestImage(t, map[string]string{
+		"std.star": `std_fn = lambda: "hello"`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": imgLib,
+		"ghcr.io/org/std:v1": imgStd,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
+
+	stdTarget, _ := ParseOCILoadTarget("oci://ghcr.io/org/std:v1/std.star")
+	libTarget, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/lib.star")
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{stdTarget, libTarget})
+	if err != nil {
+		t.Fatalf("diamond dependency must not be reported as a cycle: %v", err)
+	}
+	for _, key := range []string{
+		"oci://ghcr.io/org/std:v1/std.star",
+		"oci://ghcr.io/org/lib:v1/lib.star",
+	} {
+		if _, ok := result[key]; !ok {
+			t.Errorf("expected %s in result", key)
+		}
+	}
+}
+
+func TestResolveDiamondDependencyDifferentFile(t *testing.T) {
+	c := NewCache(PullAlways, 5*time.Minute)
+
+	// std is resolved first for naming.star, then lib needs platform.star from
+	// the same artifact.
+	imgLib := buildTestImage(t, map[string]string{
+		"lib.star": `load("oci://ghcr.io/org/std:v1/platform.star", "p")`,
+	}, ArtifactMediaType, LayerMediaType)
+	imgStd := buildTestImage(t, map[string]string{
+		"naming.star":   `n = 1`,
+		"platform.star": `p = 1`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/lib:v1": imgLib,
+		"ghcr.io/org/std:v1": imgStd,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
+
+	namingTarget, _ := ParseOCILoadTarget("oci://ghcr.io/org/std:v1/naming.star")
+	libTarget, _ := ParseOCILoadTarget("oci://ghcr.io/org/lib:v1/lib.star")
+	result, err := r.Resolve(context.Background(), []*OCILoadTarget{namingTarget, libTarget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result["oci://ghcr.io/org/std:v1/platform.star"]; !ok {
+		t.Error("expected platform.star in result")
+	}
+}
+
+func TestResolveIndirectCycleDetection(t *testing.T) {
+	c := NewCache(PullAlways, 5*time.Minute)
+
+	// a -> b -> c -> a
+	imgA := buildTestImage(t, map[string]string{
+		"a.star": `load("oci://ghcr.io/org/b:v1/b.star", "x")`,
+	}, ArtifactMediaType, LayerMediaType)
+	imgB := buildTestImage(t, map[string]string{
+		"b.star": `load("oci://ghcr.io/org/c:v1/c.star", "x")`,
+	}, ArtifactMediaType, LayerMediaType)
+	imgC := buildTestImage(t, map[string]string{
+		"c.star": `load("oci://ghcr.io/org/a:v1/a.star", "x")`,
+	}, ArtifactMediaType, LayerMediaType)
+
+	f := &mockFetcher{images: map[string]v1.Image{
+		"ghcr.io/org/a:v1": imgA,
+		"ghcr.io/org/b:v1": imgB,
+		"ghcr.io/org/c:v1": imgC,
+	}}
+	r := NewResolver(c, authn.DefaultKeychain, f, logging.NewNopLogger(), "", nil)
+
+	target, _ := ParseOCILoadTarget("oci://ghcr.io/org/a:v1/a.star")
+	_, err := r.Resolve(context.Background(), []*OCILoadTarget{target})
+	if err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("expected cycle error, got %v", err)
+	}
+}
+
 func TestResolveStaleServing(t *testing.T) {
 	now := time.Now()
 	c := NewCache(PullAlways, 5*time.Minute)
