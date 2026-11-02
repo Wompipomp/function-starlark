@@ -326,10 +326,12 @@ func (f *Function) RunFunction(ctx context.Context, req *fnv1.RunFunctionRequest
 			for name, r := range req.GetObserved().GetResources() {
 				observedResources[name] = r.GetResource()
 			}
-			// A Usage is emitted only once both sides of a pair are observed
+			// A Usage is created once both sides of a pair are observed
 			// and ready, so Usage vs ClusterUsage can be decided from the
 			// namespace of the live objects (Crossplane injects it after
-			// apply); desired bodies often omit it.
+			// apply); desired bodies often omit it. An already-created
+			// Usage or ClusterUsage is kept if a dependency later becomes
+			// unready.
 			usageResources := builtins.BuildUsageResources(deps, apiVersion, collector.Resources(), observedResources)
 
 			// Ensure Desired and Resources maps exist.

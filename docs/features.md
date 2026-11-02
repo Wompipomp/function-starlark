@@ -104,10 +104,16 @@ spec:
 For each `depends_on` relationship, a Usage resource is created with
 `replayDeletion: true` **only after both the dependent and the dependency
 are observed and ready** (`Ready=True` and `Synced=True`, or nested Object
-conditions). That is also when namespace is trustworthy: Crossplane injects
-the XR namespace onto namespaced composed resources at apply time, so it
-appears on the observed object even if the Starlark body omitted
-`metadata.namespace`. Until both sides are ready, no Usage is emitted.
+conditions, plus any field-path gate). That is also when namespace is
+trustworthy: Crossplane injects the XR namespace onto namespaced composed
+resources at apply time, so it appears on the observed object even if the
+Starlark body omitted `metadata.namespace`. Until both sides are ready, no
+Usage is emitted.
+
+Readiness is a one-time creation gate. Once the `Usage` or `ClusterUsage`
+exists, it stays in desired state even if a dependency later becomes unready
+or a field-path gate goes falsy. A temporary loss of readiness does not
+delete it.
 
 The `spec.usageAPIVersion` field (or `STARLARK_USAGE_API_VERSION` env var)
 controls which Usage API version is used. Default is `"v2"`

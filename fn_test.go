@@ -3010,6 +3010,87 @@ Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
 	}
 }
 
+// TestRunFunctionDependsOnUsageRetainedWhenUnready verifies that an existing
+// Usage or ClusterUsage stays in desired state after a dependency becomes
+// unready, and that the same unready dependency still blocks first creation.
+func TestRunFunctionDependsOnUsageRetainedWhenUnready(t *testing.T) {
+	script := `db = Resource("db", {"apiVersion": "v1", "kind": "Database"})
+Resource("app", {"apiVersion": "v1", "kind": "App"}, depends_on=[db])`
+	usageName := "usage-c2727553" // sha256("app\x00db")[:4] hex
+
+	run := func(t *testing.T, observed map[string]*fnv1.Resource) map[string]*fnv1.Resource {
+		t.Helper()
+		rt := runtime.NewRuntime(logging.NewNopLogger())
+		f := &Function{log: logging.NewNopLogger(), runtime: rt}
+		req := &fnv1.RunFunctionRequest{
+			Input: resource.MustStructJSON(fmt.Sprintf(`{
+				"apiVersion": "starlark.fn.crossplane.io/v1alpha1",
+				"kind": "StarlarkInput",
+				"spec": {"source": %q}
+			}`, script)),
+			Observed: &fnv1.State{
+				Composite: &fnv1.Resource{Resource: resource.MustStructJSON(`{}`)},
+				Resources: observed,
+			},
+		}
+		rsp, err := f.RunFunction(context.Background(), req)
+		if err != nil {
+			t.Fatalf("unexpected Go error: %v", err)
+		}
+		assertNormalResult(t, rsp)
+		return rsp.GetDesired().GetResources()
+	}
+
+	t.Run("no usage until ready", func(t *testing.T) {
+		got := run(t, map[string]*fnv1.Resource{
+			"db":  observedNotReady("v1", "Database", "team-b"),
+			"app": observedReady("v1", "App", "team-b"),
+		})
+		if _, ok := got[usageName]; ok {
+			t.Fatal("usage created while the dependency was unready")
+		}
+	})
+
+	t.Run("namespaced usage kept", func(t *testing.T) {
+		got := run(t, map[string]*fnv1.Resource{
+			"db":      observedNotReady("v1", "Database", "team-b"),
+			"app":     observedReady("v1", "App", "team-b"),
+			usageName: {Resource: resource.MustStructJSON(`{"apiVersion":"protection.crossplane.io/v1beta1","kind":"Usage","metadata":{"namespace":"team-b"}}`)},
+		})
+		usage := got[usageName]
+		if usage == nil {
+			t.Fatal("namespaced Usage was dropped after the dependency became unready")
+		}
+		body := usage.GetResource()
+		if kind := body.GetFields()["kind"].GetStringValue(); kind != "Usage" {
+			t.Errorf("kind = %q, want Usage", kind)
+		}
+		gotNS := body.GetFields()["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue()
+		if gotNS != "team-b" {
+			t.Errorf("namespace = %q, want team-b", gotNS)
+		}
+	})
+
+	t.Run("cluster usage kept", func(t *testing.T) {
+		got := run(t, map[string]*fnv1.Resource{
+			"db":      observedNotReady("v1", "Database", ""),
+			"app":     observedReady("v1", "App", ""),
+			usageName: {Resource: resource.MustStructJSON(`{"apiVersion":"protection.crossplane.io/v1beta1","kind":"ClusterUsage"}`)},
+		})
+		usage := got[usageName]
+		if usage == nil {
+			t.Fatal("ClusterUsage was dropped after the dependency became unready")
+		}
+		body := usage.GetResource()
+		if kind := body.GetFields()["kind"].GetStringValue(); kind != "ClusterUsage" {
+			t.Errorf("kind = %q, want ClusterUsage", kind)
+		}
+		if _, ok := body.GetFields()["metadata"]; ok {
+			t.Errorf("cluster usage gained metadata: %v", body.GetFields()["metadata"])
+		}
+	})
+}
+
 // TestRunFunctionDependsOnStringRef verifies that string refs in depends_on
 // produce Usage resources and emit a warning when the ref does not match any
 // resource created by the script.
@@ -4389,6 +4470,16 @@ func readyObservedJSON(apiVersion, kind, namespace string) string {
 
 func observedReady(apiVersion, kind, namespace string) *fnv1.Resource {
 	return &fnv1.Resource{Resource: resource.MustStructJSON(readyObservedJSON(apiVersion, kind, namespace))}
+}
+
+func observedNotReady(apiVersion, kind, namespace string) *fnv1.Resource {
+	meta := fmt.Sprintf(`{"name":%q`, strings.ToLower(kind))
+	if namespace != "" {
+		meta += fmt.Sprintf(`,"namespace":%q`, namespace)
+	}
+	meta += "}"
+	body := fmt.Sprintf(`{"apiVersion":%q,"kind":%q,"metadata":%s,"status":{"conditions":[{"type":"Ready","status":"False"},{"type":"Synced","status":"True"}]}}`, apiVersion, kind, meta)
+	return &fnv1.Resource{Resource: resource.MustStructJSON(body)}
 }
 
 // ---------------------------------------------------------------------------

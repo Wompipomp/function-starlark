@@ -279,7 +279,8 @@ for i in range(count):
 Use `depends_on=` for creation ordering and readiness gating between resources --
 do not hand-roll sequencing with `if is_observed(...)` / `if get_observed(...)`
 guards. `depends_on=` handles creation order, deletion order (via a Usage
-emitted once both sides are observed and ready), and field-path readiness gating, none of which a manual `if` provides.
+created once both sides are observed and ready, then kept if a dependency
+later becomes unready), and field-path readiness gating, none of which a manual `if` provides.
 Reserve `if is_observed(...)` / `get_observed(...)` for *reading* observed values,
 not for controlling whether a dependent resource is created.
 

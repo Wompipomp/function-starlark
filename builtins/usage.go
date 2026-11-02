@@ -166,6 +166,7 @@ func mergeTypeInfo(primary, fallback resourceTypeInfo) resourceTypeInfo {
 
 // usagePairReady is true when both sides of a depends_on pair are observed
 // and ready, and any field-path gate on the dependency is truthy.
+// Readiness is a creation gate only; see usageAlreadyCreated.
 func usagePairReady(d DependencyPair, observed map[string]*structpb.Struct) bool {
 	by := observed[d.Dependent]
 	of := observed[d.Dependency]
@@ -178,11 +179,62 @@ func usagePairReady(d DependencyPair, observed map[string]*structpb.Struct) bool
 	return true
 }
 
+// usageAlreadyCreated returns the observed Usage or ClusterUsage for a
+// depends_on pair, or nil if this reconcile has not seen one yet. An existing
+// usage is retained when a dependency later becomes unready; readiness does
+// not have to hold to keep it.
+func usageAlreadyCreated(name string, observed map[string]*structpb.Struct) *structpb.Struct {
+	res := observed[name]
+	if res == nil {
+		return nil
+	}
+	switch res.GetFields()["kind"].GetStringValue() {
+	case "Usage", "ClusterUsage":
+		return res
+	default:
+		return nil
+	}
+}
+
+// retainedUsageScope holds the scope of an already-created usage: its kind,
+// metadata.namespace and spec.of.resourceSelector.namespace.
+type retainedUsageScope struct {
+	Kind         string
+	Namespace    string
+	OfSelectorNS string
+}
+
+// retainedScope returns the scope of an existing usage so a retained usage
+// keeps it when a side is no longer in observed state and rebuilding from live
+// objects could drop the namespace and change kind. Only the scope is reused:
+// the Usage controller fills spec.of/by.resourceRef after resolving the
+// selectors, and those controller-owned fields must not be copied back into
+// desired state.
+func retainedScope(existing *structpb.Struct) (retainedUsageScope, bool) {
+	if existing == nil {
+		return retainedUsageScope{}, false
+	}
+	fields := existing.GetFields()
+	kind := fields["kind"].GetStringValue()
+	if kind == "" {
+		return retainedUsageScope{}, false
+	}
+	return retainedUsageScope{
+		Kind:         kind,
+		Namespace:    fields["metadata"].GetStructValue().GetFields()["namespace"].GetStringValue(),
+		OfSelectorNS: fields["spec"].GetStructValue().GetFields()["of"].GetStructValue().GetFields()["resourceSelector"].GetStructValue().GetFields()["namespace"].GetStringValue(),
+	}, true
+}
+
 // BuildUsageResources generates Usage resources for the depends_on pairs
 // whose dependent and dependency are both observed and ready. resources is
 // the map of collected resources (name -> CollectedResource) used as a
 // fallback for apiVersion/kind; observed holds the observed composed resource
 // bodies keyed by composition resource name.
+//
+// Readiness is a one-time creation gate: once a Usage or ClusterUsage has
+// been created it stays in desired state even if a dependency later becomes
+// unready or its field-path gate goes falsy.
 //
 // Namespace, and therefore Usage vs ClusterUsage on the v2 API, is read from
 // the observed bodies only: Crossplane injects a namespaced XR's namespace
@@ -203,7 +255,9 @@ func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map
 
 	result := make(map[string]*structpb.Struct)
 	for _, d := range deps {
-		if !usagePairReady(d, observed) {
+		name := usageName(d.Dependent, d.Dependency)
+		existing := usageAlreadyCreated(name, observed)
+		if !usagePairReady(d, observed) && existing == nil {
 			continue
 		}
 		byInfo := mergeTypeInfo(typeInfoFromBody(observed[d.Dependent]), desiredInfo[d.Dependent])
@@ -212,17 +266,23 @@ func BuildUsageResources(deps []DependencyPair, apiVersion string, resources map
 			d.Dependent:  byInfo,
 			d.Dependency: ofInfo,
 		}
-		byNS, ofNS := byInfo.Namespace, ofInfo.Namespace
-		kind := usageKind(apiVersion, byNS != "" || ofNS != "")
-		namespace, ofSelectorNS := "", ""
-		if apiVersion == UsageAPIVersionV2 && kind == "Usage" {
-			namespace = usageNamespace(byNS, ofNS)
-			if ofNS != "" && ofNS != namespace {
-				ofSelectorNS = ofNS
+		// Both sides still observed: derive kind and namespaces from the live
+		// objects so they stay aligned, including while unready. A missing
+		// side cannot be trusted for scope, so reuse the scope of the usage
+		// that was already created. The body itself is always rebuilt from
+		// selectors so controller-owned resourceRef fields are not re-applied.
+		scope, ok := retainedScope(existing)
+		if !ok || (observed[d.Dependent] != nil && observed[d.Dependency] != nil) {
+			byNS, ofNS := byInfo.Namespace, ofInfo.Namespace
+			scope = retainedUsageScope{Kind: usageKind(apiVersion, byNS != "" || ofNS != "")}
+			if apiVersion == UsageAPIVersionV2 && scope.Kind == "Usage" {
+				scope.Namespace = usageNamespace(byNS, ofNS)
+				if ofNS != "" && ofNS != scope.Namespace {
+					scope.OfSelectorNS = ofNS
+				}
 			}
 		}
-		name := usageName(d.Dependent, d.Dependency)
-		result[name] = buildUsageResource(d.Dependent, d.Dependency, apiVersion, kind, namespace, ofSelectorNS, typeInfos)
+		result[name] = buildUsageResource(d.Dependent, d.Dependency, apiVersion, scope.Kind, scope.Namespace, scope.OfSelectorNS, typeInfos)
 	}
 	return result
 }
